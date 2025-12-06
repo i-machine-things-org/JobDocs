@@ -1,0 +1,14 @@
+# JobDocs Requirements
+
+# Qt GUI framework
+# Note: For internal/non-distributed use, PyQt6 GPL license is fine
+# For commercial distribution, either:
+#   - Purchase PyQt6 commercial license, OR
+#   - Use system package: pacman -S python-pyqt6 (on Arch Linux)
+PyQt6>=6.5.0
+
+# For building executables (optional)
+pyinstaller>=6.0.0
+
+# All other dependencies are Python standard library
+# No additional packages needed

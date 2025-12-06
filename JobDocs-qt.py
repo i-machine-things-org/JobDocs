@@ -16,13 +16,13 @@ import csv
 from io import StringIO
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QTabWidget, QLabel, QLineEdit, QComboBox, QPushButton,
     QCheckBox, QRadioButton, QButtonGroup, QGroupBox, QListWidget,
     QTreeWidget, QTreeWidgetItem, QTableWidget, QTableWidgetItem,
     QTextEdit, QPlainTextEdit, QProgressBar, QSplitter, QFrame,
     QFileDialog, QMessageBox, QDialog, QDialogButtonBox, QMenu,
-    QHeaderView, QAbstractItemView, QSizePolicy
+    QHeaderView, QAbstractItemView, QSizePolicy, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer, QMimeData, pyqtSignal, QStandardPaths
 from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QIcon
@@ -44,6 +44,40 @@ def get_config_dir() -> Path:
     
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir
+
+
+class ScrollableMessageDialog(QDialog):
+    """A custom dialog with scrollable content and defined size"""
+
+    def __init__(self, parent, title: str, content: str, width: int = 600, height: int = 500):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(width, height)
+
+        # Create layout
+        layout = QVBoxLayout(self)
+
+        # Create scroll area
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+
+        # Create content label
+        content_label = QLabel(content)
+        content_label.setWordWrap(True)
+        content_label.setTextFormat(Qt.TextFormat.RichText)
+        content_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        content_label.setStyleSheet("padding: 10px;")
+
+        # Set label as scroll area widget
+        scroll_area.setWidget(content_label)
+
+        # Add scroll area to layout
+        layout.addWidget(scroll_area)
+
+        # Add OK button
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        button_box.accepted.connect(self.accept)
+        layout.addWidget(button_box)
 
 
 class DropZone(QFrame):
@@ -302,8 +336,8 @@ class JobDocs(QMainWindow):
                     merged = self.DEFAULT_SETTINGS.copy()
                     merged.update(settings)
                     return merged
-            except:
-                pass
+            except (json.JSONDecodeError, IOError) as e:
+                self.log_message(f"Warning: Could not load settings: {e}")
         return self.DEFAULT_SETTINGS.copy()
     
     def save_settings(self):
@@ -315,8 +349,8 @@ class JobDocs(QMainWindow):
             try:
                 with open(self.history_file, 'r') as f:
                     return json.load(f)
-            except:
-                pass
+            except (json.JSONDecodeError, IOError) as e:
+                self.log_message(f"Warning: Could not load history: {e}")
         return {'customers': {}, 'recent_jobs': []}
     
     def save_history(self):
@@ -363,6 +397,12 @@ class JobDocs(QMainWindow):
         about_action = QAction("About", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
+
+        help_menu.addSeparator()
+
+        getting_started_action = QAction("Getting started", self)
+        getting_started_action.triggered.connect(self.show_getting_started)
+        help_menu.addAction(getting_started_action)
     
     def create_job_tab(self) -> QWidget:
         widget = QWidget()
@@ -486,10 +526,25 @@ class JobDocs(QMainWindow):
         self.add_customer_combo.setMinimumWidth(150)
         self.add_customer_combo.currentTextChanged.connect(self.refresh_job_tree)
         filter_layout.addWidget(self.add_customer_combo)
-        
-        self.add_itar_check = QCheckBox("ITAR only")
-        self.add_itar_check.stateChanged.connect(self.refresh_job_tree)
-        filter_layout.addWidget(self.add_itar_check)
+
+        # ITAR filter radio buttons
+        self.add_filter_group = QButtonGroup()
+        self.add_all_radio = QRadioButton("All Jobs")
+        self.add_standard_radio = QRadioButton("Standard Only")
+        self.add_itar_radio = QRadioButton("ITAR Only")
+        self.add_all_radio.setChecked(True)
+
+        self.add_filter_group.addButton(self.add_all_radio)
+        self.add_filter_group.addButton(self.add_standard_radio)
+        self.add_filter_group.addButton(self.add_itar_radio)
+
+        self.add_all_radio.toggled.connect(self.refresh_job_tree)
+        self.add_standard_radio.toggled.connect(self.refresh_job_tree)
+        self.add_itar_radio.toggled.connect(self.refresh_job_tree)
+
+        filter_layout.addWidget(self.add_all_radio)
+        filter_layout.addWidget(self.add_standard_radio)
+        filter_layout.addWidget(self.add_itar_radio)
         filter_layout.addStretch()
         browser_layout.addLayout(filter_layout)
         
@@ -830,11 +885,11 @@ class JobDocs(QMainWindow):
         return widget
     
     # ==================== Helper Methods ====================
-    
-    def populate_customer_lists(self):
+
+    def _get_customers_from_dirs(self, dir_keys: List[str]) -> set:
+        """Extract customer names from specified directory keys"""
         customers = set()
-        
-        for dir_key in ['blueprints_dir', 'customer_files_dir', 'itar_blueprints_dir', 'itar_customer_files_dir']:
+        for dir_key in dir_keys:
             dir_path = self.settings.get(dir_key, '')
             if dir_path and os.path.exists(dir_path):
                 try:
@@ -843,35 +898,46 @@ class JobDocs(QMainWindow):
                             customers.add(d)
                 except OSError:
                     pass
-        
+        return customers
+
+    def _get_customer_files_dirs(self) -> List[Tuple[str, str]]:
+        """Returns list of (prefix, path) tuples for customer file directories"""
+        dirs = []
+        cf_dir = self.settings.get('customer_files_dir', '')
+        if cf_dir and os.path.exists(cf_dir):
+            dirs.append(('', cf_dir))
+        itar_cf_dir = self.settings.get('itar_customer_files_dir', '')
+        if itar_cf_dir and os.path.exists(itar_cf_dir):
+            dirs.append(('ITAR', itar_cf_dir))
+        return dirs
+
+    def populate_customer_lists(self):
+        customers = self._get_customers_from_dirs([
+            'blueprints_dir', 'customer_files_dir',
+            'itar_blueprints_dir', 'itar_customer_files_dir'
+        ])
+
+        # Add customers from history
         for customer in self.history.get('customers', {}).keys():
             customers.add(customer)
-        
+
         sorted_customers = sorted(customers)
-        
+
         self.customer_combo.clear()
         self.customer_combo.addItems(sorted_customers)
-        
+
         self.import_customer_combo.clear()
         self.import_customer_combo.addItems(sorted_customers)
     
     def populate_add_customer_list(self):
-        customers = set()
-        
-        for dir_key in ['customer_files_dir', 'itar_customer_files_dir']:
-            dir_path = self.settings.get(dir_key, '')
-            if dir_path and os.path.exists(dir_path):
-                try:
-                    for d in os.listdir(dir_path):
-                        if os.path.isdir(os.path.join(dir_path, d)):
-                            customers.add(d)
-                except OSError:
-                    pass
-        
+        customers = self._get_customers_from_dirs([
+            'customer_files_dir', 'itar_customer_files_dir'
+        ])
+
         self.add_customer_combo.clear()
         self.add_customer_combo.addItem("(All Customers)")
         self.add_customer_combo.addItems(sorted(customers))
-        
+
         self.refresh_job_tree()
     
     def log_message(self, message: str):
@@ -908,7 +974,6 @@ class JobDocs(QMainWindow):
             return False
     
     def open_folder(self, path: str):
-        import platform
         import subprocess
         try:
             if platform.system() == "Windows":
@@ -917,6 +982,10 @@ class JobDocs(QMainWindow):
                 subprocess.Popen(["open", path])
             else:
                 subprocess.Popen(["xdg-open", path])
+        except FileNotFoundError:
+            QMessageBox.warning(self, "Error", f"Folder not found: {path}")
+        except PermissionError:
+            QMessageBox.warning(self, "Error", f"Permission denied: {path}")
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to open folder: {e}")
     
@@ -941,21 +1010,42 @@ class JobDocs(QMainWindow):
         return job_numbers
     
     def check_duplicate_job(self, customer: str, job_number: str) -> Tuple[bool, Optional[str]]:
-        for job in self.history.get('recent_jobs', []):
-            if (job.get('customer', '').lower() == customer.lower() and
-                job.get('job_number', '').lower() == job_number.lower()):
-                return True, job.get('path', 'Unknown')
-        
-        cf_dir = self.settings.get('customer_files_dir', '')
-        if cf_dir:
-            job_docs = Path(cf_dir) / customer / 'job documents'
-            if job_docs.exists():
-                for item in job_docs.iterdir():
-                    if item.is_dir():
-                        parts = item.name.split('_', 1)
-                        if parts and parts[0].lower() == job_number.lower():
-                            return True, str(item)
-        
+        # Check for globally unique job numbers (across ALL customers)
+        job_number_lower = job_number.lower()
+
+        # Check history first (faster than file system)
+        recent_jobs = self.history.get('recent_jobs', [])
+        for job in recent_jobs:
+            if job.get('job_number', '').lower() == job_number_lower:
+                existing_customer = job.get('customer', 'Unknown')
+                return True, f"{existing_customer}: {job.get('path', 'Unknown')}"
+
+        # Check file system across all customers
+        for dir_key in ['customer_files_dir', 'itar_customer_files_dir']:
+            cf_dir = self.settings.get(dir_key, '')
+            if not cf_dir or not os.path.exists(cf_dir):
+                continue
+
+            try:
+                # Check all customer directories
+                for customer_dir in os.listdir(cf_dir):
+                    customer_path = os.path.join(cf_dir, customer_dir)
+                    if not os.path.isdir(customer_path):
+                        continue
+
+                    job_docs = Path(customer_path) / 'job documents'
+                    if job_docs.exists():
+                        try:
+                            for item in job_docs.iterdir():
+                                if item.is_dir():
+                                    parts = item.name.split('_', 1)
+                                    if parts and parts[0].lower() == job_number_lower:
+                                        return True, f"{customer_dir}: {str(item)}"
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+
         return False, None
     
     # ==================== Create Job Tab ====================
@@ -1004,24 +1094,46 @@ class JobDocs(QMainWindow):
         
         drawings = [d.strip() for d in drawings_str.split(',') if d.strip()] if drawings_str else []
         job_numbers = self.parse_job_numbers(job_input)
-        
+
         if not job_numbers:
             QMessageBox.warning(self, "Error", "Invalid job number format")
             return
-        
+
+        # Check for duplicate job numbers
+        duplicates = []
+        for job_num in job_numbers:
+            is_dup, dup_path = self.check_duplicate_job(customer, job_num)
+            if is_dup:
+                duplicates.append(f"Job #{job_num} already exists at: {dup_path}")
+
+        if duplicates:
+            dup_msg = "\n".join(duplicates)
+            QMessageBox.warning(self, "Duplicate Job Numbers", f"The following job numbers already exist:\n\n{dup_msg}")
+            return
+
         self.log_message(f"Creating job(s): {', '.join(job_numbers)}")
-        
+
+        # Track if this is a new customer
+        existing_customers = self._get_customers_from_dirs([
+            'blueprints_dir', 'customer_files_dir',
+            'itar_blueprints_dir', 'itar_customer_files_dir'
+        ])
+        is_new_customer = customer not in existing_customers
+
         created = 0
         for job_num in job_numbers:
             if self.create_single_job(customer, job_num, description, drawings, is_itar, self.job_files):
                 created += 1
-        
+
         QMessageBox.information(self, "Success", f"Created {created}/{len(job_numbers)} job(s)")
-        
+
         self.job_files.clear()
         self.job_files_list.clear()
         self.refresh_history()
-        self.populate_customer_lists()
+
+        # Only refresh customer lists if a new customer was created
+        if is_new_customer:
+            self.populate_customer_lists()
     
     def create_single_job(self, customer: str, job_number: str, description: str,
                          drawings: List[str], is_itar: bool, files: List[str]) -> bool:
@@ -1043,29 +1155,46 @@ class JobDocs(QMainWindow):
             
             for file_path in files:
                 file_name = os.path.basename(file_path)
-                
+
                 if self.is_blueprint_file(file_name):
                     bp_dest = customer_bp / file_name
-                    if not bp_dest.exists():
+                    try:
                         shutil.copy2(file_path, bp_dest)
-                    
+                    except FileExistsError:
+                        pass  # File already exists
+
                     job_dest = job_path / file_name
                     if not job_dest.exists():
                         self.create_link(bp_dest, job_dest)
                 else:
                     job_dest = job_path / file_name
-                    if not job_dest.exists():
+                    try:
                         shutil.copy2(file_path, job_dest)
+                    except FileExistsError:
+                        pass  # File already exists
             
             # Link existing drawings
             if drawings:
+                # Build blueprint file index once instead of globbing repeatedly
                 exts = self.settings.get('blueprint_extensions', ['.pdf', '.dwg', '.dxf'])
+                available_bps = {}
+                try:
+                    for bp_file in customer_bp.iterdir():
+                        if bp_file.is_file() and bp_file.suffix.lower() in exts:
+                            available_bps[bp_file.name.lower()] = bp_file
+                except OSError:
+                    pass
+
+                # Now lookup drawings efficiently
                 for drawing in drawings:
+                    drawing_lower = drawing.lower()
                     for ext in exts:
-                        for bp_file in customer_bp.glob(f"*{drawing}*{ext}"):
-                            dest = job_path / bp_file.name
-                            if not dest.exists():
-                                self.create_link(bp_file, dest)
+                        # Check for exact matches and partial matches
+                        for bp_name, bp_file in available_bps.items():
+                            if drawing_lower in bp_name and bp_name.endswith(ext.lower()):
+                                dest = job_path / bp_file.name
+                                if not dest.exists():
+                                    self.create_link(bp_file, dest)
             
             self.add_to_history(customer, job_number, description, drawings, str(job_path))
             self.log_message(f"Created: {job_path}")
@@ -1115,21 +1244,26 @@ class JobDocs(QMainWindow):
     
     def refresh_job_tree(self):
         self.job_tree.clear()
-        
-        show_itar_only = self.add_itar_check.isChecked()
+
         selected_customer = self.add_customer_combo.currentText()
         show_all_customers = selected_customer == "(All Customers)" or not selected_customer
-        
+
+        # Get directories based on filter selection
         dirs_to_search = []
-        
-        if not show_itar_only:
+
+        if self.add_all_radio.isChecked():
+            # Show both standard and ITAR
+            dirs_to_search = self._get_customer_files_dirs()
+        elif self.add_standard_radio.isChecked():
+            # Show only standard (non-ITAR) jobs
             cf_dir = self.settings.get('customer_files_dir', '')
             if cf_dir and os.path.exists(cf_dir):
                 dirs_to_search.append(('', cf_dir))
-        
-        itar_cf_dir = self.settings.get('itar_customer_files_dir', '')
-        if itar_cf_dir and os.path.exists(itar_cf_dir):
-            dirs_to_search.append(('ITAR', itar_cf_dir))
+        else:  # ITAR only
+            # Show only ITAR jobs
+            itar_cf_dir = self.settings.get('itar_customer_files_dir', '')
+            if itar_cf_dir and os.path.exists(itar_cf_dir):
+                dirs_to_search.append(('ITAR', itar_cf_dir))
         
         for prefix, cf_dir in dirs_to_search:
             try:
@@ -1161,22 +1295,15 @@ class JobDocs(QMainWindow):
     
     def search_jobs(self):
         search_term = self.add_search_edit.text().strip().lower()
-        
+
         if not search_term:
             self.refresh_job_tree()
             return
-        
+
         self.job_tree.clear()
-        
-        dirs_to_search = []
-        
-        cf_dir = self.settings.get('customer_files_dir', '')
-        if cf_dir and os.path.exists(cf_dir):
-            dirs_to_search.append(('', cf_dir))
-        
-        itar_cf_dir = self.settings.get('itar_customer_files_dir', '')
-        if itar_cf_dir and os.path.exists(itar_cf_dir):
-            dirs_to_search.append(('ITAR', itar_cf_dir))
+
+        # Use helper method for directory building
+        dirs_to_search = self._get_customer_files_dirs()
         
         results = 0
         
@@ -1292,43 +1419,51 @@ class JobDocs(QMainWindow):
         
         added = 0
         skipped = 0
-        
+
+        # Ensure blueprint directory exists if needed
+        if dest in ('blueprints', 'both'):
+            customer_bp.mkdir(parents=True, exist_ok=True)
+
         for file_path in self.add_files:
             file_name = os.path.basename(file_path)
-            
+
             try:
                 if dest == 'blueprints':
-                    customer_bp.mkdir(parents=True, exist_ok=True)
+                    # Copy only to blueprints
                     bp_dest = customer_bp / file_name
-                    if not bp_dest.exists():
+                    try:
                         shutil.copy2(file_path, bp_dest)
                         added += 1
-                    else:
+                    except FileExistsError:
                         skipped += 1
-                        
+
                 elif dest == 'job':
+                    # Copy only to job folder
                     job_dest = Path(job_path) / file_name
-                    if not job_dest.exists():
+                    try:
                         shutil.copy2(file_path, job_dest)
                         added += 1
-                    else:
+                    except FileExistsError:
                         skipped += 1
-                        
+
                 else:  # both
-                    customer_bp.mkdir(parents=True, exist_ok=True)
+                    # Copy to blueprints, then link to job
                     bp_dest = customer_bp / file_name
-                    if not bp_dest.exists():
+                    try:
                         shutil.copy2(file_path, bp_dest)
-                    
+                    except FileExistsError:
+                        pass  # File already exists in blueprints
+
                     job_dest = Path(job_path) / file_name
                     if not job_dest.exists():
                         self.create_link(bp_dest, job_dest)
                         added += 1
                     else:
                         skipped += 1
-                        
+
             except Exception as e:
                 self.log_message(f"Error adding {file_name}: {e}")
+                skipped += 1
         
         self.add_status_label.setText(f"Added: {added}, Skipped: {skipped}")
         
@@ -1362,7 +1497,8 @@ class JobDocs(QMainWindow):
             try:
                 reader = csv.reader(StringIO(line))
                 parts = next(reader)
-            except:
+            except (csv.Error, StopIteration):
+                # Fall back to string split if CSV parsing fails
                 parts = [p.strip() for p in line.split(',')]
             
             if len(parts) < 3:
@@ -1404,9 +1540,9 @@ class JobDocs(QMainWindow):
             
             if job['valid']:
                 status = "✓ Valid"
-                dup, _ = self.check_duplicate_job(job['customer'], job['job_number'])
+                dup, dup_location = self.check_duplicate_job(job['customer'], job['job_number'])
                 if dup:
-                    status = "⚠ Duplicate"
+                    status = f"⚠ Duplicate ({dup_location})"
                 valid += 1
             else:
                 status = f"✗ {job.get('error', 'Invalid')}"
@@ -1441,18 +1577,31 @@ class JobDocs(QMainWindow):
         self.bulk_progress.setMaximum(len(jobs))
         self.bulk_progress.setValue(0)
         self.bulk_progress.show()
-        
+
+        # Track existing customers before creating jobs
+        existing_customers = self._get_customers_from_dirs([
+            'blueprints_dir', 'customer_files_dir',
+            'itar_blueprints_dir', 'itar_customer_files_dir'
+        ])
+        new_customers = set()
+
         created = 0
         for i, job in enumerate(jobs):
-            if self.create_single_job(job['customer'], job['job_number'], job['description'], job['drawings'], is_itar, []):
+            customer = job['customer']
+            if customer not in existing_customers and customer not in new_customers:
+                new_customers.add(customer)
+            if self.create_single_job(customer, job['job_number'], job['description'], job['drawings'], is_itar, []):
                 created += 1
             self.bulk_progress.setValue(i + 1)
             QApplication.processEvents()
-        
+
         self.bulk_progress.hide()
         QMessageBox.information(self, "Complete", f"Created {created}/{len(jobs)} jobs")
         self.refresh_history()
-        self.populate_customer_lists()
+
+        # Only refresh customer lists if new customers were created
+        if new_customers:
+            self.populate_customer_lists()
     
     # ==================== Search Tab ====================
     
@@ -1464,19 +1613,17 @@ class JobDocs(QMainWindow):
         
         self.search_table.setRowCount(0)
         self.search_results.clear()
-        
-        dirs_to_search = []
-        
-        cf_dir = self.settings.get('customer_files_dir', '')
-        if cf_dir and os.path.exists(cf_dir):
-            dirs_to_search.append(('', cf_dir))
-        
-        itar_cf_dir = self.settings.get('itar_customer_files_dir', '')
-        if itar_cf_dir and os.path.exists(itar_cf_dir):
-            dirs_to_search.append(('ITAR', itar_cf_dir))
-        
+
+        # Use helper method for directory building
+        dirs_to_search = self._get_customer_files_dirs()
+
         if not dirs_to_search:
-            QMessageBox.warning(self, "Error", "No directories configured")
+            cf_dir = self.settings.get('customer_files_dir', '')
+            itar_cf_dir = self.settings.get('itar_customer_files_dir', '')
+            if not cf_dir and not itar_cf_dir:
+                QMessageBox.warning(self, "Error", "No customer directories configured. Please go to File → Settings to configure directories.")
+            else:
+                QMessageBox.warning(self, "Error", "Configured directories do not exist. Please check File → Settings.")
             return
         
         self.search_progress.setMaximum(0)
@@ -1485,56 +1632,79 @@ class JobDocs(QMainWindow):
         QApplication.processEvents()
         
         strict_mode = self.search_strict_radio.isChecked()
-        
+
+        # Cache checkbox states to avoid repeated calls
+        search_customer = self.search_customer_check.isChecked()
+        search_job = self.search_job_check.isChecked()
+        search_desc = self.search_desc_check.isChecked()
+        search_drawing = self.search_drawing_check.isChecked()
+
         try:
             for prefix, base_dir in dirs_to_search:
-                for root, dirs, _ in os.walk(base_dir):
-                    for dir_name in dirs:
-                        dir_path = os.path.join(root, dir_name)
-                        rel_path = os.path.relpath(dir_path, base_dir)
-                        parts = rel_path.split(os.sep)
-                        customer = parts[0] if parts else "Unknown"
-                        
-                        display_customer = f"[ITAR] {customer}" if prefix else customer
-                        
-                        if strict_mode and not dir_name[0].isdigit():
+                # Targeted traversal - only walk customer/job documents structure
+                try:
+                    customers = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
+                except OSError:
+                    continue
+
+                for customer in customers:
+                    customer_path = os.path.join(base_dir, customer)
+                    display_customer = f"[ITAR] {customer}" if prefix else customer
+
+                    # Check if searching by customer name
+                    customer_match = search_customer and search_term in customer.lower()
+
+                    # Look for job documents folder
+                    job_docs_path = os.path.join(customer_path, 'job documents')
+                    if os.path.exists(job_docs_path):
+                        try:
+                            job_folders = os.listdir(job_docs_path)
+                        except OSError:
                             continue
-                        
-                        match = False
-                        folder_lower = dir_name.lower()
-                        
-                        if self.search_customer_check.isChecked() and search_term in customer.lower():
-                            match = True
-                        if self.search_job_check.isChecked() and search_term in folder_lower:
-                            match = True
-                        if self.search_desc_check.isChecked() and search_term in folder_lower:
-                            match = True
-                        if self.search_drawing_check.isChecked() and search_term in folder_lower:
-                            match = True
-                        
-                        if match:
-                            name_parts = dir_name.replace('_', ' ').split()
-                            job_num = name_parts[0] if name_parts else ""
-                            desc = ' '.join(name_parts[1:]) if len(name_parts) > 1 else dir_name
-                            
-                            drawings = []
-                            for p in name_parts:
-                                if '-' in p:
-                                    drawings.extend([d.strip() for d in p.split('-') if d.strip()])
-                            
-                            try:
-                                mod_time = datetime.fromtimestamp(os.path.getmtime(dir_path))
-                            except:
-                                mod_time = datetime.now()
-                            
-                            self.search_results.append({
-                                'date': mod_time,
-                                'customer': display_customer,
-                                'job_number': job_num,
-                                'description': desc,
-                                'drawings': drawings,
-                                'path': dir_path
-                            })
+
+                        for dir_name in job_folders:
+                            dir_path = os.path.join(job_docs_path, dir_name)
+                            if not os.path.isdir(dir_path):
+                                continue
+
+                            # Apply strict mode filter
+                            if strict_mode and (not dir_name or not dir_name[0].isdigit()):
+                                continue
+
+                            # Check for matches
+                            match = customer_match
+                            folder_lower = dir_name.lower()
+
+                            if not match and search_job and search_term in folder_lower:
+                                match = True
+                            if not match and search_desc and search_term in folder_lower:
+                                match = True
+                            if not match and search_drawing and search_term in folder_lower:
+                                match = True
+
+                            if match:
+                                name_parts = dir_name.replace('_', ' ').split()
+                                job_num = name_parts[0] if name_parts else ""
+                                desc = ' '.join(name_parts[1:]) if len(name_parts) > 1 else dir_name
+
+                                drawings = []
+                                for p in name_parts:
+                                    if '-' in p:
+                                        drawings.extend([d.strip() for d in p.split('-') if d.strip()])
+
+                                try:
+                                    mod_time = datetime.fromtimestamp(Path(dir_path).stat().st_mtime)
+                                except (OSError, FileNotFoundError):
+                                    mod_time = datetime.now()
+
+                                self.search_results.append({
+                                    'date': mod_time,
+                                    'customer': display_customer,
+                                    'job_number': job_num,
+                                    'description': desc,
+                                    'drawings': drawings,
+                                    'path': dir_path
+                                })
             
             self.search_results.sort(key=lambda x: x['date'], reverse=True)
             
@@ -1695,17 +1865,80 @@ class JobDocs(QMainWindow):
         dialog = SettingsDialog(self.settings, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.settings = dialog.settings
-            self.save_settings():
+            self.save_settings()
             self.populate_customer_lists()
             self.populate_add_customer_list()
             QMessageBox.information(self, "Settings", "Settings saved")
-    
+
+    def show_getting_started(self):
+        content = """
+<h2>GETTING STARTED</h2>
+
+<p><b>1. Go to File → Settings</b><br>
+<b>2. Configure directories:</b><br>
+&nbsp;&nbsp;- Blueprints Directory: Central drawing storage<br>
+&nbsp;&nbsp;- Customer Files Directory: Where job folders are created<br>
+<b>3. Choose link type (Hard Link recommended)</b><br>
+<b>4. Set blueprint file extensions</b></p>
+
+<h2>CREATE JOB TAB</h2>
+
+<p><b>Enter job information:</b><br>
+- Customer Name (auto-completes)<br>
+- Job Number(s): single, comma-separated, or range (12345-12350)<br>
+- Description<br>
+- Drawing Numbers (optional)<br>
+- ITAR checkbox for controlled jobs</p>
+
+<p><b>Drop files or click browse to add files:</b><br>
+- Blueprint files → saved to blueprints, linked to job<br>
+- Other files → copied to job folder</p>
+
+<h2>BULK CREATE TAB</h2>
+
+<p><b>Create multiple jobs at once:</b><br>
+1. Enter jobs in CSV format (one per line)<br>
+2. Format: customer, job_number, description, drawings...<br>
+3. Click Validate to check for errors<br>
+4. Click Create All Jobs</p>
+
+<p><b>Example:</b><br>
+Acme Corp, 12345, Widget Assembly, DWG-001<br>
+Acme Corp, 12346, Gadget Housing, DWG-002</p>
+
+<h2>SEARCH TAB</h2>
+
+<p>Find jobs by customer, job number, description, or drawing.</p>
+
+<p><b>Search Modes:</b><br>
+- All Folders: Searches everything (slower, finds legacy files)<br>
+- Strict: Only numbered folders (faster, new files only)</p>
+
+<p>Double-click or right-click results to open folders.</p>
+
+<h2>IMPORT TAB</h2>
+
+<p><b>Import files directly to blueprints folder:</b><br>
+1. Select customer<br>
+2. Drop/browse files<br>
+3. Click Check & Import</p>
+
+<h2>TIPS</h2>
+
+<p>- Use hard links to save disk space<br>
+- ITAR jobs use separate directories<br>
+- Autocomplete learns from history<br>
+- Check for duplicates before creating</p>
+"""
+        dialog = ScrollableMessageDialog(self, "Getting Started", content, width=650, height=600)
+        dialog.exec()
+
     def show_about(self):
-        QMessageBox.about(self, "About JobDocs", """
+        content = """
 <h2>JobDocs</h2>
 <p>A tool for managing blueprint files and customer job directories.</p>
 
-<b>Features:</b>
+<h3>Features:</h3>
 <ul>
 <li>Single and bulk job creation</li>
 <li>Add files to existing jobs</li>
@@ -1716,8 +1949,10 @@ class JobDocs(QMainWindow):
 <li>History tracking</li>
 </ul>
 
-<p>github.com/i-machine-things/JobDocs</p>
-""")
+<p><a href="https://github.com/i-machine-things/JobDocs">github.com/i-machine-things/JobDocs</a></p>
+"""
+        dialog = ScrollableMessageDialog(self, "About JobDocs", content, width=500, height=400)
+        dialog.exec()
 
 
 def main():
