@@ -104,12 +104,12 @@ JobDocs creates the following directory structure:
 ```
 Customer Files Directory/
 ├── Customer Name/
-│   └── job documents/
 │       ├── 12345_Job Description/
-│       │   ├── blueprint1.pdf (hard link)
-│       │   └── other_file.doc (copy)
+│       │       └── job documents/       
+│       │               ├── blueprint1.pdf (hard link)
+│       │               └── other_file.doc (copy)
 │       └── 12346_Another Job/
-│           └── ...
+│               └── ...
 
 Blueprints Directory/
 └── Customer Name/
@@ -150,12 +150,6 @@ Files stored:
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
-
-**Note on PyQt6 Licensing:**
-- PyQt6 is dual-licensed under GPL v3 and commercial license
-- For **internal company use** (not distributing to others): GPL is fine and free
-- For **commercial distribution**: Purchase commercial PyQt6 license from Riverbank Computing
-- Alternative: Switch to PySide6 (LGPL) for free commercial distribution rights
 
 ## Support
 
