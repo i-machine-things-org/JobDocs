@@ -35,9 +35,15 @@ Thumbs.db
 *.sqlite
 test_output/
 
-# Windows installer build artifacts
+# Build artifacts (all platforms)
 installer_output/
+dist/
+build/
 *.exe
 *.msi
+*.app
 version_resource.txt
 icon.png
+
+# PyInstaller
+*.spec
