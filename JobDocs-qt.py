@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QTableWidget, QTableWidgetItem,
     QTextEdit, QPlainTextEdit, QProgressBar, QSplitter, QFrame,
     QFileDialog, QMessageBox, QDialog, QDialogButtonBox, QMenu,
-    QHeaderView, QAbstractItemView, QSizePolicy, QScrollArea
+    QHeaderView, QAbstractItemView, QSizePolicy, QScrollArea, QStyleFactory
 )
 from PyQt6.QtCore import Qt, QTimer, QMimeData, pyqtSignal, QStandardPaths
 from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QIcon
@@ -250,12 +250,28 @@ class SettingsDialog(QDialog):
         # Options
         options_group = QGroupBox("Options")
         options_layout = QVBoxLayout(options_group)
-        
+
         self.allow_duplicates_check = QCheckBox("Allow duplicate job numbers (not recommended)")
         self.allow_duplicates_check.setChecked(self.settings.get('allow_duplicate_jobs', False))
         options_layout.addWidget(self.allow_duplicates_check)
-        
+
         layout.addWidget(options_group)
+
+        # Appearance
+        appearance_group = QGroupBox("Appearance")
+        appearance_layout = QGridLayout(appearance_group)
+
+        appearance_layout.addWidget(QLabel("UI Style:"), 0, 0)
+        self.style_combo = QComboBox()
+        available_styles = QStyleFactory.keys()
+        self.style_combo.addItems(available_styles)
+        current_style = self.settings.get('ui_style', 'Fusion')
+        if current_style in available_styles:
+            self.style_combo.setCurrentText(current_style)
+        appearance_layout.addWidget(self.style_combo, 0, 1)
+        appearance_layout.addWidget(QLabel("(restart required)"), 0, 2)
+
+        layout.addWidget(appearance_group)
         
         # Buttons
         button_box = QDialogButtonBox(
@@ -275,20 +291,21 @@ class SettingsDialog(QDialog):
         self.settings['customer_files_dir'] = self.customer_files_edit.text()
         self.settings['itar_blueprints_dir'] = self.itar_blueprints_edit.text()
         self.settings['itar_customer_files_dir'] = self.itar_customer_files_edit.text()
-        
+
         if self.hard_radio.isChecked():
             self.settings['link_type'] = 'hard'
         elif self.symbolic_radio.isChecked():
             self.settings['link_type'] = 'symbolic'
         else:
             self.settings['link_type'] = 'copy'
-        
+
         extensions = [ext.strip().lower() for ext in self.extensions_edit.text().split(',') if ext.strip()]
         extensions = [ext if ext.startswith('.') else f'.{ext}' for ext in extensions]
         self.settings['blueprint_extensions'] = extensions
-        
+
         self.settings['allow_duplicate_jobs'] = self.allow_duplicates_check.isChecked()
-        
+        self.settings['ui_style'] = self.style_combo.currentText()
+
         self.accept()
 
 
@@ -302,7 +319,8 @@ class JobDocs(QMainWindow):
         'itar_customer_files_dir': '',
         'link_type': 'hard',
         'blueprint_extensions': ['.pdf', '.dwg', '.dxf'],
-        'allow_duplicate_jobs': False
+        'allow_duplicate_jobs': False,
+        'ui_style': 'Fusion'
     }
     
     def __init__(self):
@@ -471,7 +489,7 @@ class JobDocs(QMainWindow):
         btn_layout = QHBoxLayout()
         
         create_btn = QPushButton("Create Job && Link Files")
-        create_btn.setStyleSheet("font-weight: bold; padding: 8px 16px;")
+        #create_btn.setStyleSheet("font-weight: bold; padding: 8px 16px;")
         create_btn.clicked.connect(self.create_job)
         btn_layout.addWidget(create_btn)
         
@@ -1957,11 +1975,26 @@ Acme Corp, 12346, Gadget Housing, DWG-002</p>
 
 def main():
     app = QApplication(sys.argv)
-    app.setStyle('Fusion')
-    
+
+    # Load settings to get UI style preference
+    config_dir = get_config_dir()
+    settings_file = config_dir / 'settings.json'
+    ui_style = 'Fusion'  # Default
+
+    if settings_file.exists():
+        try:
+            with open(settings_file, 'r') as f:
+                settings = json.load(f)
+                ui_style = settings.get('ui_style', 'Fusion')
+        except (json.JSONDecodeError, IOError):
+            pass
+
+    # Set the style
+    app.setStyle(ui_style)
+
     window = JobDocs()
     window.show()
-    
+
     sys.exit(app.exec())
 
 

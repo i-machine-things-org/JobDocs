@@ -1,2 +1,43 @@
 build.sh
 setup-arch.sh
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.db
+*.sqlite
+test_output/
+
+# Windows installer build artifacts
+installer_output/
+*.exe
+*.msi
+version_resource.txt
+icon.png
