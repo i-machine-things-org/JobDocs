@@ -56,6 +56,13 @@ echo [4/4] Building executable with PyInstaller...
 echo   This may take a few minutes...
 echo.
 
+REM Check for icon
+set ICON_ARG=
+if exist "icon.ico" (
+    set ICON_ARG=--icon=icon.ico
+    echo   + Using icon.ico
+)
+
 py -m PyInstaller ^
     --name=JobDocs ^
     --onefile ^
@@ -70,6 +77,7 @@ py -m PyInstaller ^
     --hidden-import=PyQt6.QtCore ^
     --hidden-import=PyQt6.QtGui ^
     --hidden-import=PyQt6.QtWidgets ^
+    %ICON_ARG% ^
     JobDocs-qt.py
 
 if errorlevel 1 (

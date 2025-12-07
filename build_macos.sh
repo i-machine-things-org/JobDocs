@@ -58,8 +58,25 @@ rm -rf build dist
 echo -e "${GREEN}  ✓ Cleaned build directories${NC}"
 echo ""
 
+# Step 3.5: Create .icns if iconset exists but .icns doesn't
+if [ -d "JobDocs.iconset" ] && [ ! -f "icon.icns" ]; then
+    if command -v iconutil &> /dev/null; then
+        echo -e "${YELLOW}Creating icon.icns from iconset...${NC}"
+        iconutil -c icns JobDocs.iconset -o icon.icns
+        echo -e "${GREEN}  ✓ Created icon.icns${NC}"
+    fi
+fi
+
 # Step 4: Build application bundle
 echo -e "${YELLOW}[4/4] Building application bundle with PyInstaller...${NC}"
+
+# Check for icon
+ICON_ARG=""
+if [ -f "icon.icns" ]; then
+    ICON_ARG="--icon=icon.icns"
+    echo -e "${GREEN}  ✓ Using icon.icns${NC}"
+fi
+
 python3 -m PyInstaller \
     --name=JobDocs \
     --onefile \
@@ -73,6 +90,7 @@ python3 -m PyInstaller \
     --hidden-import=PyQt6.QtCore \
     --hidden-import=PyQt6.QtGui \
     --hidden-import=PyQt6.QtWidgets \
+    $ICON_ARG \
     JobDocs-qt.py
 
 if [ $? -ne 0 ]; then

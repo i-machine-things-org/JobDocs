@@ -61,6 +61,14 @@ echo ""
 
 # Step 4: Build executable
 echo -e "${YELLOW}[4/4] Building executable with PyInstaller...${NC}"
+
+# Check for icon
+ICON_ARG=""
+if [ -f "icon.png" ]; then
+    ICON_ARG="--icon=icon.png"
+    echo -e "${GREEN}  ✓ Using icon.png${NC}"
+fi
+
 python3 -m PyInstaller \
     --name=JobDocs \
     --onefile \
@@ -73,6 +81,7 @@ python3 -m PyInstaller \
     --hidden-import=PyQt6.QtCore \
     --hidden-import=PyQt6.QtGui \
     --hidden-import=PyQt6.QtWidgets \
+    $ICON_ARG \
     JobDocs-qt.py
 
 if [ $? -ne 0 ]; then
