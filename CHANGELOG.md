@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Improved .gitignore to exclude build artifacts
 
-## [1.0.0] - 2024-12-06
+## [1.0.0] - 2025-12-06
 
 ### Added
 - Initial release

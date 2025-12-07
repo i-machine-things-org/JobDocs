@@ -46,6 +46,64 @@ def get_config_dir() -> Path:
     return config_dir
 
 
+def get_os_type() -> str:
+    """Get simplified OS type"""
+    system = platform.system()
+    if system == "Windows":
+        return "windows"
+    elif system == "Darwin":
+        return "macos"
+    else:
+        return "linux"
+
+
+def get_os_text(key: str) -> str:
+    """Get OS-specific text for various UI elements"""
+    os_type = get_os_type()
+
+    text_map = {
+        # Terminology
+        'folder_term': {
+            'windows': 'folder',
+            'macos': 'folder',
+            'linux': 'directory'
+        },
+        'file_browser': {
+            'windows': 'File Explorer',
+            'macos': 'Finder',
+            'linux': 'file manager'
+        },
+
+        # Link type info (FILES only - no admin needed!)
+        'hard_link_note': {
+            'windows': 'Hard Link (recommended - files must be on same volume)',
+            'macos': 'Hard Link (recommended)',
+            'linux': 'Hard Link (recommended)'
+        },
+        'symlink_note': {
+            'windows': 'Symbolic Link (requires admin/Developer Mode)',
+            'macos': 'Symbolic Link',
+            'linux': 'Symbolic Link'
+        },
+
+        # Path separators
+        'path_sep': {
+            'windows': '\\',
+            'macos': '/',
+            'linux': '/'
+        },
+        'path_example': {
+            'windows': '{customer}\\{job_folder}\\job documents',
+            'macos': '{customer}/{job_folder}/job documents',
+            'linux': '{customer}/{job_folder}/job documents'
+        }
+    }
+
+    if key in text_map:
+        return text_map[key].get(os_type, text_map[key]['linux'])
+    return ""
+
+
 class ScrollableMessageDialog(QDialog):
     """A custom dialog with scrollable content and defined size"""
 
@@ -162,8 +220,18 @@ class SettingsDialog(QDialog):
         self.setup_ui()
     
     def setup_ui(self):
-        layout = QVBoxLayout(self)
-        
+        # Main dialog layout
+        main_layout = QVBoxLayout(self)
+
+        # Create scroll area for content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)  # Remove border
+
+        # Container for scrollable content
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+
         # Directories group
         dir_group = QGroupBox("Directories")
         dir_layout = QGridLayout(dir_group)
@@ -183,9 +251,9 @@ class SettingsDialog(QDialog):
         cf_btn = QPushButton("Browse...")
         cf_btn.clicked.connect(lambda: self.browse_dir(self.customer_files_edit))
         dir_layout.addWidget(cf_btn, 1, 2)
-        
-        layout.addWidget(dir_group)
-        
+
+        scroll_layout.addWidget(dir_group)
+
         # ITAR directories group
         itar_group = QGroupBox("ITAR Directories (optional)")
         itar_layout = QGridLayout(itar_group)
@@ -203,9 +271,9 @@ class SettingsDialog(QDialog):
         itar_cf_btn = QPushButton("Browse...")
         itar_cf_btn.clicked.connect(lambda: self.browse_dir(self.itar_customer_files_edit))
         itar_layout.addWidget(itar_cf_btn, 1, 2)
-        
-        layout.addWidget(itar_group)
-        
+
+        scroll_layout.addWidget(itar_group)
+
         # Link type group
         link_group = QGroupBox("Link Type")
         link_layout = QHBoxLayout(link_group)
@@ -231,9 +299,19 @@ class SettingsDialog(QDialog):
         link_layout.addWidget(self.symbolic_radio)
         link_layout.addWidget(self.copy_radio)
         link_layout.addStretch()
-        
-        layout.addWidget(link_group)
-        
+
+        # Add OS-specific tooltips
+        if get_os_type() == "windows":
+            self.hard_radio.setToolTip("Creates a hard link to blueprint files. Saves disk space. Files must be on the same volume (e.g., same drive letter).")
+            self.symbolic_radio.setToolTip("Creates a symbolic link. Requires administrator privileges or Windows Developer Mode.")
+            self.copy_radio.setToolTip("Creates an independent copy of the file. Use if blueprints are on different drives.")
+        else:
+            self.hard_radio.setToolTip("Creates a hard link to blueprint files. Recommended - saves disk space.")
+            self.symbolic_radio.setToolTip("Creates a symbolic link to blueprint files.")
+            self.copy_radio.setToolTip("Creates an independent copy of the file.")
+
+        scroll_layout.addWidget(link_group)
+
         # Blueprint extensions
         ext_group = QGroupBox("Blueprint File Types")
         ext_layout = QVBoxLayout(ext_group)
@@ -244,9 +322,9 @@ class SettingsDialog(QDialog):
         )
         ext_layout.addWidget(self.extensions_edit)
         ext_layout.addWidget(QLabel("(comma-separated, e.g., .pdf, .dwg, .dxf)"))
-        
-        layout.addWidget(ext_group)
-        
+
+        scroll_layout.addWidget(ext_group)
+
         # Options
         options_group = QGroupBox("Options")
         options_layout = QVBoxLayout(options_group)
@@ -255,7 +333,7 @@ class SettingsDialog(QDialog):
         self.allow_duplicates_check.setChecked(self.settings.get('allow_duplicate_jobs', False))
         options_layout.addWidget(self.allow_duplicates_check)
 
-        layout.addWidget(options_group)
+        scroll_layout.addWidget(options_group)
 
         # Appearance
         appearance_group = QGroupBox("Appearance")
@@ -271,21 +349,83 @@ class SettingsDialog(QDialog):
         appearance_layout.addWidget(self.style_combo, 0, 1)
         appearance_layout.addWidget(QLabel("(restart required)"), 0, 2)
 
-        layout.addWidget(appearance_group)
-        
-        # Buttons
+        scroll_layout.addWidget(appearance_group)
+
+        # Advanced Settings (collapsible)
+        self.advanced_group = QGroupBox("Advanced Settings")
+        self.advanced_group.setCheckable(True)
+        self.advanced_group.setChecked(False)
+        advanced_layout = QVBoxLayout(self.advanced_group)
+
+        # Create container widget for collapsible content
+        self.advanced_content = QWidget()
+        advanced_content_layout = QVBoxLayout(self.advanced_content)
+        advanced_content_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Use OS-specific path separator for examples
+        path_example = get_os_text('path_example')
+        path_sep = get_os_text('path_sep')
+        legacy_example = f"{{customer}}{path_sep}job documents{path_sep}{{job_folder}}"
+
+        advanced_content_layout.addWidget(QLabel("Job Folder Structure:"))
+        advanced_content_layout.addWidget(QLabel("Define the directory structure for job folders"))
+        advanced_content_layout.addWidget(QLabel("Available placeholders: {customer}, {job_folder}"))
+
+        structure_examples = QHBoxLayout()
+        structure_examples.addWidget(QLabel(f"Default: {path_example}"))
+        structure_examples.addStretch()
+        advanced_content_layout.addLayout(structure_examples)
+
+        structure_examples2 = QHBoxLayout()
+        structure_examples2.addWidget(QLabel(f"Legacy: {legacy_example}"))
+        structure_examples2.addStretch()
+        advanced_content_layout.addLayout(structure_examples2)
+
+        self.job_structure_edit = QLineEdit(
+            self.settings.get('job_folder_structure', '{customer}/{job_folder}/job documents')
+        )
+        advanced_content_layout.addWidget(self.job_structure_edit)
+
+        # Spacer
+        advanced_content_layout.addWidget(QLabel(""))
+
+        # Legacy mode toggle
+        self.legacy_mode_check = QCheckBox("Enable legacy mode (shows 'Search All Folders' option)")
+        self.legacy_mode_check.setChecked(self.settings.get('legacy_mode', True))
+        self.legacy_mode_check.toggled.connect(self.on_legacy_mode_toggled)
+        advanced_content_layout.addWidget(self.legacy_mode_check)
+
+        advanced_layout.addWidget(self.advanced_content)
+
+        # Hide content by default and connect toggle
+        self.advanced_content.setVisible(False)
+        self.advanced_group.toggled.connect(self.advanced_content.setVisible)
+
+        scroll_layout.addWidget(self.advanced_group)
+
+        # Set scroll widget and add to main layout
+        scroll.setWidget(scroll_widget)
+        main_layout.addWidget(scroll)
+
+        # Buttons (stay outside scroll area - always visible)
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
         button_box.accepted.connect(self.save)
         button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
+        main_layout.addWidget(button_box)
     
     def browse_dir(self, line_edit: QLineEdit):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Directory")
         if dir_path:
             line_edit.setText(dir_path)
-    
+
+    def on_legacy_mode_toggled(self, checked: bool):
+        """Update settings when legacy mode is toggled"""
+        # Legacy mode only controls search UI visibility, not job folder structure
+        # Job folder structure is either default or user-defined
+        self.settings['legacy_mode'] = checked
+
     def save(self):
         self.settings['blueprints_dir'] = self.blueprints_edit.text()
         self.settings['customer_files_dir'] = self.customer_files_edit.text()
@@ -303,6 +443,8 @@ class SettingsDialog(QDialog):
         extensions = [ext if ext.startswith('.') else f'.{ext}' for ext in extensions]
         self.settings['blueprint_extensions'] = extensions
 
+        self.settings['job_folder_structure'] = self.job_structure_edit.text().strip()
+        self.settings['legacy_mode'] = self.legacy_mode_check.isChecked()
         self.settings['allow_duplicate_jobs'] = self.allow_duplicates_check.isChecked()
         self.settings['ui_style'] = self.style_combo.currentText()
 
@@ -320,7 +462,9 @@ class JobDocs(QMainWindow):
         'link_type': 'hard',
         'blueprint_extensions': ['.pdf', '.dwg', '.dxf'],
         'allow_duplicate_jobs': False,
-        'ui_style': 'Fusion'
+        'ui_style': 'Fusion',
+        'job_folder_structure': '{customer}/{job_folder}/job documents',  # New default structure
+        'legacy_mode': True  # Default to TRUE to show both search options
     }
     
     def __init__(self):
@@ -345,6 +489,9 @@ class JobDocs(QMainWindow):
         self.setup_ui()
         self.setup_menu()
         self.populate_customer_lists()
+
+        # Initialize UI visibility based on legacy mode setting
+        self.update_legacy_mode_ui()
     
     def load_settings(self) -> Dict[str, Any]:
         if self.settings_file.exists():
@@ -608,12 +755,17 @@ class JobDocs(QMainWindow):
         # Destination options
         dest_group = QGroupBox("Destination")
         dest_layout = QVBoxLayout(dest_group)
-        
+
+        self.dest_button_group = QButtonGroup(self)
         self.dest_both_radio = QRadioButton("Blueprints + Job (linked)")
         self.dest_both_radio.setChecked(True)
         self.dest_blueprints_radio = QRadioButton("Blueprints only")
         self.dest_job_radio = QRadioButton("Job folder only (copy)")
-        
+
+        self.dest_button_group.addButton(self.dest_both_radio)
+        self.dest_button_group.addButton(self.dest_blueprints_radio)
+        self.dest_button_group.addButton(self.dest_job_radio)
+
         dest_layout.addWidget(self.dest_both_radio)
         dest_layout.addWidget(self.dest_blueprints_radio)
         dest_layout.addWidget(self.dest_job_radio)
@@ -779,19 +931,43 @@ class JobDocs(QMainWindow):
         check_row.addStretch()
         search_layout.addLayout(check_row)
         
-        # Mode
-        mode_row = QHBoxLayout()
+        # Mode (wrapped in container widget for show/hide control)
+        self.mode_row_widget = QWidget()
+        mode_row = QHBoxLayout(self.mode_row_widget)
+        mode_row.setContentsMargins(0, 0, 0, 0)
+
         mode_row.addWidget(QLabel("Mode:"))
+
+        self.search_mode_group = QButtonGroup(self)
         self.search_all_radio = QRadioButton("Search All Folders")
-        self.search_all_radio.setChecked(True)
-        mode_row.addWidget(self.search_all_radio)
-        
         self.search_strict_radio = QRadioButton("Strict Format (faster)")
+
+        # Set default based on legacy_mode setting
+        is_legacy = self.settings.get('legacy_mode', True)
+        if is_legacy:
+            self.search_all_radio.setChecked(True)
+        else:
+            self.search_strict_radio.setChecked(True)
+
+        self.search_mode_group.addButton(self.search_all_radio)
+        self.search_mode_group.addButton(self.search_strict_radio)
+
+        mode_row.addWidget(self.search_all_radio)
         mode_row.addWidget(self.search_strict_radio)
         mode_row.addStretch()
-        search_layout.addLayout(mode_row)
-        
+
+        search_layout.addWidget(self.mode_row_widget)
+
+        # Connect mode change to update checkbox states
+        self.search_all_radio.toggled.connect(self.update_search_field_checkboxes)
+        self.search_strict_radio.toggled.connect(self.update_search_field_checkboxes)
+
+        # Initialize checkbox states and visibility based on legacy mode
+        self.update_search_field_checkboxes()
+
         layout.addWidget(search_group)
+
+        # Note: update_legacy_mode_ui() will be called after all tabs are created
         
         # Results
         results_group = QGroupBox("Search Results")
@@ -903,6 +1079,65 @@ class JobDocs(QMainWindow):
         return widget
     
     # ==================== Helper Methods ====================
+
+    def build_job_path(self, base_dir: str, customer: str, job_folder_name: str) -> Path:
+        """Build job path based on the configured structure template"""
+        structure = self.settings.get('job_folder_structure', '{customer}/{job_folder}/job documents')
+
+        # Replace placeholders
+        path_str = structure.replace('{customer}', customer).replace('{job_folder}', job_folder_name)
+
+        return Path(base_dir) / path_str
+
+    def find_job_folders(self, customer_path: str) -> List[Tuple[str, str]]:
+        """Find all job folders in a customer directory, returns list of (job_name, job_docs_path) tuples"""
+        structure = self.settings.get('job_folder_structure', '{customer}/{job_folder}/job documents')
+
+        # Determine where job_folder appears in the structure relative to customer
+        # Remove {customer}/ prefix and see what remains
+        after_customer = structure.split('{customer}/', 1)[-1] if '{customer}/' in structure else structure
+
+        jobs = []
+
+        # Check if job_folder is at the root level after customer
+        if after_customer.startswith('{job_folder}/'):
+            # New structure: customer/job_folder/...
+            suffix = after_customer.replace('{job_folder}/', '', 1)
+            try:
+                for item in os.listdir(customer_path):
+                    item_path = os.path.join(customer_path, item)
+                    if os.path.isdir(item_path):
+                        expected_docs_path = os.path.join(item_path, suffix)
+                        if os.path.exists(expected_docs_path):
+                            jobs.append((item, expected_docs_path))
+            except OSError:
+                pass
+        else:
+            # Legacy or custom structure: might have intermediate folders
+            # For legacy: customer/job documents/job_folder
+            parts = after_customer.split('{job_folder}')
+            if len(parts) == 2:
+                prefix = parts[0].strip('/')
+                suffix = parts[1].strip('/')
+
+                prefix_path = os.path.join(customer_path, prefix) if prefix else customer_path
+
+                if os.path.exists(prefix_path):
+                    try:
+                        for item in os.listdir(prefix_path):
+                            item_path = os.path.join(prefix_path, item)
+                            if os.path.isdir(item_path):
+                                if suffix:
+                                    expected_docs_path = os.path.join(item_path, suffix)
+                                    if os.path.exists(expected_docs_path):
+                                        jobs.append((item, expected_docs_path))
+                                else:
+                                    # No suffix, the item_path itself is the job docs
+                                    jobs.append((item, item_path))
+                    except OSError:
+                        pass
+
+        return jobs
 
     def _get_customers_from_dirs(self, dir_keys: List[str]) -> set:
         """Extract customer names from specified directory keys"""
@@ -1051,16 +1286,13 @@ class JobDocs(QMainWindow):
                     if not os.path.isdir(customer_path):
                         continue
 
-                    job_docs = Path(customer_path) / 'job documents'
-                    if job_docs.exists():
-                        try:
-                            for item in job_docs.iterdir():
-                                if item.is_dir():
-                                    parts = item.name.split('_', 1)
-                                    if parts and parts[0].lower() == job_number_lower:
-                                        return True, f"{customer_dir}: {str(item)}"
-                        except OSError:
-                            pass
+                    # Use helper method to find job folders
+                    jobs = self.find_job_folders(customer_path)
+                    for job_name, job_docs_path in jobs:
+                        # Extract job number from directory name
+                        parts = job_name.split('_', 1)
+                        if parts and parts[0].lower() == job_number_lower:
+                            return True, f"{customer_dir}: {job_name}"
             except OSError:
                 pass
 
@@ -1164,8 +1396,9 @@ class JobDocs(QMainWindow):
                 job_dir_name = f"{job_number}_{description}"
             
             job_dir_name = re.sub(r'[<>:"/\\|?*]', '_', job_dir_name)
-            
-            job_path = Path(cf_dir) / customer / 'job documents' / job_dir_name
+
+            # Use the configured job folder structure
+            job_path = self.build_job_path(cf_dir, customer, job_dir_name)
             job_path.mkdir(parents=True, exist_ok=True)
             
             customer_bp = Path(bp_dir) / customer
@@ -1291,20 +1524,22 @@ class JobDocs(QMainWindow):
                     customers = [selected_customer] if os.path.isdir(os.path.join(cf_dir, selected_customer)) else []
                 
                 for customer in sorted(customers):
-                    job_docs = os.path.join(cf_dir, customer, 'job documents')
-                    if not os.path.exists(job_docs):
+                    customer_path = os.path.join(cf_dir, customer)
+                    if not os.path.exists(customer_path):
                         continue
-                    
+
                     display_name = f"[{prefix}] {customer}" if prefix else customer
                     customer_item = QTreeWidgetItem([display_name])
-                    customer_item.setData(0, Qt.ItemDataRole.UserRole, os.path.join(cf_dir, customer))
-                    
-                    jobs = sorted([d for d in os.listdir(job_docs) if os.path.isdir(os.path.join(job_docs, d))])
-                    for job in jobs:
-                        job_item = QTreeWidgetItem([job])
-                        job_item.setData(0, Qt.ItemDataRole.UserRole, os.path.join(job_docs, job))
+                    customer_item.setData(0, Qt.ItemDataRole.UserRole, customer_path)
+
+                    # Use helper method to find job folders
+                    jobs = self.find_job_folders(customer_path)
+
+                    for job_name, job_docs_path in sorted(jobs):
+                        job_item = QTreeWidgetItem([job_name])
+                        job_item.setData(0, Qt.ItemDataRole.UserRole, job_docs_path)
                         customer_item.addChild(job_item)
-                    
+
                     if customer_item.childCount() > 0:
                         self.job_tree.addTopLevelItem(customer_item)
                         
@@ -1330,28 +1565,29 @@ class JobDocs(QMainWindow):
                 customers = [d for d in os.listdir(cf_dir) if os.path.isdir(os.path.join(cf_dir, d))]
                 
                 for customer in sorted(customers):
-                    job_docs = os.path.join(cf_dir, customer, 'job documents')
-                    if not os.path.exists(job_docs):
+                    customer_path = os.path.join(cf_dir, customer)
+                    if not os.path.exists(customer_path):
                         continue
-                    
+
                     matching_jobs = []
-                    jobs = [d for d in os.listdir(job_docs) if os.path.isdir(os.path.join(job_docs, d))]
-                    
-                    for job in jobs:
-                        if search_term in job.lower() or search_term in customer.lower():
-                            matching_jobs.append((job, os.path.join(job_docs, job)))
-                    
+
+                    # Use helper method to find job folders
+                    jobs = self.find_job_folders(customer_path)
+                    for job_name, job_docs_path in jobs:
+                        if search_term in job_name.lower() or search_term in customer.lower():
+                            matching_jobs.append((job_name, job_docs_path))
+
                     if matching_jobs:
                         display_name = f"[{prefix}] {customer}" if prefix else customer
                         customer_item = QTreeWidgetItem([display_name])
-                        customer_item.setData(0, Qt.ItemDataRole.UserRole, os.path.join(cf_dir, customer))
-                        
+                        customer_item.setData(0, Qt.ItemDataRole.UserRole, customer_path)
+
                         for job, job_path in sorted(matching_jobs):
                             job_item = QTreeWidgetItem([job])
                             job_item.setData(0, Qt.ItemDataRole.UserRole, job_path)
                             customer_item.addChild(job_item)
                             results += 1
-                        
+
                         self.job_tree.addTopLevelItem(customer_item)
                         customer_item.setExpanded(True)
                         
@@ -1622,7 +1858,34 @@ class JobDocs(QMainWindow):
             self.populate_customer_lists()
     
     # ==================== Search Tab ====================
-    
+
+    def update_search_field_checkboxes(self):
+        """Enable/disable field checkboxes based on search mode"""
+        # In "Search All Folders" mode, disable checkboxes since we search everything
+        # In "Strict Format" mode, enable checkboxes for field-specific searching
+        is_strict_mode = self.search_strict_radio.isChecked()
+
+        self.search_customer_check.setEnabled(is_strict_mode)
+        self.search_job_check.setEnabled(is_strict_mode)
+        self.search_desc_check.setEnabled(is_strict_mode)
+        self.search_drawing_check.setEnabled(is_strict_mode)
+
+    def update_legacy_mode_ui(self):
+        """Show/hide UI elements based on legacy mode setting"""
+        is_legacy = self.settings.get('legacy_mode', True)
+
+        # Show/hide "Search All Folders" option
+        if is_legacy:
+            # Show both radio buttons
+            self.mode_row_widget.setVisible(True)
+        else:
+            # Hide mode selection, force Strict Format
+            self.mode_row_widget.setVisible(False)
+            self.search_strict_radio.setChecked(True)
+
+        # Update checkbox states
+        self.update_search_field_checkboxes()
+
     def perform_search(self):
         search_term = self.search_edit.text().strip().lower()
         if not search_term:
@@ -1651,11 +1914,19 @@ class JobDocs(QMainWindow):
         
         strict_mode = self.search_strict_radio.isChecked()
 
-        # Cache checkbox states to avoid repeated calls
-        search_customer = self.search_customer_check.isChecked()
-        search_job = self.search_job_check.isChecked()
-        search_desc = self.search_desc_check.isChecked()
-        search_drawing = self.search_drawing_check.isChecked()
+        # In "Search All Folders" mode, search everything regardless of checkboxes
+        # In "Strict Format" mode, respect checkbox selections
+        if strict_mode:
+            search_customer = self.search_customer_check.isChecked()
+            search_job = self.search_job_check.isChecked()
+            search_desc = self.search_desc_check.isChecked()
+            search_drawing = self.search_drawing_check.isChecked()
+        else:
+            # Legacy mode: search all fields
+            search_customer = True
+            search_job = True
+            search_desc = True
+            search_drawing = True
 
         try:
             for prefix, base_dir in dirs_to_search:
@@ -1672,57 +1943,66 @@ class JobDocs(QMainWindow):
                     # Check if searching by customer name
                     customer_match = search_customer and search_term in customer.lower()
 
-                    # Look for job documents folder
-                    job_docs_path = os.path.join(customer_path, 'job documents')
-                    if os.path.exists(job_docs_path):
-                        try:
-                            job_folders = os.listdir(job_docs_path)
-                        except OSError:
+                    # Use helper method to find job folders
+                    jobs = self.find_job_folders(customer_path)
+
+                    for dir_name, job_docs_path in jobs:
+                        # Apply strict mode filter
+                        if strict_mode and (not dir_name or not dir_name[0].isdigit()):
                             continue
 
-                        for dir_name in job_folders:
-                            dir_path = os.path.join(job_docs_path, dir_name)
-                            if not os.path.isdir(dir_path):
-                                continue
+                        # Parse folder name into components FIRST
+                        # Expected format: job#_description_drawing1-drawing2-drawing3
+                        parts = dir_name.split('_')
+                        job_num = parts[0] if parts else ""
 
-                            # Apply strict mode filter
-                            if strict_mode and (not dir_name or not dir_name[0].isdigit()):
-                                continue
+                        # Everything after job number
+                        remaining_parts = parts[1:] if len(parts) > 1 else []
 
-                            # Check for matches
-                            match = customer_match
-                            folder_lower = dir_name.lower()
+                        # Find drawings (last part with dashes) and description (everything before that)
+                        drawings = []
+                        desc_parts = []
 
-                            if not match and search_job and search_term in folder_lower:
-                                match = True
-                            if not match and search_desc and search_term in folder_lower:
-                                match = True
-                            if not match and search_drawing and search_term in folder_lower:
-                                match = True
+                        if remaining_parts:
+                            # Check if last part contains drawings (has dashes)
+                            if '-' in remaining_parts[-1]:
+                                # Last part is drawings
+                                drawings = [d.strip() for d in remaining_parts[-1].split('-') if d.strip()]
+                                # Everything before last part is description
+                                desc_parts = remaining_parts[:-1]
+                            else:
+                                # No drawings in last part, everything is description
+                                desc_parts = remaining_parts
 
-                            if match:
-                                name_parts = dir_name.replace('_', ' ').split()
-                                job_num = name_parts[0] if name_parts else ""
-                                desc = ' '.join(name_parts[1:]) if len(name_parts) > 1 else dir_name
+                        desc = ' '.join(desc_parts) if desc_parts else ""
 
-                                drawings = []
-                                for p in name_parts:
-                                    if '-' in p:
-                                        drawings.extend([d.strip() for d in p.split('-') if d.strip()])
+                        # Check for matches in SPECIFIC fields only
+                        match = customer_match
 
-                                try:
-                                    mod_time = datetime.fromtimestamp(Path(dir_path).stat().st_mtime)
-                                except (OSError, FileNotFoundError):
-                                    mod_time = datetime.now()
+                        if not match and search_job and search_term in job_num.lower():
+                            match = True
+                        if not match and search_desc and search_term in desc.lower():
+                            match = True
+                        if not match and search_drawing:
+                            for drawing in drawings:
+                                if search_term in drawing.lower():
+                                    match = True
+                                    break
 
-                                self.search_results.append({
-                                    'date': mod_time,
-                                    'customer': display_customer,
-                                    'job_number': job_num,
-                                    'description': desc,
-                                    'drawings': drawings,
-                                    'path': dir_path
-                                })
+                        if match:
+                            try:
+                                mod_time = datetime.fromtimestamp(Path(job_docs_path).stat().st_mtime)
+                            except (OSError, FileNotFoundError):
+                                mod_time = datetime.now()
+
+                            self.search_results.append({
+                                'date': mod_time,
+                                'customer': display_customer,
+                                'job_number': job_num,
+                                'description': desc,
+                                'drawings': drawings,
+                                'path': job_docs_path
+                            })
             
             self.search_results.sort(key=lambda x: x['date'], reverse=True)
             
@@ -1886,18 +2166,36 @@ class JobDocs(QMainWindow):
             self.save_settings()
             self.populate_customer_lists()
             self.populate_add_customer_list()
+
+            # Update search tab based on new legacy mode setting
+            self.update_legacy_mode_ui()
+
             QMessageBox.information(self, "Settings", "Settings saved")
 
     def show_getting_started(self):
-        content = """
+        folder_term = get_os_text('folder_term')
+        os_type = get_os_type()
+        path_example = get_os_text('path_example')
+
+        # OS-specific link recommendation
+        if os_type == "windows":
+            link_info = "Hard Link recommended (saves space, works on same drive)"
+        else:
+            link_info = "Hard Link recommended (saves space)"
+
+        content = f"""
 <h2>GETTING STARTED</h2>
 
 <p><b>1. Go to File → Settings</b><br>
 <b>2. Configure directories:</b><br>
 &nbsp;&nbsp;- Blueprints Directory: Central drawing storage<br>
-&nbsp;&nbsp;- Customer Files Directory: Where job folders are created<br>
-<b>3. Choose link type (Hard Link recommended)</b><br>
+&nbsp;&nbsp;- Customer Files Directory: Where job {folder_term}s are created<br>
+<b>3. Choose link type ({link_info})</b><br>
 <b>4. Set blueprint file extensions</b></p>
+
+<p><b>Advanced (optional):</b><br>
+Enable "Advanced Settings" in Settings to customize job {folder_term} structure<br>
+&nbsp;&nbsp;- Default: {path_example}<br>
 
 <h2>CREATE JOB TAB</h2>
 
@@ -1910,7 +2208,7 @@ class JobDocs(QMainWindow):
 
 <p><b>Drop files or click browse to add files:</b><br>
 - Blueprint files → saved to blueprints, linked to job<br>
-- Other files → copied to job folder</p>
+- Other files → copied to job {folder_term}</p>
 
 <h2>BULK CREATE TAB</h2>
 
@@ -1930,20 +2228,20 @@ Acme Corp, 12346, Gadget Housing, DWG-002</p>
 
 <p><b>Search Modes:</b><br>
 - All Folders: Searches everything (slower, finds legacy files)<br>
-- Strict: Only numbered folders (faster, new files only)</p>
+- Strict: Only numbered {folder_term}s (faster, new files only)</p>
 
-<p>Double-click or right-click results to open folders.</p>
+<p>Double-click or right-click results to open {folder_term}s.</p>
 
 <h2>IMPORT TAB</h2>
 
-<p><b>Import files directly to blueprints folder:</b><br>
+<p><b>Import files directly to blueprints {folder_term}:</b><br>
 1. Select customer<br>
 2. Drop/browse files<br>
 3. Click Check & Import</p>
 
 <h2>TIPS</h2>
 
-<p>- Use hard links to save disk space<br>
+<p>- Hard links save disk space (blueprints appear in multiple {folder_term}s)<br>
 - ITAR jobs use separate directories<br>
 - Autocomplete learns from history<br>
 - Check for duplicates before creating</p>
@@ -1952,9 +2250,18 @@ Acme Corp, 12346, Gadget Housing, DWG-002</p>
         dialog.exec()
 
     def show_about(self):
-        content = """
+        folder_term = get_os_text('folder_term')
+        os_type = get_os_type()
+
+        # OS-specific note about hard links
+        if os_type == "windows":
+            link_note = "<p><i>Note: Hard links work for blueprint files without admin rights. Files must be on the same volume. Use Copy mode if blueprints are on different drives.</i></p>"
+        else:
+            link_note = f"<p><i>Note: Hard links allow blueprint files to appear in multiple job {folder_term}s while only using disk space once.</i></p>"
+
+        content = f"""
 <h2>JobDocs</h2>
-<p>A tool for managing blueprint files and customer job directories.</p>
+<p>A tool for managing blueprint files and customer job {folder_term}s.</p>
 
 <h3>Features:</h3>
 <ul>
@@ -1963,9 +2270,13 @@ Acme Corp, 12346, Gadget Housing, DWG-002</p>
 <li>Blueprint file linking (hard links save disk space)</li>
 <li>File system search</li>
 <li>Import tools</li>
-<li>ITAR directory support</li>
+<li>ITAR {folder_term} support</li>
 <li>History tracking</li>
 </ul>
+
+{link_note}
+
+<p>Built with Python and PyQt6</p>
 
 <p><a href="https://github.com/i-machine-things/JobDocs">github.com/i-machine-things/JobDocs</a></p>
 """
