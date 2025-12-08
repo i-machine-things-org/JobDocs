@@ -47,3 +47,4 @@ icon.png
 
 # PyInstaller
 *.spec
+ignore.me.md

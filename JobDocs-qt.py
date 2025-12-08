@@ -1,6 +1,12 @@
 """
 JobDocs - A tool for managing blueprint links and customer files
 Qt version for modern UI
+
+Copyright (c) 2025 JobDocs Contributors
+Licensed under the MIT License - see LICENSE file for details
+
+This software is provided "as is" without warranty of any kind.
+See LICENSE file for full terms and conditions.
 """
 
 import os
@@ -141,33 +147,36 @@ class ScrollableMessageDialog(QDialog):
 class DropZone(QFrame):
     """A widget that accepts file drops"""
     files_dropped = pyqtSignal(list)
-    
+
     def __init__(self, label: str = "Drop files here", parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
         self.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Sunken)
-        self.setMinimumHeight(80)
+        self.setMinimumHeight(60)
         self.setStyleSheet("""
             DropZone {
                 background-color: #f5f5f5;
                 border: 2px dashed #ccc;
-                border-radius: 8px;
+                border-radius: 6px;
             }
             DropZone:hover {
                 border-color: #999;
                 background-color: #e8e8e8;
             }
         """)
-        
+
         layout = QVBoxLayout(self)
-        self.label = QLabel(f"{label}\nor click Browse")
+        layout.setContentsMargins(3, 3, 3, 3)
+        layout.setSpacing(2)
+        self.label = QLabel(f"{label} or click Browse")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label.setStyleSheet("color: #666; font-size: 11px;")
+        self.label.setStyleSheet("color: #666; font-size: 10px;")
         layout.addWidget(self.label)
-        
+
         self.browse_btn = QPushButton("Browse...")
         self.browse_btn.clicked.connect(self.browse_files)
-        self.browse_btn.setMaximumWidth(100)
+        self.browse_btn.setMaximumWidth(90)
+        self.browse_btn.setMaximumHeight(22)
         layout.addWidget(self.browse_btn, alignment=Qt.AlignmentFlag.AlignCenter)
     
     def dragEnterEvent(self, event: QDragEnterEvent):
@@ -395,6 +404,15 @@ class SettingsDialog(QDialog):
         self.legacy_mode_check.toggled.connect(self.on_legacy_mode_toggled)
         advanced_content_layout.addWidget(self.legacy_mode_check)
 
+        # Spacer
+        advanced_content_layout.addWidget(QLabel(""))
+
+        # Experimental features
+        self.experimental_check = QCheckBox("Enable experimental features (Database integration, Reporting)")
+        self.experimental_check.setChecked(self.settings.get('experimental_features', False))
+        self.experimental_check.setToolTip("Enables experimental features like database integration and reporting. Requires restart.")
+        advanced_content_layout.addWidget(self.experimental_check)
+
         advanced_layout.addWidget(self.advanced_content)
 
         # Hide content by default and connect toggle
@@ -402,6 +420,75 @@ class SettingsDialog(QDialog):
         self.advanced_group.toggled.connect(self.advanced_content.setVisible)
 
         scroll_layout.addWidget(self.advanced_group)
+
+        # Experimental Settings (collapsible, shown only when experimental features enabled)
+        self.experimental_group = QGroupBox("Experimental: Database Settings")
+        self.experimental_group.setCheckable(True)
+        self.experimental_group.setChecked(False)
+        experimental_layout = QVBoxLayout(self.experimental_group)
+
+        # Create container widget for collapsible content
+        self.experimental_content = QWidget()
+        experimental_content_layout = QVBoxLayout(self.experimental_content)
+        experimental_content_layout.setContentsMargins(0, 0, 0, 0)
+
+        experimental_content_layout.addWidget(QLabel("Configure database connection for JobBOSS/ERP integration:"))
+
+        # Database type
+        db_type_layout = QHBoxLayout()
+        db_type_layout.addWidget(QLabel("Database Type:"))
+        self.db_type_combo = QComboBox()
+        self.db_type_combo.addItems(["mssql", "mysql", "postgresql", "sqlite"])
+        self.db_type_combo.setCurrentText(self.settings.get('db_type', 'mssql'))
+        db_type_layout.addWidget(self.db_type_combo)
+        db_type_layout.addStretch()
+        experimental_content_layout.addLayout(db_type_layout)
+
+        # Database connection settings
+        db_grid = QGridLayout()
+
+        db_grid.addWidget(QLabel("Host:"), 0, 0)
+        self.db_host_edit = QLineEdit(self.settings.get('db_host', 'localhost'))
+        db_grid.addWidget(self.db_host_edit, 0, 1)
+
+        db_grid.addWidget(QLabel("Port:"), 0, 2)
+        self.db_port_edit = QLineEdit(str(self.settings.get('db_port', 1433)))
+        self.db_port_edit.setMaximumWidth(80)
+        db_grid.addWidget(self.db_port_edit, 0, 3)
+
+        db_grid.addWidget(QLabel("Database:"), 1, 0)
+        self.db_name_edit = QLineEdit(self.settings.get('db_name', ''))
+        db_grid.addWidget(self.db_name_edit, 1, 1, 1, 3)
+
+        db_grid.addWidget(QLabel("Username:"), 2, 0)
+        self.db_username_edit = QLineEdit(self.settings.get('db_username', ''))
+        db_grid.addWidget(self.db_username_edit, 2, 1, 1, 3)
+
+        db_grid.addWidget(QLabel("Password:"), 3, 0)
+        self.db_password_edit = QLineEdit(self.settings.get('db_password', ''))
+        self.db_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        db_grid.addWidget(self.db_password_edit, 3, 1, 1, 3)
+
+        experimental_content_layout.addLayout(db_grid)
+
+        # Test connection button
+        test_btn_layout = QHBoxLayout()
+        self.test_db_btn = QPushButton("Test Connection")
+        self.test_db_btn.clicked.connect(self.test_database_connection)
+        test_btn_layout.addWidget(self.test_db_btn)
+        test_btn_layout.addStretch()
+        experimental_content_layout.addLayout(test_btn_layout)
+
+        experimental_layout.addWidget(self.experimental_content)
+
+        # Hide content by default and connect toggle
+        self.experimental_content.setVisible(False)
+        self.experimental_group.toggled.connect(self.experimental_content.setVisible)
+
+        # Only show experimental group if experimental features are enabled
+        self.experimental_group.setVisible(self.settings.get('experimental_features', False))
+
+        scroll_layout.addWidget(self.experimental_group)
 
         # Set scroll widget and add to main layout
         scroll.setWidget(scroll_widget)
@@ -426,6 +513,35 @@ class SettingsDialog(QDialog):
         # Job folder structure is either default or user-defined
         self.settings['legacy_mode'] = checked
 
+    def test_database_connection(self):
+        """Test database connection with current settings"""
+        db_type = self.db_type_combo.currentText()
+        host = self.db_host_edit.text()
+        port = self.db_port_edit.text()
+        database = self.db_name_edit.text()
+        username = self.db_username_edit.text()
+        password = self.db_password_edit.text()
+
+        if not all([host, database, username]):
+            QMessageBox.warning(self, "Missing Information", "Please fill in Host, Database, and Username fields.")
+            return
+
+        # Placeholder - actual implementation would use pyodbc, pymysql, etc.
+        QMessageBox.information(
+            self,
+            "Test Connection",
+            f"Database connection test (placeholder):\n\n"
+            f"Type: {db_type}\n"
+            f"Host: {host}:{port}\n"
+            f"Database: {database}\n"
+            f"Username: {username}\n\n"
+            f"To implement:\n"
+            f"- Install driver: pip install pyodbc (for MSSQL)\n"
+            f"- Install driver: pip install pymysql (for MySQL)\n"
+            f"- Install driver: pip install psycopg2 (for PostgreSQL)\n\n"
+            f"See db_integration.py for implementation details."
+        )
+
     def save(self):
         self.settings['blueprints_dir'] = self.blueprints_edit.text()
         self.settings['customer_files_dir'] = self.customer_files_edit.text()
@@ -448,6 +564,15 @@ class SettingsDialog(QDialog):
         self.settings['allow_duplicate_jobs'] = self.allow_duplicates_check.isChecked()
         self.settings['ui_style'] = self.style_combo.currentText()
 
+        # Experimental settings
+        self.settings['experimental_features'] = self.experimental_check.isChecked()
+        self.settings['db_type'] = self.db_type_combo.currentText()
+        self.settings['db_host'] = self.db_host_edit.text()
+        self.settings['db_port'] = int(self.db_port_edit.text()) if self.db_port_edit.text().isdigit() else 1433
+        self.settings['db_name'] = self.db_name_edit.text()
+        self.settings['db_username'] = self.db_username_edit.text()
+        self.settings['db_password'] = self.db_password_edit.text()
+
         self.accept()
 
 
@@ -464,13 +589,20 @@ class JobDocs(QMainWindow):
         'allow_duplicate_jobs': False,
         'ui_style': 'Fusion',
         'job_folder_structure': '{customer}/{job_folder}/job documents',  # New default structure
-        'legacy_mode': True  # Default to TRUE to show both search options
+        'legacy_mode': True,  # Default to TRUE to show both search options
+        'experimental_features': False,  # Enable experimental features like database integration
+        'db_type': 'mssql',  # Database type: mssql, mysql, postgresql
+        'db_host': 'localhost',
+        'db_port': 1433,
+        'db_name': '',
+        'db_username': '',
+        'db_password': ''  # Note: Store securely in production
     }
     
     def __init__(self):
         super().__init__()
         self.setWindowTitle("JobDocs")
-        self.setMinimumSize(1000, 750)
+        self.setMinimumSize(900, 700)
         
         # Config
         self.config_dir = get_config_dir()
@@ -523,15 +655,23 @@ class JobDocs(QMainWindow):
             json.dump(self.history, f, indent=2)
     
     def setup_ui(self):
+        # Create scroll area for main content
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.setCentralWidget(scroll_area)
+
+        # Container widget for scrollable content
         central = QWidget()
-        self.setCentralWidget(central)
+        scroll_area.setWidget(central)
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(10, 10, 10, 10)
-        
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
         # Tab widget
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
-        
+
         # Create tabs
         self.tabs.addTab(self.create_job_tab(), "Create Job")
         self.tabs.addTab(self.create_add_to_job_tab(), "Add to Job")
@@ -539,6 +679,10 @@ class JobDocs(QMainWindow):
         self.tabs.addTab(self.create_search_tab(), "Search")
         self.tabs.addTab(self.create_import_tab(), "Import Blueprints")
         self.tabs.addTab(self.create_history_tab(), "History")
+
+        # Add experimental reporting tab if enabled
+        if self.settings.get('experimental_features', False):
+            self.tabs.addTab(self.create_reporting_tab(), "Reports (Beta)")
     
     def setup_menu(self):
         menubar = self.menuBar()
@@ -572,35 +716,39 @@ class JobDocs(QMainWindow):
     def create_job_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
         # Job info group
         info_group = QGroupBox("Job Information")
         info_layout = QGridLayout(info_group)
+        info_layout.setSpacing(3)
+        info_layout.setContentsMargins(5, 5, 5, 5)
         
         # Customer
-        info_layout.addWidget(QLabel("Customer Name:"), 0, 0)
+        info_layout.addWidget(QLabel("Customer:"), 0, 0)
         self.customer_combo = QComboBox()
         self.customer_combo.setEditable(True)
-        self.customer_combo.setMinimumWidth(300)
+        self.customer_combo.setMinimumWidth(250)
         info_layout.addWidget(self.customer_combo, 0, 1)
         
         # Job number
-        info_layout.addWidget(QLabel("Job Number(s):"), 1, 0)
+        info_layout.addWidget(QLabel("Job #:"), 1, 0)
         self.job_number_edit = QLineEdit()
-        self.job_number_edit.setPlaceholderText("e.g., 12345 or 12345, 12346 or 12345-12350")
+        self.job_number_edit.setPlaceholderText("e.g., 12345 or 12345-12350")
         info_layout.addWidget(self.job_number_edit, 1, 1)
         self.job_status_label = QLabel("")
         info_layout.addWidget(self.job_status_label, 1, 2)
-        
+
         # Description
         info_layout.addWidget(QLabel("Description:"), 2, 0)
         self.description_edit = QLineEdit()
         info_layout.addWidget(self.description_edit, 2, 1)
-        
+
         # Drawings
-        info_layout.addWidget(QLabel("Drawing Numbers:"), 3, 0)
+        info_layout.addWidget(QLabel("Drawings:"), 3, 0)
         self.drawings_edit = QLineEdit()
-        self.drawings_edit.setPlaceholderText("comma-separated, optional")
+        self.drawings_edit.setPlaceholderText("comma-separated")
         info_layout.addWidget(self.drawings_edit, 3, 1)
         
         # ITAR
@@ -612,15 +760,18 @@ class JobDocs(QMainWindow):
         # Files group
         files_group = QGroupBox("Job Files (Optional)")
         files_layout = QVBoxLayout(files_group)
-        
-        files_layout.addWidget(QLabel("Blueprint files → blueprints folder, others → job folder"))
-        
-        self.job_drop_zone = DropZone("Drop job files here")
+        files_layout.setSpacing(3)
+        files_layout.setContentsMargins(5, 5, 5, 5)
+
+        files_layout.addWidget(QLabel("Blueprints → blueprints folder, others → job folder"))
+
+        self.job_drop_zone = DropZone("Drop files")
         self.job_drop_zone.files_dropped.connect(self.handle_job_files)
+        self.job_drop_zone.setMinimumHeight(60)
         files_layout.addWidget(self.job_drop_zone)
-        
+
         self.job_files_list = QListWidget()
-        self.job_files_list.setMaximumHeight(100)
+        self.job_files_list.setMaximumHeight(70)
         files_layout.addWidget(self.job_files_list)
         
         files_btn_layout = QHBoxLayout()
@@ -659,9 +810,10 @@ class JobDocs(QMainWindow):
         # Log
         log_group = QGroupBox("Activity Log")
         log_layout = QVBoxLayout(log_group)
+        log_layout.setContentsMargins(5, 5, 5, 5)
         self.log_text = QPlainTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setMaximumHeight(150)
+        self.log_text.setMaximumHeight(100)
         log_layout.addWidget(self.log_text)
         layout.addWidget(log_group)
         
@@ -670,19 +822,24 @@ class JobDocs(QMainWindow):
     def create_add_to_job_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
-        layout.addWidget(QLabel("Add documents to an existing job folder and/or blueprints"))
-        
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
+        layout.addWidget(QLabel("Add documents to existing job"))
+
         # Splitter for left/right panels
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        
+
         # Left - Job browser
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 5, 0)
-        
-        browser_group = QGroupBox("Select Existing Job")
+        left_layout.setContentsMargins(0, 0, 3, 0)
+        left_layout.setSpacing(3)
+
+        browser_group = QGroupBox("Select Job")
         browser_layout = QVBoxLayout(browser_group)
+        browser_layout.setSpacing(3)
+        browser_layout.setContentsMargins(5, 5, 5, 5)
         
         # Filters
         filter_layout = QHBoxLayout()
@@ -747,20 +904,25 @@ class JobDocs(QMainWindow):
         # Right - Add files
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(5, 0, 0, 0)
-        
+        right_layout.setContentsMargins(3, 0, 0, 0)
+        right_layout.setSpacing(3)
+
         add_group = QGroupBox("Add Files")
         add_layout = QVBoxLayout(add_group)
+        add_layout.setSpacing(3)
+        add_layout.setContentsMargins(5, 5, 5, 5)
         
         # Destination options
         dest_group = QGroupBox("Destination")
         dest_layout = QVBoxLayout(dest_group)
+        dest_layout.setSpacing(2)
+        dest_layout.setContentsMargins(5, 5, 5, 5)
 
         self.dest_button_group = QButtonGroup(self)
-        self.dest_both_radio = QRadioButton("Blueprints + Job (linked)")
+        self.dest_both_radio = QRadioButton("Blueprints + Job")
         self.dest_both_radio.setChecked(True)
         self.dest_blueprints_radio = QRadioButton("Blueprints only")
-        self.dest_job_radio = QRadioButton("Job folder only (copy)")
+        self.dest_job_radio = QRadioButton("Job only")
 
         self.dest_button_group.addButton(self.dest_both_radio)
         self.dest_button_group.addButton(self.dest_blueprints_radio)
@@ -772,13 +934,14 @@ class JobDocs(QMainWindow):
         add_layout.addWidget(dest_group)
         
         # Drop zone
-        self.add_drop_zone = DropZone("Drop files to add")
+        self.add_drop_zone = DropZone("Drop files")
         self.add_drop_zone.files_dropped.connect(self.handle_add_files)
+        self.add_drop_zone.setMinimumHeight(60)
         add_layout.addWidget(self.add_drop_zone)
-        
+
         # File list
         self.add_files_list = QListWidget()
-        self.add_files_list.setMaximumHeight(120)
+        self.add_files_list.setMaximumHeight(90)
         add_layout.addWidget(self.add_files_list)
         
         # Buttons
@@ -794,8 +957,8 @@ class JobDocs(QMainWindow):
         add_layout.addLayout(add_btn_layout)
         
         # Add button
-        add_files_btn = QPushButton("Add Files to Selected Job")
-        add_files_btn.setStyleSheet("font-weight: bold; padding: 8px;")
+        add_files_btn = QPushButton("Add Files to Job")
+        add_files_btn.setStyleSheet("font-weight: bold; padding: 6px;")
         add_files_btn.clicked.connect(self.add_files_to_job)
         add_layout.addWidget(add_files_btn)
         
@@ -816,13 +979,17 @@ class JobDocs(QMainWindow):
     def create_bulk_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
         # Instructions
         inst_group = QGroupBox("Bulk Job Creation")
         inst_layout = QVBoxLayout(inst_group)
-        inst_layout.addWidget(QLabel("Create multiple jobs at once. Format: customer, job_number, description, drawing1, drawing2, ..."))
+        inst_layout.setSpacing(2)
+        inst_layout.setContentsMargins(5, 5, 5, 5)
+        inst_layout.addWidget(QLabel("Format: customer, job#, description, drawings..."))
         inst_layout.addWidget(QLabel("Example: Acme Corp, 12345, Widget Assembly, DWG-001"))
-        
+
         self.bulk_itar_check = QCheckBox("All jobs are ITAR")
         inst_layout.addWidget(self.bulk_itar_check)
         layout.addWidget(inst_group)
@@ -830,47 +997,51 @@ class JobDocs(QMainWindow):
         # Text input
         text_group = QGroupBox("Job Data (CSV Format)")
         text_layout = QVBoxLayout(text_group)
-        
+        text_layout.setSpacing(3)
+        text_layout.setContentsMargins(5, 5, 5, 5)
+
         toolbar = QHBoxLayout()
         import_btn = QPushButton("Import CSV")
         import_btn.clicked.connect(self.import_bulk_csv)
         toolbar.addWidget(import_btn)
-        
+
         clear_bulk_btn = QPushButton("Clear")
         clear_bulk_btn.clicked.connect(lambda: self.bulk_text.clear())
         toolbar.addWidget(clear_bulk_btn)
-        
+
         validate_btn = QPushButton("Validate")
         validate_btn.clicked.connect(self.validate_bulk_data)
         toolbar.addWidget(validate_btn)
         toolbar.addStretch()
         text_layout.addLayout(toolbar)
-        
+
         self.bulk_text = QPlainTextEdit()
         self.bulk_text.setPlaceholderText(
-            "# Enter jobs in CSV format (lines starting with # are ignored)\n"
+            "# CSV format (# = comments)\n"
             "Acme Corp, 12345, Widget Assembly, DWG-001\n"
             "Beta Inc, 54321, Custom Part"
         )
+        self.bulk_text.setMaximumHeight(150)
         text_layout.addWidget(self.bulk_text)
         layout.addWidget(text_group)
-        
+
         # Preview table
         preview_group = QGroupBox("Preview / Validation")
         preview_layout = QVBoxLayout(preview_group)
-        
+        preview_layout.setContentsMargins(5, 5, 5, 5)
+
         self.bulk_table = QTableWidget()
         self.bulk_table.setColumnCount(5)
-        self.bulk_table.setHorizontalHeaderLabels(["Status", "Customer", "Job Number", "Description", "Drawings"])
+        self.bulk_table.setHorizontalHeaderLabels(["Status", "Customer", "Job #", "Description", "Drawings"])
         self.bulk_table.horizontalHeader().setStretchLastSection(True)
-        self.bulk_table.setMaximumHeight(200)
+        self.bulk_table.setMaximumHeight(150)
         preview_layout.addWidget(self.bulk_table)
         layout.addWidget(preview_group)
         
         # Buttons
         btn_layout = QHBoxLayout()
         create_bulk_btn = QPushButton("Create All Jobs")
-        create_bulk_btn.setStyleSheet("font-weight: bold; padding: 8px 16px;")
+        create_bulk_btn.setStyleSheet("font-weight: bold; padding: 6px;")
         create_bulk_btn.clicked.connect(self.create_bulk_jobs)
         btn_layout.addWidget(create_bulk_btn)
         
@@ -889,10 +1060,14 @@ class JobDocs(QMainWindow):
     def create_search_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
         # Search controls
         search_group = QGroupBox("Search Criteria")
         search_layout = QVBoxLayout(search_group)
+        search_layout.setSpacing(3)
+        search_layout.setContentsMargins(5, 5, 5, 5)
         
         top_row = QHBoxLayout()
         top_row.addWidget(QLabel("Search:"))
@@ -972,10 +1147,11 @@ class JobDocs(QMainWindow):
         # Results
         results_group = QGroupBox("Search Results")
         results_layout = QVBoxLayout(results_group)
-        
+        results_layout.setContentsMargins(5, 5, 5, 5)
+
         self.search_table = QTableWidget()
         self.search_table.setColumnCount(5)
-        self.search_table.setHorizontalHeaderLabels(["Date", "Customer", "Job Number", "Description", "Drawings"])
+        self.search_table.setHorizontalHeaderLabels(["Date", "Customer", "Job #", "Description", "Drawings"])
         self.search_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.search_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.search_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -997,30 +1173,36 @@ class JobDocs(QMainWindow):
     def create_import_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
         layout.addWidget(QLabel("Import files to blueprints folder"))
-        
+
         # Customer selection
-        select_group = QGroupBox("Customer Selection")
+        select_group = QGroupBox("Customer")
         select_layout = QHBoxLayout(select_group)
+        select_layout.setContentsMargins(5, 5, 5, 5)
         select_layout.addWidget(QLabel("Customer:"))
         self.import_customer_combo = QComboBox()
         self.import_customer_combo.setEditable(True)
-        self.import_customer_combo.setMinimumWidth(250)
+        self.import_customer_combo.setMinimumWidth(200)
         select_layout.addWidget(self.import_customer_combo)
         select_layout.addStretch()
         layout.addWidget(select_group)
-        
+
         # Drop zone
         files_group = QGroupBox("Files to Import")
         files_layout = QVBoxLayout(files_group)
-        
-        self.import_drop_zone = DropZone("Drop files to import")
+        files_layout.setSpacing(3)
+        files_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.import_drop_zone = DropZone("Drop files")
         self.import_drop_zone.files_dropped.connect(self.handle_import_files)
+        self.import_drop_zone.setMinimumHeight(60)
         files_layout.addWidget(self.import_drop_zone)
-        
+
         self.import_files_list = QListWidget()
-        self.import_files_list.setMaximumHeight(150)
+        self.import_files_list.setMaximumHeight(120)
         files_layout.addWidget(self.import_files_list)
         
         btn_layout = QHBoxLayout()
@@ -1039,8 +1221,10 @@ class JobDocs(QMainWindow):
         # Results
         results_group = QGroupBox("Results")
         results_layout = QVBoxLayout(results_group)
+        results_layout.setContentsMargins(5, 5, 5, 5)
         self.import_log = QPlainTextEdit()
         self.import_log.setReadOnly(True)
+        self.import_log.setMaximumHeight(120)
         results_layout.addWidget(self.import_log)
         layout.addWidget(results_group)
         
@@ -1049,14 +1233,17 @@ class JobDocs(QMainWindow):
     def create_history_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
         # History table
         history_group = QGroupBox("Recent Jobs")
         history_layout = QVBoxLayout(history_group)
-        
+        history_layout.setContentsMargins(5, 5, 5, 5)
+
         self.history_table = QTableWidget()
         self.history_table.setColumnCount(5)
-        self.history_table.setHorizontalHeaderLabels(["Date", "Customer", "Job Number", "Description", "Drawings"])
+        self.history_table.setHorizontalHeaderLabels(["Date", "Customer", "Job #", "Description", "Drawings"])
         self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.history_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         history_layout.addWidget(self.history_table)
@@ -1075,9 +1262,130 @@ class JobDocs(QMainWindow):
         layout.addWidget(history_group)
         
         self.refresh_history()
-        
+
         return widget
-    
+
+    def create_reporting_tab(self) -> QWidget:
+        """Create experimental reporting tab for database integration"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
+        # Info banner
+        info_group = QGroupBox("Experimental Feature")
+        info_layout = QVBoxLayout(info_group)
+        info_layout.setContentsMargins(5, 5, 5, 5)
+        info_label = QLabel(
+            "This is an experimental feature for database integration with JobBOSS and other ERP systems.\n"
+            "Configure database connection in Settings > Advanced Settings > Experimental."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #666; padding: 5px;")
+        info_layout.addWidget(info_label)
+        layout.addWidget(info_group)
+
+        # Database connection status
+        status_group = QGroupBox("Database Connection")
+        status_layout = QVBoxLayout(status_group)
+        status_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.db_status_label = QLabel("Status: Not connected")
+        self.db_status_label.setStyleSheet("color: #999;")
+        status_layout.addWidget(self.db_status_label)
+
+        db_btn_layout = QHBoxLayout()
+        self.connect_db_btn = QPushButton("Connect to Database")
+        self.connect_db_btn.clicked.connect(self.connect_to_database)
+        db_btn_layout.addWidget(self.connect_db_btn)
+
+        self.disconnect_db_btn = QPushButton("Disconnect")
+        self.disconnect_db_btn.clicked.connect(self.disconnect_from_database)
+        self.disconnect_db_btn.setEnabled(False)
+        db_btn_layout.addWidget(self.disconnect_db_btn)
+
+        db_btn_layout.addStretch()
+        status_layout.addLayout(db_btn_layout)
+        layout.addWidget(status_group)
+
+        # Report selection
+        report_group = QGroupBox("Generate Reports")
+        report_layout = QVBoxLayout(report_group)
+        report_layout.setContentsMargins(5, 5, 5, 5)
+        report_layout.setSpacing(5)
+
+        # Report type selection
+        type_layout = QHBoxLayout()
+        type_layout.addWidget(QLabel("Report Type:"))
+        self.report_type_combo = QComboBox()
+        self.report_type_combo.addItems([
+            "Job Statistics",
+            "Jobs by Customer",
+            "Jobs by Date Range",
+            "Recent Jobs",
+            "Top Customers"
+        ])
+        type_layout.addWidget(self.report_type_combo)
+        type_layout.addStretch()
+        report_layout.addLayout(type_layout)
+
+        # Filter options
+        filter_layout = QGridLayout()
+
+        filter_layout.addWidget(QLabel("Customer:"), 0, 0)
+        self.report_customer_combo = QComboBox()
+        self.report_customer_combo.setEditable(True)
+        self.report_customer_combo.addItem("All Customers")
+        filter_layout.addWidget(self.report_customer_combo, 0, 1)
+
+        filter_layout.addWidget(QLabel("Start Date:"), 1, 0)
+        self.report_start_date = QLineEdit()
+        self.report_start_date.setPlaceholderText("YYYY-MM-DD")
+        filter_layout.addWidget(self.report_start_date, 1, 1)
+
+        filter_layout.addWidget(QLabel("End Date:"), 1, 2)
+        self.report_end_date = QLineEdit()
+        self.report_end_date.setPlaceholderText("YYYY-MM-DD")
+        filter_layout.addWidget(self.report_end_date, 1, 3)
+
+        report_layout.addLayout(filter_layout)
+
+        # Generate button
+        gen_btn_layout = QHBoxLayout()
+        self.generate_report_btn = QPushButton("Generate Report")
+        self.generate_report_btn.clicked.connect(self.generate_report)
+        self.generate_report_btn.setStyleSheet("font-weight: bold; padding: 6px;")
+        gen_btn_layout.addWidget(self.generate_report_btn)
+
+        self.export_report_btn = QPushButton("Export to CSV")
+        self.export_report_btn.clicked.connect(self.export_report)
+        gen_btn_layout.addWidget(self.export_report_btn)
+
+        gen_btn_layout.addStretch()
+        report_layout.addLayout(gen_btn_layout)
+
+        layout.addWidget(report_group)
+
+        # Results
+        results_group = QGroupBox("Report Results")
+        results_layout = QVBoxLayout(results_group)
+        results_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.report_table = QTableWidget()
+        self.report_table.setColumnCount(5)
+        self.report_table.setHorizontalHeaderLabels(["Date", "Customer", "Job #", "Description", "Status"])
+        self.report_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.report_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        results_layout.addWidget(self.report_table)
+
+        self.report_status_label = QLabel("No data loaded. Connect to database and generate a report.")
+        self.report_status_label.setStyleSheet("color: #666;")
+        results_layout.addWidget(self.report_status_label)
+
+        layout.addWidget(results_group)
+
+        return widget
+
     # ==================== Helper Methods ====================
 
     def build_job_path(self, base_dir: str, customer: str, job_folder_name: str) -> Path:
@@ -2248,6 +2556,111 @@ Acme Corp, 12346, Gadget Housing, DWG-002</p>
 """
         dialog = ScrollableMessageDialog(self, "Getting Started", content, width=650, height=600)
         dialog.exec()
+
+    # ==================== Experimental: Database/Reporting Methods ====================
+
+    def connect_to_database(self):
+        """Connect to database using settings (placeholder)"""
+        db_type = self.settings.get('db_type', 'mssql')
+        host = self.settings.get('db_host', 'localhost')
+        port = self.settings.get('db_port', 1433)
+        database = self.settings.get('db_name', '')
+
+        if not database:
+            QMessageBox.warning(
+                self,
+                "Database Not Configured",
+                "Please configure database settings in Settings > Advanced > Experimental."
+            )
+            return
+
+        # Placeholder - actual implementation would use db_integration.py
+        self.db_status_label.setText(f"Status: Connected to {database} (placeholder)")
+        self.db_status_label.setStyleSheet("color: green;")
+        self.connect_db_btn.setEnabled(False)
+        self.disconnect_db_btn.setEnabled(True)
+
+        QMessageBox.information(
+            self,
+            "Database Connection",
+            f"Placeholder: Would connect to {db_type} database:\n\n"
+            f"Host: {host}:{port}\n"
+            f"Database: {database}\n\n"
+            f"To implement, see db_integration.py"
+        )
+
+    def disconnect_from_database(self):
+        """Disconnect from database (placeholder)"""
+        self.db_status_label.setText("Status: Not connected")
+        self.db_status_label.setStyleSheet("color: #999;")
+        self.connect_db_btn.setEnabled(True)
+        self.disconnect_db_btn.setEnabled(False)
+
+    def generate_report(self):
+        """Generate report from database (placeholder)"""
+        report_type = self.report_type_combo.currentText()
+
+        # Clear existing data
+        self.report_table.setRowCount(0)
+
+        # Placeholder data
+        sample_data = [
+            ["2025-01-15", "Acme Corporation", "12345", "Widget Assembly", "Active"],
+            ["2025-01-14", "Beta Industries", "54321", "Custom Bracket", "Completed"],
+            ["2025-01-13", "Acme Corporation", "12346", "Housing Unit", "Active"],
+            ["2025-01-12", "Gamma Systems", "99999", "Shaft Assembly", "Active"],
+        ]
+
+        # Populate table with sample data
+        for row_data in sample_data:
+            row = self.report_table.rowCount()
+            self.report_table.insertRow(row)
+            for col, value in enumerate(row_data):
+                item = QTableWidgetItem(value)
+                self.report_table.setItem(row, col, item)
+
+        self.report_status_label.setText(
+            f"Showing {len(sample_data)} sample records for '{report_type}' (placeholder)\n"
+            "To implement: Connect to database and query actual data using db_integration.py"
+        )
+
+    def export_report(self):
+        """Export report to CSV (placeholder)"""
+        if self.report_table.rowCount() == 0:
+            QMessageBox.warning(self, "No Data", "Generate a report first before exporting.")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Report",
+            f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "CSV Files (*.csv)"
+        )
+
+        if file_path:
+            try:
+                with open(file_path, 'w', newline='') as f:
+                    writer = csv.writer(f)
+
+                    # Write headers
+                    headers = []
+                    for col in range(self.report_table.columnCount()):
+                        headers.append(self.report_table.horizontalHeaderItem(col).text())
+                    writer.writerow(headers)
+
+                    # Write data
+                    for row in range(self.report_table.rowCount()):
+                        row_data = []
+                        for col in range(self.report_table.columnCount()):
+                            item = self.report_table.item(row, col)
+                            row_data.append(item.text() if item else "")
+                        writer.writerow(row_data)
+
+                QMessageBox.information(self, "Export Successful", f"Report exported to:\n{file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Failed", f"Failed to export report:\n{str(e)}")
+
+    # ==================== About/Help ====================
 
     def show_about(self):
         folder_term = get_os_text('folder_term')

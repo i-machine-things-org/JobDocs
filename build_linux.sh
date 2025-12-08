@@ -39,9 +39,9 @@ echo ""
 # Step 2: Install dependencies
 echo -e "${YELLOW}[2/4] Installing/upgrading build dependencies...${NC}"
 # PEP 668 workaround: Try --user first, fall back to --break-system-packages if needed
-if pip install --user --upgrade pyinstaller PyQt6 2>/dev/null; then
+if pip3 install --user --upgrade pyinstaller PyQt6 2>/dev/null; then
     echo -e "${GREEN}  ✓ Dependencies installed with --user${NC}"
-elif pip install --user --upgrade --break-system-packages pyinstaller PyQt6 2>/dev/null; then
+elif pip3 install --user --upgrade --break-system-packages pyinstaller PyQt6 2>/dev/null; then
     echo -e "${GREEN}  ✓ Dependencies installed with --break-system-packages (PEP 668 workaround)${NC}"
 else
     echo -e "${RED}ERROR: Failed to install dependencies${NC}"
@@ -69,6 +69,16 @@ if [ -f "icon.png" ]; then
     echo -e "${GREEN}  ✓ Using icon.png${NC}"
 fi
 
+# Find PyQt6.sip binary
+SIP_BINARY=$(python3 -c "import PyQt6.sip; print(PyQt6.sip.__file__)" 2>/dev/null)
+if [ -n "$SIP_BINARY" ] && [ -f "$SIP_BINARY" ]; then
+    SIP_ARG="--add-binary=$SIP_BINARY:PyQt6"
+    echo -e "${GREEN}  ✓ Found PyQt6.sip at $SIP_BINARY${NC}"
+else
+    SIP_ARG=""
+    echo -e "${YELLOW}  ! PyQt6.sip binary not found${NC}"
+fi
+
 python3 -m PyInstaller \
     --name=JobDocs \
     --onefile \
@@ -77,10 +87,13 @@ python3 -m PyInstaller \
     --clean \
     --add-data="README.md:." \
     --add-data="LICENSE:." \
-    --hidden-import=PyQt6 \
-    --hidden-import=PyQt6.QtCore \
-    --hidden-import=PyQt6.QtGui \
-    --hidden-import=PyQt6.QtWidgets \
+    --copy-metadata=PyQt6 \
+    --copy-metadata=PyQt6_sip \
+    --collect-all=PyQt6 \
+    --collect-binaries=PyQt6 \
+    --hidden-import=PyQt6.sip \
+    --hidden-import=db_integration \
+    $SIP_ARG \
     $ICON_ARG \
     JobDocs-qt.py
 

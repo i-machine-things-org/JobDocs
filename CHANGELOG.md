@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Experimental**: Database integration framework for JobBOSS/ERP systems
+  - Database connection settings in Advanced Settings
+  - Placeholder code for database connectivity
+  - Reporting tab with sample data and CSV export
+  - Database integration module (`db_integration.py`)
+  - Comprehensive documentation (DATABASE_INTEGRATION.md)
+  - Implementation TODO tracker (TODO_DATABASE_INTEGRATION.md)
+- Compact UI mode - reduced window size from 1000x750 to 900x700
+- Tighter spacing and margins throughout UI
+- Smaller component heights for better screen fit
 - Windows installer build system
 - Automatic icon generation
 - Enhanced build scripts with progress indicators
@@ -17,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Improved .gitignore to exclude build artifacts
+- Reduced minimum window size for better compatibility with smaller screens
+- Compacted DropZone widgets (80px → 60px minimum height)
+- Shortened labels and placeholders throughout UI
 
 ## [1.0.0] - 2025-12-06
 

@@ -63,6 +63,16 @@ if exist "icon.ico" (
     echo   + Using icon.ico
 )
 
+REM Find PyQt6.sip binary
+set SIP_ARG=
+for /f "delims=" %%i in ('py -c "import PyQt6.sip; print(PyQt6.sip.__file__)" 2^>nul') do set SIP_BINARY=%%i
+if defined SIP_BINARY (
+    if exist "%SIP_BINARY%" (
+        set SIP_ARG=--add-binary="%SIP_BINARY%;PyQt6"
+        echo   + Found PyQt6.sip at %SIP_BINARY%
+    )
+)
+
 py -m PyInstaller ^
     --name=JobDocs ^
     --onefile ^
@@ -73,10 +83,13 @@ py -m PyInstaller ^
     --workpath=build ^
     --add-data="README.md;." ^
     --add-data="LICENSE;." ^
-    --hidden-import=PyQt6 ^
-    --hidden-import=PyQt6.QtCore ^
-    --hidden-import=PyQt6.QtGui ^
-    --hidden-import=PyQt6.QtWidgets ^
+    --copy-metadata=PyQt6 ^
+    --copy-metadata=PyQt6_sip ^
+    --collect-all=PyQt6 ^
+    --collect-binaries=PyQt6 ^
+    --hidden-import=PyQt6.sip ^
+    --hidden-import=db_integration ^
+    %SIP_ARG% ^
     %ICON_ARG% ^
     JobDocs-qt.py
 

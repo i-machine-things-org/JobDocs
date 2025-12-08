@@ -12,6 +12,7 @@ A tool for managing blueprint files and customer job directories with support fo
 - **Import Tools** - Direct import of files to blueprint folders
 - **History Tracking** - Keep track of recent jobs and customer information
 - **Cross-Platform** - Works on Windows, macOS, and Linux
+- **Database Integration (Experimental)** - Connect to JobBOSS or other ERP systems for automated job creation and reporting (see [DATABASE_INTEGRATION.md](DATABASE_INTEGRATION.md))
 
 ## Installation
 
@@ -160,9 +161,14 @@ https://github.com/i-machine-things/JobDocs
 
 ### Project Structure
 - `JobDocs-qt.py` - Main application file
+- `db_integration.py` - Database integration module (experimental)
 - `LICENSE` - MIT License
 - `requirements.txt` - Python dependencies
 - `README.md` - This file
+- `DATABASE_INTEGRATION.md` - Database integration guide (experimental)
+- `TODO_DATABASE_INTEGRATION.md` - Database implementation tasks
+- `BUILD.md` - Build instructions for packaging
+- `CHANGELOG.md` - Version history
 
 ### Contributing
 

@@ -84,25 +84,35 @@ On first launch, macOS may show a security warning. To allow:
 
 ## Windows Build
 
-See [windows_installer/README.md](windows_installer/README.md) for detailed Windows instructions.
-
 ### Quick Build
 
-```powershell
-cd windows_installer
-.\build_installer.ps1
+```cmd
+build_windows.bat
 ```
 
-Or:
+This creates a standalone executable at `dist\JobDocs.exe`
+
+### Manual Build
 
 ```cmd
-cd windows_installer
-build_installer.bat
+REM Install dependencies
+py -m pip install --upgrade pyinstaller PyQt6 pillow
+
+REM Build
+py -m PyInstaller --onefile --windowed --noconsole JobDocs-qt.py
+
+REM Run
+dist\JobDocs.exe
 ```
 
-This creates:
-- Standalone executable: `dist\JobDocs.exe`
-- Windows installer: `installer_output\JobDocs-1.0.0-Setup.exe`
+**Note**: `pillow` is used for icon generation if you're creating icons from PNG files.
+
+### Using PowerShell
+
+You can also run the batch file from PowerShell:
+```powershell
+cmd /c build_windows.bat
+```
 
 ---
 
@@ -121,6 +131,8 @@ All builds include:
 - README and LICENSE files
 
 No additional dependencies required on target systems!
+
+**Note**: The experimental database integration feature (see [DATABASE_INTEGRATION.md](DATABASE_INTEGRATION.md)) requires additional database drivers to be installed separately. The built executable will work without these drivers - the database features simply won't be available until drivers are installed.
 
 ---
 
