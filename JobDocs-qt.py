@@ -964,8 +964,9 @@ class JobDocs(QMainWindow):
         
         self.add_status_label = QLabel("")
         add_layout.addWidget(self.add_status_label)
-        
+
         right_layout.addWidget(add_group)
+        right_layout.addStretch()
         splitter.addWidget(right_widget)
         
         splitter.setSizes([450, 450])
@@ -1133,6 +1134,19 @@ class JobDocs(QMainWindow):
 
         search_layout.addWidget(self.mode_row_widget)
 
+        # Legacy search options (shown only in "Search All Folders" mode)
+        self.legacy_options_widget = QWidget()
+        legacy_options_row = QHBoxLayout(self.legacy_options_widget)
+        legacy_options_row.setContentsMargins(0, 0, 0, 0)
+
+        legacy_options_row.addWidget(QLabel("Also search:"))
+        self.search_blueprints_check = QCheckBox("Blueprints directories")
+        self.search_blueprints_check.setChecked(False)
+        legacy_options_row.addWidget(self.search_blueprints_check)
+        legacy_options_row.addStretch()
+
+        search_layout.addWidget(self.legacy_options_widget)
+
         # Connect mode change to update checkbox states
         self.search_all_radio.toggled.connect(self.update_search_field_checkboxes)
         self.search_strict_radio.toggled.connect(self.update_search_field_checkboxes)
@@ -1180,14 +1194,21 @@ class JobDocs(QMainWindow):
 
         # Customer selection
         select_group = QGroupBox("Customer")
-        select_layout = QHBoxLayout(select_group)
+        select_layout = QVBoxLayout(select_group)
         select_layout.setContentsMargins(5, 5, 5, 5)
-        select_layout.addWidget(QLabel("Customer:"))
+
+        customer_row = QHBoxLayout()
+        customer_row.addWidget(QLabel("Customer:"))
         self.import_customer_combo = QComboBox()
         self.import_customer_combo.setEditable(True)
         self.import_customer_combo.setMinimumWidth(200)
-        select_layout.addWidget(self.import_customer_combo)
-        select_layout.addStretch()
+        customer_row.addWidget(self.import_customer_combo)
+        customer_row.addStretch()
+        select_layout.addLayout(customer_row)
+
+        self.import_itar_check = QCheckBox("ITAR (uses ITAR blueprints directory)")
+        select_layout.addWidget(self.import_itar_check)
+
         layout.addWidget(select_group)
 
         # Drop zone
@@ -1806,7 +1827,7 @@ class JobDocs(QMainWindow):
 
         selected_customer = self.add_customer_combo.currentText()
         show_all_customers = selected_customer == "(All Customers)" or not selected_customer
-
+        
         # Get directories based on filter selection
         dirs_to_search = []
 
@@ -2119,23 +2140,61 @@ class JobDocs(QMainWindow):
         self.bulk_status_label.setText(f"Valid: {valid} | Invalid: {invalid}")
         return invalid == 0
     
+    def job_exists(self, customer: str, job_number: str, is_itar: bool) -> bool:
+        """Check if a job already exists in the system"""
+        # Check if duplicates are allowed
+        if self.settings.get('allow_duplicate_jobs', False):
+            return False
+
+        bp_dir, cf_dir = self.get_directories(is_itar)
+        if not cf_dir:
+            return False
+
+        # Check customer directory for any job folder starting with this job number
+        customer_path = Path(cf_dir) / customer
+        if not customer_path.exists():
+            return False
+
+        # Find all job folders
+        jobs = self.find_job_folders(str(customer_path))
+        for job_name, _ in jobs:
+            # Check if job folder name starts with the job number
+            if job_name.startswith(f"{job_number}_") or job_name == job_number:
+                return True
+
+        return False
+
     def create_bulk_jobs(self):
         if not self.validate_bulk_data():
             if QMessageBox.question(self, "Warning", "Some jobs have errors. Create only valid jobs?") != QMessageBox.StandardButton.Yes:
                 return
-        
+
         jobs = [j for j in self.parse_bulk_data() if j['valid']]
         if not jobs:
             QMessageBox.warning(self, "No Jobs", "No valid jobs to create")
             return
-        
+
         is_itar = self.bulk_itar_check.isChecked()
         bp_dir, cf_dir = self.get_directories(is_itar)
-        
+
         if not bp_dir or not cf_dir:
             QMessageBox.warning(self, "Error", "Directories not configured")
             return
-        
+
+        # Check for duplicates
+        duplicates = []
+        for job in jobs:
+            if self.job_exists(job['customer'], job['job_number'], is_itar):
+                duplicates.append(f"{job['customer']} - Job #{job['job_number']}")
+
+        if duplicates:
+            dup_list = "\n".join(duplicates[:10])
+            if len(duplicates) > 10:
+                dup_list += f"\n... and {len(duplicates) - 10} more"
+            msg = f"The following jobs already exist:\n\n{dup_list}\n\nSkip duplicates and create remaining jobs?"
+            if QMessageBox.question(self, "Duplicate Jobs Found", msg) != QMessageBox.StandardButton.Yes:
+                return
+
         self.bulk_progress.setMaximum(len(jobs))
         self.bulk_progress.setValue(0)
         self.bulk_progress.show()
@@ -2148,17 +2207,26 @@ class JobDocs(QMainWindow):
         new_customers = set()
 
         created = 0
+        skipped = 0
         for i, job in enumerate(jobs):
             customer = job['customer']
             if customer not in existing_customers and customer not in new_customers:
                 new_customers.add(customer)
-            if self.create_single_job(customer, job['job_number'], job['description'], job['drawings'], is_itar, []):
+
+            # Skip if job already exists
+            if self.job_exists(customer, job['job_number'], is_itar):
+                skipped += 1
+            elif self.create_single_job(customer, job['job_number'], job['description'], job['drawings'], is_itar, []):
                 created += 1
+
             self.bulk_progress.setValue(i + 1)
             QApplication.processEvents()
 
         self.bulk_progress.hide()
-        QMessageBox.information(self, "Complete", f"Created {created}/{len(jobs)} jobs")
+        msg = f"Created {created}/{len(jobs)} jobs"
+        if skipped > 0:
+            msg += f" (Skipped {skipped} duplicates)"
+        QMessageBox.information(self, "Complete", msg)
         self.refresh_history()
 
         # Only refresh customer lists if new customers were created
@@ -2178,6 +2246,9 @@ class JobDocs(QMainWindow):
         self.search_desc_check.setEnabled(is_strict_mode)
         self.search_drawing_check.setEnabled(is_strict_mode)
 
+        # Show/hide legacy search options
+        self.legacy_options_widget.setVisible(not is_strict_mode)
+
     def update_legacy_mode_ui(self):
         """Show/hide UI elements based on legacy mode setting"""
         is_legacy = self.settings.get('legacy_mode', True)
@@ -2194,19 +2265,24 @@ class JobDocs(QMainWindow):
         # Update checkbox states
         self.update_search_field_checkboxes()
 
+
     def perform_search(self):
         search_term = self.search_edit.text().strip().lower()
         if not search_term:
             QMessageBox.warning(self, "Search", "Enter a search term")
             return
-        
+
         self.search_table.setRowCount(0)
         self.search_results.clear()
 
-        # Use helper method for directory building
-        dirs_to_search = self._get_customer_files_dirs()
+        strict_mode = self.search_strict_radio.isChecked()
 
-        if not dirs_to_search:
+        # Build list of directories to search
+        dirs_to_search = []
+
+        # Always search customer files directories
+        customer_dirs = self._get_customer_files_dirs()
+        if not customer_dirs:
             cf_dir = self.settings.get('customer_files_dir', '')
             itar_cf_dir = self.settings.get('itar_customer_files_dir', '')
             if not cf_dir and not itar_cf_dir:
@@ -2214,13 +2290,22 @@ class JobDocs(QMainWindow):
             else:
                 QMessageBox.warning(self, "Error", "Configured directories do not exist. Please check File → Settings.")
             return
-        
+
+        dirs_to_search.extend(customer_dirs)
+
+        # In legacy mode, optionally search blueprints directories
+        if not strict_mode and self.search_blueprints_check.isChecked():
+            bp_dir = self.settings.get('blueprints_dir', '')
+            if bp_dir and os.path.exists(bp_dir):
+                dirs_to_search.append(('BP', bp_dir))
+            itar_bp_dir = self.settings.get('itar_blueprints_dir', '')
+            if itar_bp_dir and os.path.exists(itar_bp_dir):
+                dirs_to_search.append(('ITAR-BP', itar_bp_dir))
+
         self.search_progress.setMaximum(0)
         self.search_progress.show()
         self.search_status_label.setText("Searching...")
         QApplication.processEvents()
-        
-        strict_mode = self.search_strict_radio.isChecked()
 
         # In "Search All Folders" mode, search everything regardless of checkboxes
         # In "Strict Format" mode, respect checkbox selections
@@ -2237,83 +2322,80 @@ class JobDocs(QMainWindow):
             search_drawing = True
 
         try:
-            for prefix, base_dir in dirs_to_search:
-                # Targeted traversal - only walk customer/job documents structure
-                try:
-                    customers = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
-                except OSError:
-                    continue
+            if strict_mode:
+                # Strict mode: use structured search
+                for prefix, base_dir in dirs_to_search:
+                    try:
+                        customers = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
+                    except OSError:
+                        continue
 
-                for customer in customers:
-                    customer_path = os.path.join(base_dir, customer)
-                    display_customer = f"[ITAR] {customer}" if prefix else customer
+                    for customer in customers:
+                        customer_path = os.path.join(base_dir, customer)
+                        display_customer = f"[ITAR] {customer}" if prefix else customer
 
-                    # Check if searching by customer name
-                    customer_match = search_customer and search_term in customer.lower()
+                        # Check if searching by customer name
+                        customer_match = search_customer and search_term in customer.lower()
 
-                    # Use helper method to find job folders
-                    jobs = self.find_job_folders(customer_path)
+                        # Use helper method to find job folders
+                        jobs = self.find_job_folders(customer_path)
 
-                    for dir_name, job_docs_path in jobs:
-                        # Apply strict mode filter
-                        if strict_mode and (not dir_name or not dir_name[0].isdigit()):
-                            continue
+                        for dir_name, job_docs_path in jobs:
+                            # Apply strict mode filter
+                            if not dir_name or not dir_name[0].isdigit():
+                                continue
 
-                        # Parse folder name into components FIRST
-                        # Expected format: job#_description_drawing1-drawing2-drawing3
-                        parts = dir_name.split('_')
-                        job_num = parts[0] if parts else ""
+                            # Parse folder name into components
+                            parts = dir_name.split('_')
+                            job_num = parts[0] if parts else ""
+                            remaining_parts = parts[1:] if len(parts) > 1 else []
 
-                        # Everything after job number
-                        remaining_parts = parts[1:] if len(parts) > 1 else []
+                            drawings = []
+                            desc_parts = []
 
-                        # Find drawings (last part with dashes) and description (everything before that)
-                        drawings = []
-                        desc_parts = []
+                            if remaining_parts:
+                                if '-' in remaining_parts[-1]:
+                                    drawings = [d.strip() for d in remaining_parts[-1].split('-') if d.strip()]
+                                    desc_parts = remaining_parts[:-1]
+                                else:
+                                    desc_parts = remaining_parts
 
-                        if remaining_parts:
-                            # Check if last part contains drawings (has dashes)
-                            if '-' in remaining_parts[-1]:
-                                # Last part is drawings
-                                drawings = [d.strip() for d in remaining_parts[-1].split('-') if d.strip()]
-                                # Everything before last part is description
-                                desc_parts = remaining_parts[:-1]
-                            else:
-                                # No drawings in last part, everything is description
-                                desc_parts = remaining_parts
+                            desc = ' '.join(desc_parts) if desc_parts else ""
 
-                        desc = ' '.join(desc_parts) if desc_parts else ""
+                            # Check for matches
+                            match = customer_match
 
-                        # Check for matches in SPECIFIC fields only
-                        match = customer_match
+                            if not match and search_job and search_term in job_num.lower():
+                                match = True
+                            if not match and search_desc and search_term in desc.lower():
+                                match = True
+                            if not match and search_drawing:
+                                for drawing in drawings:
+                                    if search_term in drawing.lower():
+                                        match = True
+                                        break
 
-                        if not match and search_job and search_term in job_num.lower():
-                            match = True
-                        if not match and search_desc and search_term in desc.lower():
-                            match = True
-                        if not match and search_drawing:
-                            for drawing in drawings:
-                                if search_term in drawing.lower():
-                                    match = True
-                                    break
+                            if match:
+                                try:
+                                    mod_time = datetime.fromtimestamp(Path(job_docs_path).stat().st_mtime)
+                                except (OSError, FileNotFoundError):
+                                    mod_time = datetime.now()
 
-                        if match:
-                            try:
-                                mod_time = datetime.fromtimestamp(Path(job_docs_path).stat().st_mtime)
-                            except (OSError, FileNotFoundError):
-                                mod_time = datetime.now()
+                                self.search_results.append({
+                                    'date': mod_time,
+                                    'customer': display_customer,
+                                    'job_number': job_num,
+                                    'description': desc,
+                                    'drawings': drawings,
+                                    'path': job_docs_path
+                                })
+            else:
+                # Legacy mode: full recursive search of all directories
+                for prefix, base_dir in dirs_to_search:
+                    self._legacy_recursive_search(base_dir, prefix, search_term)
 
-                            self.search_results.append({
-                                'date': mod_time,
-                                'customer': display_customer,
-                                'job_number': job_num,
-                                'description': desc,
-                                'drawings': drawings,
-                                'path': job_docs_path
-                            })
-            
             self.search_results.sort(key=lambda x: x['date'], reverse=True)
-            
+
             for result in self.search_results:
                 row = self.search_table.rowCount()
                 self.search_table.insertRow(row)
@@ -2322,13 +2404,78 @@ class JobDocs(QMainWindow):
                 self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
                 self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
                 self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
-            
+
             self.search_status_label.setText(f"Found {len(self.search_results)} result(s)")
-            
+
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Search error: {e}")
-        
+
         self.search_progress.hide()
+
+    def _legacy_recursive_search(self, base_dir: str, prefix: str, search_term: str):
+        """Recursively search all folders in legacy mode"""
+        try:
+            for root, dirs, files in os.walk(base_dir):
+                # Get folder name
+                folder_name = os.path.basename(root)
+
+                # Try to extract customer from path
+                rel_path = os.path.relpath(root, base_dir)
+                path_parts = rel_path.split(os.sep)
+                customer = path_parts[0] if path_parts and path_parts[0] != '.' else "Unknown"
+
+                # Check if folder name or any part of path contains search term
+                if search_term in folder_name.lower() or search_term in rel_path.lower():
+                    # Try to parse folder name for job info
+                    parts = folder_name.split('_')
+                    job_num = ""
+                    desc = ""
+                    drawings = []
+
+                    # Try to extract job number (look for digits)
+                    for part in parts:
+                        if part and part[0].isdigit():
+                            job_num = part
+                            break
+
+                    # If no structured format, use folder name as description
+                    if not job_num:
+                        # Check if folder name starts with digits
+                        import re
+                        match = re.match(r'^(\d+)', folder_name)
+                        if match:
+                            job_num = match.group(1)
+                            desc = folder_name[len(job_num):].strip(' -_')
+                        else:
+                            desc = folder_name
+                    else:
+                        # Parse remaining parts
+                        remaining_parts = [p for p in parts if p != job_num]
+                        if remaining_parts:
+                            if '-' in remaining_parts[-1]:
+                                drawings = [d.strip() for d in remaining_parts[-1].split('-') if d.strip()]
+                                desc = ' '.join(remaining_parts[:-1])
+                            else:
+                                desc = ' '.join(remaining_parts)
+
+                    display_customer = f"[{prefix}] {customer}" if prefix else customer
+
+                    try:
+                        mod_time = datetime.fromtimestamp(Path(root).stat().st_mtime)
+                    except (OSError, FileNotFoundError):
+                        mod_time = datetime.now()
+
+                    self.search_results.append({
+                        'date': mod_time,
+                        'customer': display_customer,
+                        'job_number': job_num if job_num else "(no job #)",
+                        'description': desc,
+                        'drawings': drawings,
+                        'path': root
+                    })
+        except Exception as e:
+            # Skip directories that cause errors
+            pass
     
     def clear_search(self):
         self.search_edit.clear()
@@ -2401,16 +2548,20 @@ class JobDocs(QMainWindow):
         if not customer:
             QMessageBox.warning(self, "Error", "Please enter a customer name")
             return
-        
+
         if not self.import_files:
             QMessageBox.warning(self, "Error", "Please add files")
             return
-        
-        bp_dir = self.settings.get('blueprints_dir', '')
+
+        # Check if ITAR is selected
+        is_itar = self.import_itar_check.isChecked()
+        bp_dir = self.settings.get('itar_blueprints_dir' if is_itar else 'blueprints_dir', '')
+
         if not bp_dir:
-            QMessageBox.warning(self, "Error", "Blueprints directory not configured")
+            dir_type = "ITAR blueprints" if is_itar else "Blueprints"
+            QMessageBox.warning(self, "Error", f"{dir_type} directory not configured")
             return
-        
+
         customer_bp = Path(bp_dir) / customer
         customer_bp.mkdir(parents=True, exist_ok=True)
         

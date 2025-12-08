@@ -24,12 +24,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Version information in executable
 - Settings dialog with UI style selector
 - Sample file generator for testing
+- **Legacy Search Mode**: Full recursive search through all customer directories
+  - Handles inconsistent folder structures from legacy files
+  - Optional blueprints directory search
+  - Smart folder name parsing for job numbers and descriptions
+- **Import Blueprints ITAR Support**: Import tab now has ITAR checkbox to import to ITAR blueprints directory
+- **Duplicate Job Protection**: Bulk job creation now detects and skips duplicate jobs
+  - Shows warning dialog listing duplicates before creation
+  - Respects allow_duplicate_jobs setting
 
 ### Changed
 - Improved .gitignore to exclude build artifacts
 - Reduced minimum window size for better compatibility with smaller screens
 - Compacted DropZone widgets (80px → 60px minimum height)
 - Shortened labels and placeholders throughout UI
+
+### Fixed
+- Dead space in Add to Job tab - added proper vertical stretch
+- Search functionality now properly differentiates between legacy and strict modes
+- Legacy search options now show/hide based on selected mode
 
 ## [1.0.0] - 2025-12-06
 

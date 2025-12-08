@@ -8,6 +8,17 @@ echo          JobDocs Windows Executable Build Script
 echo ============================================================
 echo.
 
+REM Prompt for custom output directory
+set /p CUSTOM_DIST="Enter output directory (press Enter for default 'dist'): "
+if "%CUSTOM_DIST%"=="" (
+    set DIST_DIR=dist
+    echo Using default output directory: dist
+) else (
+    set DIST_DIR=%CUSTOM_DIST%
+    echo Using custom output directory: %DIST_DIR%
+)
+echo.
+
 REM Check if we're in the right directory
 if not exist "JobDocs-qt.py" (
     color 0C
@@ -22,7 +33,7 @@ if not exist "JobDocs-qt.py" (
 
 REM Step 1: Check if Python is installed
 echo [1/4] Checking Python installation...
-py --version >nul 2>&1
+python --version >nul 2>&1
 if errorlevel 1 (
     color 0C
     echo ERROR: Python is not installed or not in PATH
@@ -30,12 +41,12 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-py --version
+python --version
 echo.
 
 REM Step 2: Install/upgrade required packages
 echo [2/4] Installing/upgrading build dependencies...
-py -m pip install --upgrade pyinstaller PyQt6 pillow
+python -m pip install --upgrade pyinstaller PyQt6 pillow
 if errorlevel 1 (
     color 0C
     echo ERROR: Failed to install dependencies
@@ -46,9 +57,18 @@ echo.
 
 REM Step 3: Clean previous builds
 echo [3/4] Cleaning previous builds...
-if exist build rmdir /s /q build
-if exist dist rmdir /s /q dist
-echo   + Cleaned build directories
+if exist build rmdir /s /q build 2>nul
+if exist "%DIST_DIR%\JobDocs.exe" (
+    echo   + Attempting to remove old executable...
+    del /F /Q "%DIST_DIR%\JobDocs.exe" 2>nul
+    if exist "%DIST_DIR%\JobDocs.exe" (
+        echo   WARNING: Could not delete old executable - will attempt to overwrite
+        echo   TIP: Try a different output directory or add to Windows Defender exclusions
+    ) else (
+        echo   + Removed old executable
+    )
+)
+if not exist "%DIST_DIR%" mkdir "%DIST_DIR%"
 echo.
 
 REM Step 4: Build the executable
@@ -65,7 +85,7 @@ if exist "icon.ico" (
 
 REM Find PyQt6.sip binary
 set SIP_ARG=
-for /f "delims=" %%i in ('py -c "import PyQt6.sip; print(PyQt6.sip.__file__)" 2^>nul') do set SIP_BINARY=%%i
+for /f "delims=" %%i in ('python -c "import PyQt6.sip; print(PyQt6.sip.__file__)" 2^>nul') do set SIP_BINARY=%%i
 if defined SIP_BINARY (
     if exist "%SIP_BINARY%" (
         set SIP_ARG=--add-binary="%SIP_BINARY%;PyQt6"
@@ -73,13 +93,13 @@ if defined SIP_BINARY (
     )
 )
 
-py -m PyInstaller ^
+python -m PyInstaller ^
     --name=JobDocs ^
     --onefile ^
     --windowed ^
     --noconsole ^
-    --clean ^
-    --distpath=dist ^
+    --noconfirm ^
+    --distpath=%DIST_DIR% ^
     --workpath=build ^
     --add-data="README.md;." ^
     --add-data="LICENSE;." ^
@@ -105,14 +125,14 @@ color 0A
 echo ============================================================
 echo                     BUILD COMPLETE!
 echo ============================================================
-echo Executable: dist\JobDocs.exe
+echo Executable: %DIST_DIR%\JobDocs.exe
 
-if exist dist\JobDocs.exe (
-    for %%A in (dist\JobDocs.exe) do echo Size: %%~zA bytes
+if exist "%DIST_DIR%\JobDocs.exe" (
+    for %%A in ("%DIST_DIR%\JobDocs.exe") do echo Size: %%~zA bytes
 )
 
 echo.
-echo To run: dist\JobDocs.exe
+echo To run: %DIST_DIR%\JobDocs.exe
 echo ============================================================
 color 0F
 pause

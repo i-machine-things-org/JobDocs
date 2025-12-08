@@ -77,6 +77,8 @@ python JobDocs-qt.py
    ```
 3. Click **Validate** to check for errors
 4. Click **Create All Jobs**
+   - Automatically detects and skips duplicate jobs
+   - Shows warning if duplicates are found
 
 Or import from CSV file using the **Import CSV** button.
 
@@ -88,14 +90,26 @@ Use the **Add to Job** tab to:
 - Filter by customer or ITAR status
 - Choose destination (blueprints only, job folder only, or both)
 
+### Importing Blueprints
+
+Use the **Import Blueprints** tab to:
+- Import blueprint files directly to the blueprints directory
+- Select customer name
+- Choose ITAR or standard blueprints directory
+- Automatically creates customer folders
+
 ### Searching
 
 The **Search** tab provides powerful search capabilities:
 - Search by customer name, job number, description, or drawing
-- Filter by search criteria checkboxes
-- Choose between:
-  - **All Folders**: Comprehensive search (slower)
-  - **Strict Mode**: Only numbered job folders (faster)
+- Two search modes:
+  - **Search All Folders** (Legacy mode): Full recursive search through all folders in customer directories
+    - Handles inconsistent folder structures from legacy files
+    - Optional: Also search blueprints directories
+    - Slower but comprehensive
+  - **Strict Format** (Faster): Only searches properly formatted job folders (job#_description_drawings)
+    - Filter by specific fields (customer, job #, description, drawings)
+    - Much faster for well-organized structures
 - Double-click results to open job folders
 
 ## File Structure

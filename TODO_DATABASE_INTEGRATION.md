@@ -11,9 +11,9 @@ This document tracks the tasks needed to implement full database integration wit
 
 ### Required Dependencies
 - [ ] Install database driver
-  - [ ] For SQL Server/JobBOSS: `pip install pyodbc`
-  - [ ] For MySQL: `pip install pymysql`
-  - [ ] For PostgreSQL: `pip install psycopg2-binary`
+  - [x] For SQL Server/JobBOSS: `pip install pyodbc`
+  - [x] For MySQL: `pip install pymysql`
+  - [x] For PostgreSQL: `pip install psycopg2-binary`
 - [ ] Add driver requirements to `requirements.txt`
 - [ ] Document ODBC driver installation (Windows)
 
