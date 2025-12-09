@@ -342,6 +342,26 @@ class SettingsDialog(QDialog):
         self.allow_duplicates_check.setChecked(self.settings.get('allow_duplicate_jobs', False))
         options_layout.addWidget(self.allow_duplicates_check)
 
+        # Default tab setting
+        default_tab_layout = QHBoxLayout()
+        default_tab_layout.addWidget(QLabel("Default opening tab:"))
+        self.default_tab_combo = QComboBox()
+        self.default_tab_combo.addItems([
+            "Create Quote",
+            "Create Job",
+            "Add to Job",
+            "Bulk Create",
+            "Search",
+            "Import Blueprints",
+            "History"
+        ])
+        current_default = self.settings.get('default_tab', 0)
+        if 0 <= current_default < self.default_tab_combo.count():
+            self.default_tab_combo.setCurrentIndex(current_default)
+        default_tab_layout.addWidget(self.default_tab_combo)
+        default_tab_layout.addStretch()
+        options_layout.addLayout(default_tab_layout)
+
         scroll_layout.addWidget(options_group)
 
         # Appearance
@@ -563,6 +583,7 @@ class SettingsDialog(QDialog):
         self.settings['legacy_mode'] = self.legacy_mode_check.isChecked()
         self.settings['allow_duplicate_jobs'] = self.allow_duplicates_check.isChecked()
         self.settings['ui_style'] = self.style_combo.currentText()
+        self.settings['default_tab'] = self.default_tab_combo.currentIndex()
 
         # Experimental settings
         self.settings['experimental_features'] = self.experimental_check.isChecked()
@@ -590,6 +611,7 @@ class JobDocs(QMainWindow):
         'ui_style': 'Fusion',
         'job_folder_structure': '{customer}/{job_folder}/job documents',  # New default structure
         'legacy_mode': True,  # Default to TRUE to show both search options
+        'default_tab': 0,  # Default opening tab (0=Create Quote, 1=Create Job, etc.)
         'experimental_features': False,  # Enable experimental features like database integration
         'db_type': 'mssql',  # Database type: mssql, mysql, postgresql
         'db_host': 'localhost',
@@ -617,6 +639,7 @@ class JobDocs(QMainWindow):
         self.add_files: List[str] = []
         self.import_files: List[str] = []
         self.search_results: List[Dict[str, Any]] = []
+        self.quotes: List[Dict[str, Any]] = []  # Store quotes
         
         self.setup_ui()
         self.setup_menu()
@@ -673,6 +696,7 @@ class JobDocs(QMainWindow):
         layout.addWidget(self.tabs)
 
         # Create tabs
+        self.tabs.addTab(self.create_quote_tab(), "Create Quote")
         self.tabs.addTab(self.create_job_tab(), "Create Job")
         self.tabs.addTab(self.create_add_to_job_tab(), "Add to Job")
         self.tabs.addTab(self.create_bulk_tab(), "Bulk Create")
@@ -683,6 +707,11 @@ class JobDocs(QMainWindow):
         # Add experimental reporting tab if enabled
         if self.settings.get('experimental_features', False):
             self.tabs.addTab(self.create_reporting_tab(), "Reports (Beta)")
+
+        # Set default tab
+        default_tab = self.settings.get('default_tab', 0)
+        if 0 <= default_tab < self.tabs.count():
+            self.tabs.setCurrentIndex(default_tab)
     
     def setup_menu(self):
         menubar = self.menuBar()
@@ -712,7 +741,172 @@ class JobDocs(QMainWindow):
         getting_started_action = QAction("Getting started", self)
         getting_started_action.triggered.connect(self.show_getting_started)
         help_menu.addAction(getting_started_action)
-    
+
+    # ==================== Create Quote Tab ====================
+
+    def create_quote_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
+        # Quote info group
+        info_group = QGroupBox("Quote Information")
+        info_layout = QGridLayout(info_group)
+        info_layout.setSpacing(3)
+        info_layout.setContentsMargins(5, 5, 5, 5)
+
+        info_layout.addWidget(QLabel("Customer:"), 0, 0)
+        self.quote_customer_combo = QComboBox()
+        self.quote_customer_combo.setEditable(True)
+        self.quote_customer_combo.setPlaceholderText("Customer name")
+        self.quote_customer_combo.setMinimumWidth(200)
+        info_layout.addWidget(self.quote_customer_combo, 0, 1)
+
+        info_layout.addWidget(QLabel("Quote #:"), 1, 0)
+        self.quote_number_edit = QLineEdit()
+        self.quote_number_edit.setPlaceholderText("Quote number")
+        info_layout.addWidget(self.quote_number_edit, 1, 1)
+
+        info_layout.addWidget(QLabel("Description:"), 2, 0)
+        self.quote_description_edit = QLineEdit()
+        self.quote_description_edit.setPlaceholderText("Quote description")
+        info_layout.addWidget(self.quote_description_edit, 2, 1)
+
+        info_layout.addWidget(QLabel("Drawings:"), 3, 0)
+        self.quote_drawings_edit = QLineEdit()
+        self.quote_drawings_edit.setPlaceholderText("Drawing numbers (comma-separated)")
+        info_layout.addWidget(self.quote_drawings_edit, 3, 1)
+
+        info_layout.addWidget(QLabel("Notes:"), 4, 0)
+        self.quote_notes_edit = QTextEdit()
+        self.quote_notes_edit.setPlaceholderText("Quote notes, pricing, delivery dates, etc.")
+        self.quote_notes_edit.setMaximumHeight(80)
+        info_layout.addWidget(self.quote_notes_edit, 4, 1)
+
+        layout.addWidget(info_group)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+
+        save_quote_btn = QPushButton("Save Quote")
+        save_quote_btn.setStyleSheet("font-weight: bold; padding: 6px;")
+        save_quote_btn.clicked.connect(self.save_quote)
+        button_layout.addWidget(save_quote_btn)
+
+        clear_quote_btn = QPushButton("Clear")
+        clear_quote_btn.clicked.connect(self.clear_quote_form)
+        button_layout.addWidget(clear_quote_btn)
+
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+
+        # Saved quotes list
+        quotes_group = QGroupBox("Saved Quotes")
+        quotes_layout = QVBoxLayout(quotes_group)
+        quotes_layout.setSpacing(3)
+        quotes_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.quotes_table = QTableWidget()
+        self.quotes_table.setColumnCount(5)
+        self.quotes_table.setHorizontalHeaderLabels(["Customer", "Quote #", "Description", "Drawings", "Notes"])
+        self.quotes_table.horizontalHeader().setStretchLastSection(True)
+        self.quotes_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.quotes_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.quotes_table.customContextMenuRequested.connect(self.show_quote_context_menu)
+        quotes_layout.addWidget(self.quotes_table)
+
+        layout.addWidget(quotes_group, 1)
+
+        self.quote_status_label = QLabel("")
+        layout.addWidget(self.quote_status_label)
+
+        return widget
+
+    def save_quote(self):
+        customer = self.quote_customer_combo.currentText().strip()
+        quote_number = self.quote_number_edit.text().strip()
+        description = self.quote_description_edit.text().strip()
+        drawings_text = self.quote_drawings_edit.text().strip()
+        notes = self.quote_notes_edit.toPlainText().strip()
+
+        if not customer or not quote_number:
+            QMessageBox.warning(self, "Error", "Customer and Quote # are required")
+            return
+
+        drawings = [d.strip() for d in drawings_text.split(',') if d.strip()]
+
+        quote = {
+            'customer': customer,
+            'quote_number': quote_number,
+            'description': description,
+            'drawings': drawings,
+            'notes': notes,
+            'date': datetime.now().isoformat()
+        }
+
+        self.quotes.append(quote)
+        self.refresh_quotes_table()
+        self.clear_quote_form()
+        self.quote_status_label.setText(f"Quote {quote_number} saved successfully")
+        QTimer.singleShot(3000, lambda: self.quote_status_label.setText(""))
+
+    def clear_quote_form(self):
+        self.quote_customer_combo.setCurrentText("")
+        self.quote_number_edit.clear()
+        self.quote_description_edit.clear()
+        self.quote_drawings_edit.clear()
+        self.quote_notes_edit.clear()
+
+    def refresh_quotes_table(self):
+        self.quotes_table.setRowCount(0)
+        for quote in reversed(self.quotes):  # Show newest first
+            row = self.quotes_table.rowCount()
+            self.quotes_table.insertRow(row)
+            self.quotes_table.setItem(row, 0, QTableWidgetItem(quote['customer']))
+            self.quotes_table.setItem(row, 1, QTableWidgetItem(quote['quote_number']))
+            self.quotes_table.setItem(row, 2, QTableWidgetItem(quote['description']))
+            self.quotes_table.setItem(row, 3, QTableWidgetItem(', '.join(quote['drawings'])))
+            self.quotes_table.setItem(row, 4, QTableWidgetItem(quote['notes'][:50] + '...' if len(quote['notes']) > 50 else quote['notes']))
+
+    def show_quote_context_menu(self, pos):
+        row = self.quotes_table.currentRow()
+        if row < 0:
+            return
+
+        menu = QMenu(self)
+
+        convert_action = menu.addAction("Convert to Job")
+        delete_action = menu.addAction("Delete Quote")
+
+        action = menu.exec(self.quotes_table.viewport().mapToGlobal(pos))
+
+        if action == convert_action:
+            self.convert_quote_to_job(row)
+        elif action == delete_action:
+            self.delete_quote(row)
+
+    def convert_quote_to_job(self, row):
+        # Get the quote (reversed list, so adjust index)
+        quote = self.quotes[len(self.quotes) - 1 - row]
+
+        # Switch to Create Job tab and populate fields
+        self.tabs.setCurrentIndex(1)  # Create Job is now tab 1
+        self.customer_combo.setCurrentText(quote['customer'])
+        self.job_number_edit.setText(quote['quote_number'])
+        self.description_edit.setText(quote['description'])
+        self.drawings_edit.setText(', '.join(quote['drawings']))
+
+        QMessageBox.information(self, "Quote Loaded", f"Quote {quote['quote_number']} loaded into Create Job tab")
+
+    def delete_quote(self, row):
+        if QMessageBox.question(self, "Delete Quote", "Delete this quote?") == QMessageBox.StandardButton.Yes:
+            # Remove from list (reversed display)
+            del self.quotes[len(self.quotes) - 1 - row]
+            self.refresh_quotes_table()
+
+    # ==================== Create Job Tab ====================
+
     def create_job_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -1503,6 +1697,9 @@ class JobDocs(QMainWindow):
             customers.add(customer)
 
         sorted_customers = sorted(customers)
+
+        self.quote_customer_combo.clear()
+        self.quote_customer_combo.addItems(sorted_customers)
 
         self.customer_combo.clear()
         self.customer_combo.addItems(sorted_customers)
