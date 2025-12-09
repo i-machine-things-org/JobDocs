@@ -823,7 +823,7 @@ class JobDocs(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        layout.setSpacing(3)
 
         layout.addWidget(QLabel("Add documents to existing job"))
 
@@ -897,8 +897,8 @@ class JobDocs(QMainWindow):
         self.selected_job_label = QLabel("No job selected")
         self.selected_job_label.setStyleSheet("color: gray;")
         browser_layout.addWidget(self.selected_job_label)
-        
-        left_layout.addWidget(browser_group)
+
+        left_layout.addWidget(browser_group, 1)
         splitter.addWidget(left_widget)
         
         # Right - Add files
@@ -965,12 +965,11 @@ class JobDocs(QMainWindow):
         self.add_status_label = QLabel("")
         add_layout.addWidget(self.add_status_label)
 
-        right_layout.addWidget(add_group)
-        right_layout.addStretch()
+        right_layout.addWidget(add_group, 1)
         splitter.addWidget(right_widget)
-        
+
         splitter.setSizes([450, 450])
-        layout.addWidget(splitter)
+        layout.addWidget(splitter, 1)
         
         # Initialize
         QTimer.singleShot(100, self.populate_add_customer_list)
