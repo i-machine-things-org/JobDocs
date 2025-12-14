@@ -57,6 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Main Application**: Now uses modular system (main.py instead of JobDocs-qt.py)
+- **BUILD.md**: Completely rewritten for modular architecture
+  - Updated all build commands to use main.py
+  - Added PyInstaller spec file example
+  - Included module data packaging instructions
+  - Removed references to deleted build scripts
 - **UI Organization**: Removed inline search from Quote/Job tabs in favor of popup dialog
 - **Module Loading**: All customer lists now populated centrally after module load
 - **Architecture**: 2897-line monolith → ~300 lines per module
