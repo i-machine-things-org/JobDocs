@@ -18,8 +18,9 @@ IMPORTANT: This is experimental placeholder code. Before using in production:
 4. Review security considerations in DATABASE_INTEGRATION.md
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 from datetime import datetime
+import threading
 
 
 class DatabaseConnection:
@@ -34,8 +35,14 @@ class DatabaseConnection:
         self.port = port
         self.database = database
         self.username = username
-        self.password = password
+        self._password = password  # Private attribute to avoid accidental exposure
         self.connection = None
+
+    def __repr__(self):
+        """String representation that redacts the password"""
+        return (f"{self.__class__.__name__}(db_type={self.db_type!r}, "
+                f"host={self.host!r}, port={self.port}, database={self.database!r}, "
+                f"username={self.username!r}, password='***')")
 
     def connect(self) -> bool:
         """
@@ -52,7 +59,7 @@ class DatabaseConnection:
                 f"SERVER={self.host},{self.port};"
                 f"DATABASE={self.database};"
                 f"UID={self.username};"
-                f"PWD={self.password}"
+                f"PWD={self._password}"
             )
             self.connection = pyodbc.connect(conn_str)
         """
@@ -168,42 +175,70 @@ class JobWatcher:
     def __init__(self, db_connection: DatabaseConnection):
         self.db = db_connection
         self.last_check = datetime.now()
-        self.running = False
+        self._running = False
+        self._lock = threading.Lock()  # Thread safety for concurrent access
+        self._thread = None
 
-    def start_watching(self, interval_seconds: int = 60, callback=None):
+    def start_watching(self, interval_seconds: int = 60,
+                       callback: Optional[Callable[[Dict[str, Any]], None]] = None):
         """
         Start watching for new jobs
 
         Args:
             interval_seconds: How often to check for new jobs
-            callback: Function to call when new job is detected
+            callback: Function to call when new job is detected.
                       Should accept job dict as parameter
 
-        TODO: Implement polling loop or event subscription
-        Example:
-            import threading
+        Raises:
+            RuntimeError: If watcher is already running
+
+        TODO: Implement actual polling loop
+        Example implementation:
             import time
 
+            with self._lock:
+                if self._running:
+                    raise RuntimeError("Watcher is already running")
+                self._running = True
+
             def poll():
-                while self.running:
-                    new_jobs = self.db.get_new_jobs(self.last_check)
-                    for job in new_jobs:
-                        if callback:
-                            callback(job)
-                    self.last_check = datetime.now()
+                while True:
+                    with self._lock:
+                        if not self._running:
+                            break
+                    try:
+                        new_jobs = self.db.get_new_jobs(self.last_check)
+                        for job in new_jobs:
+                            if callback:
+                                callback(job)
+                        self.last_check = datetime.now()
+                    except Exception as e:
+                        print(f"Error in job watcher: {e}")
+                        # Optionally: log error, notify user, or implement retry logic
                     time.sleep(interval_seconds)
 
-            self.running = True
-            thread = threading.Thread(target=poll, daemon=True)
-            thread.start()
+            self._thread = threading.Thread(target=poll, daemon=True)
+            self._thread.start()
         """
         print(f"[PLACEHOLDER] Starting job watcher (interval: {interval_seconds}s)")
-        self.running = True
+        with self._lock:
+            if self._running:
+                raise RuntimeError("Watcher is already running")
+            self._running = True
 
     def stop_watching(self):
-        """Stop watching for new jobs"""
+        """
+        Stop watching for new jobs
+
+        Thread-safe method to stop the watcher and optionally wait for thread cleanup
+        """
         print("[PLACEHOLDER] Stopping job watcher")
-        self.running = False
+        with self._lock:
+            self._running = False
+
+        # Optional: Wait for thread to finish (would be needed in real implementation)
+        # if self._thread and self._thread.is_alive():
+        #     self._thread.join(timeout=5.0)
 
 
 class ReportGenerator:
@@ -266,17 +301,25 @@ class ReportGenerator:
 
 # Example usage:
 if __name__ == "__main__":
+    import os
+
     # Example configuration for JobBOSS
     print("JobDocs Database Integration - Example Usage\n")
 
-    # Create connection
+    # Create connection using environment variables for secure credential handling
+    # Set JOBBOSS_USER and JOBBOSS_PASSWORD environment variables
     jobboss = JobBOSSIntegration(
-        host="localhost",
-        port=1433,
-        database="JobBOSS",
-        username="user",
-        password="password"
+        host=os.environ.get("JOBBOSS_HOST", "localhost"),
+        port=int(os.environ.get("JOBBOSS_PORT", "1433")),
+        database=os.environ.get("JOBBOSS_DB", "JobBOSS"),
+        username=os.environ.get("JOBBOSS_USER", "user"),
+        password=os.environ.get("JOBBOSS_PASSWORD", "password")
     )
+
+    print("Note: For secure credential handling, set these environment variables:")
+    print("      JOBBOSS_HOST, JOBBOSS_PORT, JOBBOSS_DB")
+    print("      JOBBOSS_USER, JOBBOSS_PASSWORD")
+    print("      Using defaults for this example.\n")
 
     # Test connection
     success, message = jobboss.test_connection()

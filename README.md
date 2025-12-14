@@ -256,3 +256,7 @@ Contributions are welcome! Feel free to submit issues or pull requests.
 ---
 
 **Note**: ITAR (International Traffic in Arms Regulations) compliance is the user's responsibility. This tool only provides organizational separation of ITAR and non-ITAR files.
+
+## Acknowledgments
+
+This project was developed with assistance from Claude (Anthropic), an AI assistant that helped with code architecture, documentation, testing, and packaging solutions.

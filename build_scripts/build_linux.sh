@@ -23,12 +23,12 @@ echo "      Python $PYTHON_VERSION found"
 echo "[2/5] Checking dependencies..."
 if ! python3 -c "import PyQt6" 2>/dev/null; then
     echo "      PyQt6 not found. Installing..."
-    if python3 -m pip install --user PyQt6 2>/dev/null; then
+    if python3 -m pip install --user "PyQt6>=6.5.0" 2>/dev/null; then
         echo "      PyQt6 installed successfully"
     else
         echo "      ERROR: Failed to install PyQt6"
         echo "      Please install manually: sudo apt install python3-pyqt6 python3-pip"
-        echo "      Or: python3 -m pip install --user PyQt6"
+        echo "      Or: python3 -m pip install --user 'PyQt6>=6.5.0'"
         exit 1
     fi
 else
@@ -38,12 +38,12 @@ fi
 # Check for PyInstaller
 if ! python3 -c "import PyInstaller" 2>/dev/null && ! command -v pyinstaller &> /dev/null; then
     echo "      PyInstaller not found. Installing..."
-    if python3 -m pip install --user pyinstaller 2>/dev/null; then
+    if python3 -m pip install --user "pyinstaller>=6.0.0" 2>/dev/null; then
         echo "      PyInstaller installed successfully"
     else
         echo "      ERROR: Failed to install PyInstaller"
         echo "      Please install manually:"
-        echo "        Option 1: sudo apt install python3-pip && python3 -m pip install --user pyinstaller"
+        echo "        Option 1: sudo apt install python3-pip && python3 -m pip install --user 'pyinstaller>=6.0.0'"
         echo "        Option 2: sudo apt install pyinstaller"
         exit 1
     fi
