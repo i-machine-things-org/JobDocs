@@ -32,9 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Getting Started Guide**: Comprehensive getting started documentation
 - **Build Scripts**: New build scripts for Linux and Windows
   - `build_linux.sh` - Automated Linux build with dependency checking
+    - Creates both `jobdocs` and `JobDocs` (symlink) executables
   - `build_windows.bat` - Automated Windows build with dependency checking
+    - Creates distribution folder with README and shortcut helper
+    - Includes both `jobdocs.exe` and `JobDocs.exe`
   - Both scripts use PyInstaller with modular architecture support
   - Auto-install missing dependencies
+  - Includes PyQt6.uic hidden import to fix module loading errors
 - **Experimental**: Database integration framework for JobBOSS/ERP systems
   - Database connection settings in Advanced Settings
   - Placeholder code for database connectivity

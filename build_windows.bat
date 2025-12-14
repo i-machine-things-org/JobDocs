@@ -53,13 +53,14 @@ py -m PyInstaller ^
     --onefile ^
     --windowed ^
     --noconsole ^
-    --name JobDocs ^
+    --name jobdocs ^
     --add-data "core;core" ^
     --add-data "shared;shared" ^
     --add-data "modules;modules" ^
     --hidden-import PyQt6.QtCore ^
     --hidden-import PyQt6.QtGui ^
     --hidden-import PyQt6.QtWidgets ^
+    --hidden-import PyQt6.uic ^
     main.py
 
 if errorlevel 1 (
@@ -71,18 +72,86 @@ if errorlevel 1 (
 echo       Build successful!
 echo.
 
+REM Create distribution directory
+echo [5/5] Creating distribution package...
+if exist JobDocs-Windows rmdir /s /q JobDocs-Windows
+mkdir JobDocs-Windows
+
+REM Copy executables
+copy dist\jobdocs.exe JobDocs-Windows\ >nul
+copy dist\jobdocs.exe JobDocs-Windows\JobDocs.exe >nul
+
+REM Create README
+echo Creating README...
+(
+echo JobDocs - Windows Distribution
+echo ==============================
+echo.
+echo Installation:
+echo   1. Copy this folder to your desired location ^(e.g., C:\Program Files\JobDocs^)
+echo   2. Right-click on jobdocs.exe and select "Send to" ^> "Desktop ^(create shortcut^)"
+echo   3. ^(Optional^) Pin the shortcut to Start Menu or Taskbar
+echo.
+echo Running JobDocs:
+echo   - Double-click jobdocs.exe
+echo   - Or use the desktop shortcut
+echo.
+echo Both jobdocs.exe and JobDocs.exe are identical - use either one.
+echo.
+echo First-time setup:
+echo   On first launch, JobDocs will ask you to configure:
+echo   - ITAR directory ^(for controlled files^)
+echo   - Non-ITAR directory ^(for regular files^)
+echo   - Blueprints directory
+echo.
+echo For help and documentation, see:
+echo   https://github.com/YOUR-USERNAME/JobDocs
+echo.
+echo Version: 2.0
+echo Build date: %date%
+) > JobDocs-Windows\README.txt
+
+REM Create shortcut script
+echo Creating shortcut helper...
+(
+echo @echo off
+echo echo Creating JobDocs desktop shortcut...
+echo.
+echo set SCRIPT="%TEMP%\create_jobdocs_shortcut.vbs"
+echo.
+echo echo Set oWS = WScript.CreateObject^("WScript.Shell"^) ^> %%SCRIPT%%
+echo echo sLinkFile = oWS.SpecialFolders^("Desktop"^) ^& "\JobDocs.lnk" ^>^> %%SCRIPT%%
+echo echo Set oLink = oWS.CreateShortcut^(sLinkFile^) ^>^> %%SCRIPT%%
+echo echo oLink.TargetPath = "%%~dp0jobdocs.exe" ^>^> %%SCRIPT%%
+echo echo oLink.WorkingDirectory = "%%~dp0" ^>^> %%SCRIPT%%
+echo echo oLink.Description = "JobDocs - Job and Quote Management" ^>^> %%SCRIPT%%
+echo echo oLink.Save ^>^> %%SCRIPT%%
+echo.
+echo cscript /nologo %%SCRIPT%%
+echo del %%SCRIPT%%
+echo.
+echo echo Desktop shortcut created successfully!
+echo pause
+) > JobDocs-Windows\Create-Desktop-Shortcut.bat
+
 REM Show build info
-echo [5/5] Build complete!
 echo.
 echo ======================================
-echo Output: dist\JobDocs.exe
-for %%I in (dist\JobDocs.exe) do echo Size: %%~zI bytes
+echo Build Complete!
 echo ======================================
 echo.
-echo To run:
-echo   dist\JobDocs.exe
+echo Distribution package: JobDocs-Windows\
 echo.
-echo To create a shortcut:
-echo   Right-click dist\JobDocs.exe ^> Send to ^> Desktop
+echo Contents:
+echo   - jobdocs.exe / JobDocs.exe
+echo   - README.txt
+echo   - Create-Desktop-Shortcut.bat
+echo.
+for %%I in (JobDocs-Windows\jobdocs.exe) do echo Size: %%~zI bytes
+echo.
+echo Next steps:
+echo   1. Copy the JobDocs-Windows folder to your desired location
+echo   2. Run Create-Desktop-Shortcut.bat to create a desktop shortcut
+echo   3. Or manually create shortcuts to Start Menu/Taskbar
 echo.
 pause

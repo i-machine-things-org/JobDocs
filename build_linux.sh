@@ -61,13 +61,14 @@ echo "[4/5] Building executable..."
 python3 -m PyInstaller \
     --onefile \
     --windowed \
-    --name JobDocs \
+    --name jobdocs \
     --add-data "core:core" \
     --add-data "shared:shared" \
     --add-data "modules:modules" \
     --hidden-import PyQt6.QtCore \
     --hidden-import PyQt6.QtGui \
     --hidden-import PyQt6.QtWidgets \
+    --hidden-import PyQt6.uic \
     main.py
 
 if [ $? -eq 0 ]; then
@@ -77,21 +78,29 @@ else
     exit 1
 fi
 
+# Create symlink for capitalized version
+echo "Creating JobDocs symlink..."
+cd dist
+ln -sf jobdocs JobDocs
+cd ..
+
 # Show build info
 echo "[5/5] Build complete!"
 echo ""
 echo "======================================"
-echo "Output: dist/JobDocs"
-echo "Size: $(du -h dist/JobDocs | cut -f1)"
+echo "Output: dist/jobdocs (with JobDocs symlink)"
+echo "Size: $(du -h dist/jobdocs | cut -f1)"
 echo "======================================"
 echo ""
 echo "To install system-wide:"
-echo "  sudo cp dist/JobDocs /usr/local/bin/"
+echo "  sudo cp dist/jobdocs /usr/local/bin/"
+echo "  sudo ln -sf /usr/local/bin/jobdocs /usr/local/bin/JobDocs"
 echo ""
 echo "To install for current user:"
 echo "  mkdir -p ~/.local/bin"
-echo "  cp dist/JobDocs ~/.local/bin/"
+echo "  cp dist/jobdocs ~/.local/bin/"
+echo "  ln -sf ~/.local/bin/jobdocs ~/.local/bin/JobDocs"
 echo ""
 echo "To run:"
-echo "  ./dist/JobDocs"
+echo "  ./dist/jobdocs  (or ./dist/JobDocs)"
 echo ""

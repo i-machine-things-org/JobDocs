@@ -41,7 +41,10 @@ The script will:
 - Build the executable
 - Show installation instructions
 
-Output: `dist\JobDocs.exe`
+Output: `JobDocs-Windows/` distribution folder containing:
+- `jobdocs.exe` / `JobDocs.exe` (both executables)
+- `README.txt` (installation instructions)
+- `Create-Desktop-Shortcut.bat` (automated shortcut creator)
 
 ## Manual Build (All Platforms)
 
@@ -59,6 +62,7 @@ python3 -m PyInstaller --onefile --windowed \
   --hidden-import PyQt6.QtCore \
   --hidden-import PyQt6.QtGui \
   --hidden-import PyQt6.QtWidgets \
+  --hidden-import PyQt6.uic \
   main.py
 
 # Run
@@ -81,6 +85,7 @@ python3 -m PyInstaller --onefile --windowed \
   --hidden-import PyQt6.QtCore \
   --hidden-import PyQt6.QtGui \
   --hidden-import PyQt6.QtWidgets \
+  --hidden-import PyQt6.uic \
   main.py
 
 # Run
@@ -101,6 +106,7 @@ py -m PyInstaller --onefile --windowed --noconsole ^
   --hidden-import PyQt6.QtCore ^
   --hidden-import PyQt6.QtGui ^
   --hidden-import PyQt6.QtWidgets ^
+  --hidden-import PyQt6.uic ^
   main.py
 
 REM Run
@@ -129,6 +135,7 @@ a = Analysis(
         'PyQt6.QtCore',
         'PyQt6.QtGui',
         'PyQt6.QtWidgets',
+        'PyQt6.uic',
     ],
     hookspath=[],
     hooksconfig={},
@@ -181,9 +188,9 @@ pyinstaller JobDocs.spec
 
 After building, you'll find:
 
-- **Linux**: `dist/JobDocs` (single executable)
+- **Linux**: `dist/jobdocs` and `dist/JobDocs` (executable with symlink)
 - **macOS**: `dist/JobDocs.app` (application bundle)
-- **Windows**: `dist/JobDocs.exe` (single executable)
+- **Windows**: `JobDocs-Windows/` distribution folder (see Automated Scripts output above)
 
 All builds include:
 - Embedded Python runtime
@@ -220,7 +227,17 @@ cp -r dist/JobDocs.app /Applications/
 
 ### Windows
 
-Simply copy `dist\JobDocs.exe` to your desired location, or create a shortcut.
+**Using the automated build script:**
+
+The `build_windows.bat` script creates a `JobDocs-Windows\` folder with everything you need:
+
+1. Copy the entire `JobDocs-Windows` folder to your desired location (e.g., `C:\Program Files\JobDocs`)
+2. Run `Create-Desktop-Shortcut.bat` to automatically create a desktop shortcut
+3. (Optional) Pin the executable to Start Menu or Taskbar
+
+**Manual installation:**
+
+Simply copy `dist\jobdocs.exe` to your desired location and create shortcuts manually.
 
 ## Development Mode
 
