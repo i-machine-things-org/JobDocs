@@ -26,7 +26,14 @@ echo [2/5] Checking dependencies...
 py -c "import PyQt6" >nul 2>&1
 if errorlevel 1 (
     echo       PyQt6 not found. Installing...
-    py -m pip install --user PyQt6
+    py -m pip install --user PyQt6>=6.5.0
+    if errorlevel 1 (
+        echo       ERROR: Failed to install PyQt6
+        echo       Please check your internet connection and try again
+        pause
+        exit /b 1
+    )
+    echo       PyQt6 installed successfully
 ) else (
     echo       PyQt6 found
 )
@@ -34,7 +41,14 @@ if errorlevel 1 (
 py -c "import PyInstaller" >nul 2>&1
 if errorlevel 1 (
     echo       PyInstaller not found. Installing...
-    py -m pip install --user pyinstaller
+    py -m pip install --user pyinstaller>=6.0.0
+    if errorlevel 1 (
+        echo       ERROR: Failed to install PyInstaller
+        echo       Please check your internet connection and try again
+        pause
+        exit /b 1
+    )
+    echo       PyInstaller installed successfully
 ) else (
     echo       PyInstaller found
 )
@@ -77,9 +91,8 @@ echo [5/5] Creating distribution package...
 if exist JobDocs-Windows rmdir /s /q JobDocs-Windows
 mkdir JobDocs-Windows
 
-REM Copy executables
+REM Copy executable
 copy dist\jobdocs.exe JobDocs-Windows\ >nul
-copy dist\jobdocs.exe JobDocs-Windows\JobDocs.exe >nul
 
 REM Create README
 echo Creating README...
@@ -96,7 +109,7 @@ echo Running JobDocs:
 echo   - Double-click jobdocs.exe
 echo   - Or use the desktop shortcut
 echo.
-echo Both jobdocs.exe and JobDocs.exe are identical - use either one.
+echo Note: Windows is case-insensitive, so you can type "jobdocs" or "JobDocs".
 echo.
 echo First-time setup:
 echo   On first launch, JobDocs will ask you to configure:
@@ -105,9 +118,9 @@ echo   - Non-ITAR directory ^(for regular files^)
 echo   - Blueprints directory
 echo.
 echo For help and documentation, see:
-echo   https://github.com/YOUR-USERNAME/JobDocs
+echo   https://github.com/i-machine-things/JobDocs
 echo.
-echo Version: 2.0
+echo Version: 0.2.0-alpha
 echo Build date: %date%
 ) > JobDocs-Windows\README.txt
 
@@ -143,7 +156,7 @@ echo.
 echo Distribution package: JobDocs-Windows\
 echo.
 echo Contents:
-echo   - jobdocs.exe / JobDocs.exe
+echo   - jobdocs.exe
 echo   - README.txt
 echo   - Create-Desktop-Shortcut.bat
 echo.

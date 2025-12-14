@@ -9,14 +9,22 @@ All platforms require:
 - PyQt6
 - PyInstaller
 
+## Important: Executables vs Installers
+
+**This guide is for building standalone executables** (portable versions).
+
+For **installer packages** that end users should use:
+- **Linux:** See [linux/](linux/) for `.deb` package
+- **Windows:** See [windows/](windows/) for installer `.exe`
+
 ## Quick Build (Automated Scripts)
 
-The easiest way to build JobDocs is using the provided build scripts, which automatically check dependencies and install them if needed.
+The easiest way to build standalone executables is using the provided build scripts in the `build_scripts/` directory.
 
 ### Linux
 
 ```bash
-./build_linux.sh
+./build_scripts/build_linux.sh
 ```
 
 The script will:
@@ -31,7 +39,7 @@ Output: `dist/JobDocs`
 ### Windows
 
 ```cmd
-build_windows.bat
+build_scripts\build_windows.bat
 ```
 
 The script will:

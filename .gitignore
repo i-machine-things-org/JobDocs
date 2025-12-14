@@ -2,9 +2,12 @@
 itar/
 not itar/
 sample_files/
+test_jobs.csv
 
-# Claude Code
+# Claude Code and development notes
 .claude/
+.github-push-checklist.md
+docs/
 
 # Python
 __pycache__/
@@ -39,6 +42,7 @@ Thumbs.db
 *.db
 *.sqlite
 test_output/
+old/
 
 # Build artifacts (all platforms)
 installer_output/
@@ -47,8 +51,13 @@ build/
 *.exe
 *.msi
 *.app
+*.deb
 version_resource.txt
 icon.png
+linux/debian/
+linux/*.deb
+windows/Output/
+JobDocs-Setup-*.exe
 
 # PyInstaller
 *.spec
