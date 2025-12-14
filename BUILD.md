@@ -9,7 +9,41 @@ All platforms require:
 - PyQt6
 - PyInstaller
 
-## Quick Build (All Platforms)
+## Quick Build (Automated Scripts)
+
+The easiest way to build JobDocs is using the provided build scripts, which automatically check dependencies and install them if needed.
+
+### Linux
+
+```bash
+./build_linux.sh
+```
+
+The script will:
+- Check Python version
+- Auto-install PyQt6 and PyInstaller if needed
+- Clean previous builds
+- Build the executable
+- Show installation instructions
+
+Output: `dist/JobDocs`
+
+### Windows
+
+```cmd
+build_windows.bat
+```
+
+The script will:
+- Check Python version
+- Auto-install PyQt6 and PyInstaller if needed
+- Clean previous builds
+- Build the executable
+- Show installation instructions
+
+Output: `dist\JobDocs.exe`
+
+## Manual Build (All Platforms)
 
 ### Linux
 

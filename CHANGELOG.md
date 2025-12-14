@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updates after creating new customers
   - Consistent across all modules
 - **Getting Started Guide**: Comprehensive getting started documentation
+- **Build Scripts**: New build scripts for Linux and Windows
+  - `build_linux.sh` - Automated Linux build with dependency checking
+  - `build_windows.bat` - Automated Windows build with dependency checking
+  - Both scripts use PyInstaller with modular architecture support
+  - Auto-install missing dependencies
 - **Experimental**: Database integration framework for JobBOSS/ERP systems
   - Database connection settings in Advanced Settings
   - Placeholder code for database connectivity
