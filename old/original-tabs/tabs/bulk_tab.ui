@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>BulkTab</class>
+ <widget class="QWidget" name="BulkTab">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>800</width>
+    <height>600</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Bulk Job Creation</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="spacing">
+    <number>5</number>
+   </property>
+   <property name="leftMargin">
+    <number>5</number>
+   </property>
+   <property name="topMargin">
+    <number>5</number>
+   </property>
+   <property name="rightMargin">
+    <number>5</number>
+   </property>
+   <property name="bottomMargin">
+    <number>5</number>
+   </property>
+   <item>
+    <widget class="QGroupBox" name="inst_group">
+     <property name="title">
+      <string>Bulk Job Creation</string>
+     </property>
+     <layout class="QVBoxLayout" name="inst_layout">
+      <property name="spacing">
+       <number>2</number>
+      </property>
+      <property name="leftMargin">
+       <number>5</number>
+      </property>
+      <property name="topMargin">
+       <number>5</number>
+      </property>
+      <property name="rightMargin">
+       <number>5</number>
+      </property>
+      <property name="bottomMargin">
+       <number>5</number>
+      </property>
+      <item>
+       <widget class="QLabel" name="label">
+        <property name="text">
+         <string>Format: customer, job#, description, drawings...</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="label_2">
+        <property name="text">
+         <string>Example: Acme Corp, 12345, Widget Assembly, DWG-001</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="bulk_itar_check">
+        <property name="text">
+         <string>All jobs are ITAR</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="text_group">
+     <property name="title">
+      <string>Job Data (CSV Format)</string>
+     </property>
+     <layout class="QVBoxLayout" name="text_layout">
+      <property name="spacing">
+       <number>3</number>
+      </property>
+      <property name="leftMargin">
+       <number>5</number>
+      </property>
+      <property name="topMargin">
+       <number>5</number>
+      </property>
+      <property name="rightMargin">
+       <number>5</number>
+      </property>
+      <property name="bottomMargin">
+       <number>5</number>
+      </property>
+      <item>
+       <layout class="QHBoxLayout" name="toolbar">
+        <item>
+         <widget class="QPushButton" name="import_btn">
+          <property name="text">
+           <string>Import CSV</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="clear_bulk_btn">
+          <property name="text">
+           <string>Clear</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="validate_btn">
+          <property name="text">
+           <string>Validate</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QPlainTextEdit" name="bulk_text">
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>150</height>
+         </size>
+        </property>
+        <property name="placeholderText">
+         <string># CSV format (# = comments)
+Acme Corp, 12345, Widget Assembly, DWG-001
+Beta Inc, 54321, Custom Part</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="preview_group">
+     <property name="title">
+      <string>Preview / Validation</string>
+     </property>
+     <layout class="QVBoxLayout" name="preview_layout">
+      <property name="leftMargin">
+       <number>5</number>
+      </property>
+      <property name="topMargin">
+       <number>5</number>
+      </property>
+      <property name="rightMargin">
+       <number>5</number>
+      </property>
+      <property name="bottomMargin">
+       <number>5</number>
+      </property>
+      <item>
+       <widget class="QTableWidget" name="bulk_table">
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>150</height>
+         </size>
+        </property>
+        <column>
+         <property name="text">
+          <string>Status</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Customer</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Job #</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Description</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Drawings</string>
+         </property>
+        </column>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="btn_layout">
+     <item>
+      <widget class="QPushButton" name="create_bulk_btn">
+       <property name="styleSheet">
+        <string notr="true">font-weight: bold; padding: 6px;</string>
+       </property>
+       <property name="text">
+        <string>Create All Jobs</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="bulk_status_label">
+       <property name="text">
+        <string/>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="horizontalSpacer_2">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QProgressBar" name="bulk_progress">
+       <property name="maximumSize">
+        <size>
+         <width>200</width>
+         <height>16777215</height>
+        </size>
+       </property>
+       <property name="visible">
+        <bool>false</bool>
+       </property>
+       <property name="value">
+        <number>0</number>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

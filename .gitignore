@@ -1,5 +1,14 @@
+# Build scripts
 build.sh
 setup-arch.sh
+
+# Test/sample directories
+itar/
+not itar/
+sample_files/
+
+# Claude Code
+.claude/
 
 # Python
 __pycache__/

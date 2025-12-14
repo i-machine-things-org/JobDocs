@@ -1,0 +1,370 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ReportingTab</class>
+ <widget class="QWidget" name="ReportingTab">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>800</width>
+    <height>600</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Reporting</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="spacing">
+    <number>5</number>
+   </property>
+   <property name="leftMargin">
+    <number>5</number>
+   </property>
+   <property name="topMargin">
+    <number>5</number>
+   </property>
+   <property name="rightMargin">
+    <number>5</number>
+   </property>
+   <property name="bottomMargin">
+    <number>5</number>
+   </property>
+   <item>
+    <widget class="QGroupBox" name="experimentalGroupBox">
+     <property name="title">
+      <string>Experimental Feature</string>
+     </property>
+     <layout class="QVBoxLayout" name="experimentalLayout">
+      <property name="spacing">
+       <number>5</number>
+      </property>
+      <property name="leftMargin">
+       <number>5</number>
+      </property>
+      <property name="topMargin">
+       <number>5</number>
+      </property>
+      <property name="rightMargin">
+       <number>5</number>
+      </property>
+      <property name="bottomMargin">
+       <number>5</number>
+      </property>
+      <item>
+       <widget class="QLabel" name="experimentalInfoLabel">
+        <property name="text">
+         <string>This is an experimental feature for database integration with JobBOSS and other ERP systems.
+Configure database connection in Settings &gt; Advanced Settings &gt; Experimental.</string>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: #666; padding: 5px;</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="databaseGroupBox">
+     <property name="title">
+      <string>Database Connection</string>
+     </property>
+     <layout class="QVBoxLayout" name="databaseLayout">
+      <property name="spacing">
+       <number>5</number>
+      </property>
+      <property name="leftMargin">
+       <number>5</number>
+      </property>
+      <property name="topMargin">
+       <number>5</number>
+      </property>
+      <property name="rightMargin">
+       <number>5</number>
+      </property>
+      <property name="bottomMargin">
+       <number>5</number>
+      </property>
+      <item>
+       <widget class="QLabel" name="db_status_label">
+        <property name="text">
+         <string>Status: Not connected</string>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: #999;</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="dbButtonLayout">
+        <item>
+         <widget class="QPushButton" name="connect_db_btn">
+          <property name="text">
+           <string>Connect to Database</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="disconnect_db_btn">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="text">
+           <string>Disconnect</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="dbButtonSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="generateReportsGroupBox">
+     <property name="title">
+      <string>Generate Reports</string>
+     </property>
+     <layout class="QVBoxLayout" name="generateReportsLayout">
+      <property name="spacing">
+       <number>5</number>
+      </property>
+      <property name="leftMargin">
+       <number>5</number>
+      </property>
+      <property name="topMargin">
+       <number>5</number>
+      </property>
+      <property name="rightMargin">
+       <number>5</number>
+      </property>
+      <property name="bottomMargin">
+       <number>5</number>
+      </property>
+      <item>
+       <layout class="QHBoxLayout" name="reportTypeLayout">
+        <item>
+         <widget class="QLabel" name="reportTypeLabel">
+          <property name="text">
+           <string>Report Type:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="report_type_combo">
+          <item>
+           <property name="text">
+            <string>Job Statistics</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Jobs by Customer</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Jobs by Date Range</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Recent Jobs</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Top Customers</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+        <item>
+         <spacer name="reportTypeSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QGridLayout" name="filterLayout">
+        <item row="0" column="0">
+         <widget class="QLabel" name="customerLabel">
+          <property name="text">
+           <string>Customer:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QComboBox" name="report_customer_combo">
+          <property name="editable">
+           <bool>true</bool>
+          </property>
+          <item>
+           <property name="text">
+            <string>All Customers</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="startDateLabel">
+          <property name="text">
+           <string>Start Date:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QLineEdit" name="report_start_date">
+          <property name="placeholderText">
+           <string>YYYY-MM-DD</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="2">
+         <widget class="QLabel" name="endDateLabel">
+          <property name="text">
+           <string>End Date:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="3">
+         <widget class="QLineEdit" name="report_end_date">
+          <property name="placeholderText">
+           <string>YYYY-MM-DD</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="generateButtonLayout">
+        <item>
+         <widget class="QPushButton" name="generate_report_btn">
+          <property name="text">
+           <string>Generate Report</string>
+          </property>
+          <property name="styleSheet">
+           <string notr="true">font-weight: bold; padding: 6px;</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="export_report_btn">
+          <property name="text">
+           <string>Export to CSV</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="generateButtonSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="reportResultsGroupBox">
+     <property name="title">
+      <string>Report Results</string>
+     </property>
+     <layout class="QVBoxLayout" name="reportResultsLayout">
+      <property name="spacing">
+       <number>5</number>
+      </property>
+      <property name="leftMargin">
+       <number>5</number>
+      </property>
+      <property name="topMargin">
+       <number>5</number>
+      </property>
+      <property name="rightMargin">
+       <number>5</number>
+      </property>
+      <property name="bottomMargin">
+       <number>5</number>
+      </property>
+      <item>
+       <widget class="QTableWidget" name="report_table">
+        <property name="selectionBehavior">
+         <enum>QAbstractItemView::SelectRows</enum>
+        </property>
+        <column>
+         <property name="text">
+          <string>Date</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Customer</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Job #</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Description</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Status</string>
+         </property>
+        </column>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="report_status_label">
+        <property name="text">
+         <string>No data loaded. Connect to database and generate a report.</string>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: #666;</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

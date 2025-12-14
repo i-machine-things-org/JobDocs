@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Modular Plugin Architecture**: Complete refactor to plugin-based system
+  - Drop-in module support with automatic discovery
+  - BaseModule interface for extensibility
+  - AppContext for shared application state
+  - ModuleLoader with auto-discovery
+  - Template module for creating new plugins
+  - 8 core modules (Quote, Job, Add to Job, Bulk, Search, Import, History, Reporting)
+- **Quote Module**: Full quote creation and management
+  - Quote creation with ITAR support
+  - File linking and management
+  - Copy From dialog for reusing quote/job data
+  - Quote folders organized in customer/Quotes/ subdirectory
+- **Copy From Dialog**: Unified search dialog for copying job/quote information
+  - Search across all jobs and quotes
+  - ITAR labeling in search results
+  - Double-click to populate form
+  - Filters by job folders (with "job documents") and quote folders
+- **Customer List Auto-Population**: All customer dropdowns now populate automatically
+  - Scans both ITAR and non-ITAR directories
+  - Updates after creating new customers
+  - Consistent across all modules
+- **Getting Started Guide**: Comprehensive getting started documentation
 - **Experimental**: Database integration framework for JobBOSS/ERP systems
   - Database connection settings in Advanced Settings
   - Placeholder code for database connectivity
@@ -34,15 +56,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Respects allow_duplicate_jobs setting
 
 ### Changed
-- Improved .gitignore to exclude build artifacts
+- **Main Application**: Now uses modular system (main.py instead of JobDocs-qt.py)
+- **UI Organization**: Removed inline search from Quote/Job tabs in favor of popup dialog
+- **Module Loading**: All customer lists now populated centrally after module load
+- **Architecture**: 2897-line monolith → ~300 lines per module
+- Improved .gitignore to exclude build artifacts, test directories, and Claude workspace
 - Reduced minimum window size for better compatibility with smaller screens
 - Compacted DropZone widgets (80px → 60px minimum height)
 - Shortened labels and placeholders throughout UI
+- Job and Quote modules now use consistent populate_*_customer_list naming
 
 ### Fixed
+- **Bulk Create**: Now properly creates jobs instead of just adding to history
+  - Fixed by calling actual Job module's create_single_job method
+  - Module references now stored in main window for inter-module communication
+- **Customer Dropdowns**: All modules now show all customers from both ITAR and non-ITAR directories
+  - Fixed populate_customer_lists() to actually call module methods
+  - Removed redundant QTimer.singleShot calls
+  - Customer lists refresh after module load
+- **Copy From Dialog**: Fixed button box widget type error
+- **Search Dialog**: Now properly filters by job folders and quote folders only
 - Dead space in Add to Job tab - added proper vertical stretch
 - Search functionality now properly differentiates between legacy and strict modes
 - Legacy search options now show/hide based on selected mode
+
+### Removed
+- **JobDocs-qt.py**: Legacy monolithic version archived to `old/legacy/`
+  - Was broken due to refactored imports
+  - All functionality replaced by modular main.py
+  - Kept in git history for reference
+- Inline search UI from Quote and Job tabs (replaced with popup dialog)
+- QSplitter widgets from Quote and Job tabs
+- Redundant timer-based customer list population
+- Temporary test files and cleanup summaries
 
 ## [1.0.0] - 2025-12-06
 

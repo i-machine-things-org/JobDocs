@@ -2,6 +2,12 @@
 JobDocs - A tool for managing blueprint links and customer files
 Qt version for modern UI
 
+⚠️  DEPRECATED: This is the legacy monolithic version of JobDocs.
+    Please use main.py instead, which uses the new modular architecture.
+
+    This file is kept for backwards compatibility and reference only.
+    See MIGRATION_COMPLETE.md for details on the new architecture.
+
 Copyright (c) 2025 JobDocs Contributors
 Licensed under the MIT License - see LICENSE file for details
 
@@ -32,6 +38,10 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QMimeData, pyqtSignal, QStandardPaths
 from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QIcon
+from PyQt6 import uic
+
+# Import custom widgets
+from dropzone_widget import DropZone
 
 
 def get_config_dir() -> Path:
@@ -636,9 +646,7 @@ class JobDocs(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("JobDocs")
-        self.setMinimumSize(900, 700)
-        
+
         # Config
         self.config_dir = get_config_dir()
         self.settings_file = self.config_dir / 'settings.json'
@@ -689,24 +697,44 @@ class JobDocs(QMainWindow):
     def save_history(self):
         with open(self.history_file, 'w') as f:
             json.dump(self.history, f, indent=2)
-    
+
+    def get_ui_path(self, ui_filename: str) -> Path:
+        """Get path to UI file, handling both dev and production environments"""
+        if getattr(sys, 'frozen', False):
+            # Running as compiled executable
+            application_path = Path(sys._MEIPASS)
+        else:
+            # Running as script
+            application_path = Path(__file__).parent
+
+        ui_file = application_path / ui_filename
+        if not ui_file.exists():
+            raise FileNotFoundError(f"UI file not found: {ui_file}")
+
+        return ui_file
+
     def setup_ui(self):
-        # Create scroll area for main content
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        self.setCentralWidget(scroll_area)
+        # Load UI from .ui file
+        # Handle both running as script and as PyInstaller executable
+        if getattr(sys, 'frozen', False):
+            # Running as compiled executable
+            application_path = Path(sys._MEIPASS)
+        else:
+            # Running as script
+            application_path = Path(__file__).parent
 
-        # Container widget for scrollable content
-        central = QWidget()
-        scroll_area.setWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        ui_file = application_path / 'jobdocs_mainwindow.ui'
+        if not ui_file.exists():
+            raise FileNotFoundError(f"UI file not found: {ui_file}")
 
-        # Tab widget
-        self.tabs = QTabWidget()
-        layout.addWidget(self.tabs)
+        uic.loadUi(ui_file, self)
+
+        # The UI file provides the basic structure, now populate the tabs
+        # Get reference to tabs widget (already created by .ui file)
+        # Note: self.tabs is already available from the .ui file
+
+        # Clear placeholder tabs from UI file and add actual content
+        self.tabs.clear()
 
         # Create tabs
         self.tabs.addTab(self.create_quote_tab(), "Create Quote")
@@ -727,162 +755,54 @@ class JobDocs(QMainWindow):
             self.tabs.setCurrentIndex(default_tab)
     
     def setup_menu(self):
-        menubar = self.menuBar()
-        
-        # File menu
-        file_menu = menubar.addMenu("File")
-        
-        settings_action = QAction("Settings...", self)
-        settings_action.triggered.connect(self.open_settings)
-        file_menu.addAction(settings_action)
-        
-        file_menu.addSeparator()
-        
-        exit_action = QAction("Exit", self)
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
-        
-        # Help menu
-        help_menu = menubar.addMenu("Help")
-        
-        about_action = QAction("About", self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(about_action)
-
-        help_menu.addSeparator()
-
-        getting_started_action = QAction("Getting started", self)
-        getting_started_action.triggered.connect(self.show_getting_started)
-        help_menu.addAction(getting_started_action)
+        # Menu is now defined in the .ui file, just connect actions
+        # Actions are loaded from .ui file: actionSettings, actionExit, actionAbout, actionGettingStarted
+        self.actionSettings.triggered.connect(self.open_settings)
+        self.actionExit.triggered.connect(self.close)
+        self.actionAbout.triggered.connect(self.show_about)
+        self.actionGettingStarted.triggered.connect(self.show_getting_started)
 
     # ==================== Create Quote Tab ====================
 
     def create_quote_tab(self) -> QWidget:
+        """Create quote tab by loading UI and connecting signals"""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        ui_file = self.get_ui_path('tabs/quote_tab.ui')
+        uic.loadUi(ui_file, widget)
 
-        # Quote info group
-        info_group = QGroupBox("Quote Information")
-        info_layout = QGridLayout(info_group)
-        info_layout.setSpacing(3)
-        info_layout.setContentsMargins(5, 5, 5, 5)
+        # Store widget references as instance attributes
+        self.quote_customer_combo = widget.quote_customer_combo
+        self.quote_number_edit = widget.quote_number_edit
+        self.quote_description_edit = widget.quote_description_edit
+        self.quote_drawings_edit = widget.quote_drawings_edit
+        self.quote_itar_check = widget.quote_itar_check
+        self.quote_files_list = widget.quote_files_list
+        self.quote_search_input = widget.quote_search_input
+        self.quote_search_results = widget.quote_search_results
 
-        # Customer
-        info_layout.addWidget(QLabel("Customer:"), 0, 0)
-        self.quote_customer_combo = QComboBox()
-        self.quote_customer_combo.setEditable(True)
-        self.quote_customer_combo.setMinimumWidth(250)
-        info_layout.addWidget(self.quote_customer_combo, 0, 1)
-
-        # Quote number
-        info_layout.addWidget(QLabel("Quote #:"), 1, 0)
-        self.quote_number_edit = QLineEdit()
-        self.quote_number_edit.setPlaceholderText("e.g., Q12345 or Q12345-Q12350")
-        info_layout.addWidget(self.quote_number_edit, 1, 1)
-
-        # Description
-        info_layout.addWidget(QLabel("Description:"), 2, 0)
-        self.quote_description_edit = QLineEdit()
-        info_layout.addWidget(self.quote_description_edit, 2, 1)
-
-        # Drawings
-        info_layout.addWidget(QLabel("Drawings:"), 3, 0)
-        self.quote_drawings_edit = QLineEdit()
-        self.quote_drawings_edit.setPlaceholderText("comma-separated")
-        info_layout.addWidget(self.quote_drawings_edit, 3, 1)
-
-        # ITAR
-        self.quote_itar_check = QCheckBox("ITAR Quote (uses separate directories)")
-        info_layout.addWidget(self.quote_itar_check, 4, 1)
-
-        layout.addWidget(info_group)
-
-        # Splitter for Files and Search sections
-        files_search_splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # Files group (left)
-        files_group = QGroupBox("Quote Files (Optional)")
-        files_layout = QVBoxLayout(files_group)
-        files_layout.setSpacing(3)
-        files_layout.setContentsMargins(5, 5, 5, 5)
-
-        files_layout.addWidget(QLabel("Blueprints → blueprints folder, others → quote folder"))
-
+        # Replace QFrame placeholder with actual DropZone widget
+        placeholder = widget.quote_drop_zone
+        parent = placeholder.parent()
+        layout = parent.layout()
+        index = layout.indexOf(placeholder)
+        placeholder.deleteLater()
         self.quote_drop_zone = DropZone("Drop files")
-        self.quote_drop_zone.files_dropped.connect(self.add_quote_files)
         self.quote_drop_zone.setMinimumHeight(60)
-        files_layout.addWidget(self.quote_drop_zone)
+        layout.insertWidget(index, self.quote_drop_zone)
 
-        self.quote_files_list = QListWidget()
-        self.quote_files_list.setMaximumHeight(70)
-        files_layout.addWidget(self.quote_files_list)
+        # Set splitter sizes
+        widget.filesSplitter.setSizes([450, 450])
 
-        files_btn_layout = QHBoxLayout()
-        remove_btn = QPushButton("Remove Selected")
-        remove_btn.clicked.connect(self.remove_quote_file)
-        files_btn_layout.addWidget(remove_btn)
-        files_btn_layout.addStretch()
-        files_layout.addLayout(files_btn_layout)
-
-        files_search_splitter.addWidget(files_group)
-
-        # Search and copy section (right)
-        search_group = QGroupBox("Search & Copy")
-        search_layout = QVBoxLayout(search_group)
-        search_layout.setSpacing(3)
-        search_layout.setContentsMargins(5, 5, 5, 5)
-
-        search_layout.addWidget(QLabel("Search existing jobs/quotes to copy info:"))
-
-        self.quote_search_input = QLineEdit()
-        self.quote_search_input.setPlaceholderText("Search by customer, job#, description...")
+        # Connect signals
+        self.quote_drop_zone.files_dropped.connect(self.add_quote_files)
+        widget.remove_btn.clicked.connect(self.remove_quote_file)
         self.quote_search_input.textChanged.connect(self.search_for_quote_copy)
-        search_layout.addWidget(self.quote_search_input)
-
-        self.quote_search_results = QListWidget()
-        self.quote_search_results.setMaximumHeight(70)
         self.quote_search_results.itemDoubleClicked.connect(self.copy_quote_to_form)
-        search_layout.addWidget(self.quote_search_results)
-
-        search_btn_layout = QHBoxLayout()
-        copy_info_btn = QPushButton("Copy Info")
-        copy_info_btn.setToolTip("Copy selected job/quote info to form")
-        copy_info_btn.clicked.connect(self.copy_quote_to_form)
-        search_btn_layout.addWidget(copy_info_btn)
-
-        link_files_btn = QPushButton("Link Files")
-        link_files_btn.setToolTip("Link files from selected job/quote")
-        link_files_btn.clicked.connect(self.link_files_from_quote)
-        search_btn_layout.addWidget(link_files_btn)
-
-        search_btn_layout.addStretch()
-        search_layout.addLayout(search_btn_layout)
-
-        files_search_splitter.addWidget(search_group)
-        files_search_splitter.setSizes([450, 450])
-
-        layout.addWidget(files_search_splitter)
-
-        # Action buttons
-        btn_layout = QHBoxLayout()
-
-        create_btn = QPushButton("Create Quote && Link Files")
-        create_btn.clicked.connect(self.create_quote)
-        btn_layout.addWidget(create_btn)
-
-        convert_btn = QPushButton("Convert to Job")
-        convert_btn.setToolTip("Copy current quote info to Create Job tab")
-        convert_btn.clicked.connect(self.convert_current_quote_to_job)
-        btn_layout.addWidget(convert_btn)
-
-        clear_btn = QPushButton("Clear")
-        clear_btn.clicked.connect(self.clear_quote_form)
-        btn_layout.addWidget(clear_btn)
-
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
+        widget.copy_info_btn.clicked.connect(self.copy_quote_to_form)
+        widget.link_files_btn.clicked.connect(self.link_files_from_quote)
+        widget.create_btn.clicked.connect(self.create_quote)
+        widget.convert_btn.clicked.connect(self.convert_current_quote_to_job)
+        widget.clear_btn.clicked.connect(self.clear_quote_form)
 
         return widget
 
@@ -1245,438 +1165,163 @@ class JobDocs(QMainWindow):
     # ==================== Create Job Tab ====================
 
     def create_job_tab(self) -> QWidget:
+        """Create job tab by loading UI and connecting signals"""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        ui_file = self.get_ui_path('tabs/job_tab.ui')
+        uic.loadUi(ui_file, widget)
 
-        # Job info group
-        info_group = QGroupBox("Job Information")
-        info_layout = QGridLayout(info_group)
-        info_layout.setSpacing(3)
-        info_layout.setContentsMargins(5, 5, 5, 5)
-        
-        # Customer
-        info_layout.addWidget(QLabel("Customer:"), 0, 0)
-        self.customer_combo = QComboBox()
-        self.customer_combo.setEditable(True)
-        self.customer_combo.setMinimumWidth(250)
-        info_layout.addWidget(self.customer_combo, 0, 1)
-        
-        # Job number
-        info_layout.addWidget(QLabel("Job #:"), 1, 0)
-        self.job_number_edit = QLineEdit()
-        self.job_number_edit.setPlaceholderText("e.g., 12345 or 12345-12350")
-        info_layout.addWidget(self.job_number_edit, 1, 1)
-        self.job_status_label = QLabel("")
-        info_layout.addWidget(self.job_status_label, 1, 2)
+        # Store widget references
+        self.customer_combo = widget.customer_combo
+        self.job_number_edit = widget.job_number_edit
+        self.job_status_label = widget.job_status_label
+        self.description_edit = widget.description_edit
+        self.drawings_edit = widget.drawings_edit
+        self.itar_check = widget.itar_check
+        self.job_files_list = widget.job_files_list
+        self.job_search_input = widget.job_search_input
+        self.job_search_results = widget.job_search_results
 
-        # Description
-        info_layout.addWidget(QLabel("Description:"), 2, 0)
-        self.description_edit = QLineEdit()
-        info_layout.addWidget(self.description_edit, 2, 1)
-
-        # Drawings
-        info_layout.addWidget(QLabel("Drawings:"), 3, 0)
-        self.drawings_edit = QLineEdit()
-        self.drawings_edit.setPlaceholderText("comma-separated")
-        info_layout.addWidget(self.drawings_edit, 3, 1)
-        
-        # ITAR
-        self.itar_check = QCheckBox("ITAR Job (uses separate directories)")
-        info_layout.addWidget(self.itar_check, 4, 1)
-        
-        layout.addWidget(info_group)
-
-        # Splitter for Files and Search sections
-        files_search_splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # Files group (left)
-        files_group = QGroupBox("Job Files (Optional)")
-        files_layout = QVBoxLayout(files_group)
-        files_layout.setSpacing(3)
-        files_layout.setContentsMargins(5, 5, 5, 5)
-
-        files_layout.addWidget(QLabel("Blueprints → blueprints folder, others → job folder"))
-
+        # Replace DropZone placeholder
+        placeholder = widget.job_drop_zone
+        parent = placeholder.parent()
+        layout = parent.layout()
+        index = layout.indexOf(placeholder)
+        placeholder.deleteLater()
         self.job_drop_zone = DropZone("Drop files")
-        self.job_drop_zone.files_dropped.connect(self.handle_job_files)
         self.job_drop_zone.setMinimumHeight(60)
-        files_layout.addWidget(self.job_drop_zone)
+        layout.insertWidget(index, self.job_drop_zone)
 
-        self.job_files_list = QListWidget()
-        self.job_files_list.setMaximumHeight(70)
-        files_layout.addWidget(self.job_files_list)
+        # Set splitter sizes
+        widget.filesSplitter.setSizes([450, 450])
 
-        files_btn_layout = QHBoxLayout()
-        remove_btn = QPushButton("Remove Selected")
-        remove_btn.clicked.connect(self.remove_job_file)
-        files_btn_layout.addWidget(remove_btn)
-        files_btn_layout.addStretch()
-        files_layout.addLayout(files_btn_layout)
-
-        files_search_splitter.addWidget(files_group)
-
-        # Search and copy section (right)
-        search_group = QGroupBox("Search & Copy")
-        search_layout = QVBoxLayout(search_group)
-        search_layout.setSpacing(3)
-        search_layout.setContentsMargins(5, 5, 5, 5)
-
-        search_layout.addWidget(QLabel("Search existing jobs/quotes to copy info:"))
-
-        self.job_search_input = QLineEdit()
-        self.job_search_input.setPlaceholderText("Search by customer, job#, description...")
+        # Connect signals
+        self.job_drop_zone.files_dropped.connect(self.handle_job_files)
+        widget.remove_btn.clicked.connect(self.remove_job_file)
         self.job_search_input.textChanged.connect(self.search_for_job_copy)
-        search_layout.addWidget(self.job_search_input)
-
-        self.job_search_results = QListWidget()
-        self.job_search_results.setMaximumHeight(70)
         self.job_search_results.itemDoubleClicked.connect(self.copy_job_to_form)
-        search_layout.addWidget(self.job_search_results)
-
-        search_btn_layout = QHBoxLayout()
-        copy_info_btn = QPushButton("Copy Info")
-        copy_info_btn.setToolTip("Copy selected job/quote info to form")
-        copy_info_btn.clicked.connect(self.copy_job_to_form)
-        search_btn_layout.addWidget(copy_info_btn)
-
-        link_files_btn = QPushButton("Link Files")
-        link_files_btn.setToolTip("Link files from selected job/quote")
-        link_files_btn.clicked.connect(self.link_files_from_job)
-        search_btn_layout.addWidget(link_files_btn)
-
-        search_btn_layout.addStretch()
-        search_layout.addLayout(search_btn_layout)
-
-        files_search_splitter.addWidget(search_group)
-        files_search_splitter.setSizes([450, 450])
-
-        layout.addWidget(files_search_splitter)
-        
-        # Action buttons
-        btn_layout = QHBoxLayout()
-        
-        create_btn = QPushButton("Create Job && Link Files")
-        #create_btn.setStyleSheet("font-weight: bold; padding: 8px 16px;")
-        create_btn.clicked.connect(self.create_job)
-        btn_layout.addWidget(create_btn)
-        
-        clear_btn = QPushButton("Clear")
-        clear_btn.clicked.connect(self.clear_job_form)
-        btn_layout.addWidget(clear_btn)
-        
-        btn_layout.addStretch()
-        
-        open_bp_btn = QPushButton("Open Blueprints")
-        open_bp_btn.clicked.connect(self.open_blueprints_folder)
-        btn_layout.addWidget(open_bp_btn)
-        
-        open_cf_btn = QPushButton("Open Customer Files")
-        open_cf_btn.clicked.connect(self.open_customer_files_folder)
-        btn_layout.addWidget(open_cf_btn)
-        
-        layout.addLayout(btn_layout)
+        widget.copy_info_btn.clicked.connect(self.copy_job_to_form)
+        widget.link_files_btn.clicked.connect(self.link_files_from_job)
+        widget.create_btn.clicked.connect(self.create_job)
+        widget.clear_btn.clicked.connect(self.clear_job_form)
+        widget.open_bp_btn.clicked.connect(self.open_blueprints_folder)
+        widget.open_cf_btn.clicked.connect(self.open_customer_files_folder)
 
         return widget
     
     def create_add_to_job_tab(self) -> QWidget:
+        """Create add to job tab by loading UI and connecting signals"""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(3)
+        ui_file = self.get_ui_path('tabs/add_to_job_tab.ui')
+        uic.loadUi(ui_file, widget)
 
-        layout.addWidget(QLabel("Add documents to existing job"))
+        # Store widget references
+        self.add_customer_combo = widget.add_customer_combo
+        self.add_search_edit = widget.add_search_edit
+        self.job_tree = widget.job_tree
+        self.selected_job_label = widget.selected_job_label
+        self.add_files_list = widget.add_files_list
+        self.add_status_label = widget.add_status_label
 
-        # Splitter for left/right panels
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        # Store radio button references
+        self.add_all_radio = widget.add_all_radio
+        self.add_standard_radio = widget.add_standard_radio
+        self.add_itar_radio = widget.add_itar_radio
+        self.dest_both_radio = widget.dest_both_radio
+        self.dest_blueprints_radio = widget.dest_blueprints_radio
+        self.dest_job_radio = widget.dest_job_radio
 
-        # Left - Job browser
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 3, 0)
-        left_layout.setSpacing(3)
-
-        browser_group = QGroupBox("Select Job")
-        browser_layout = QVBoxLayout(browser_group)
-        browser_layout.setSpacing(3)
-        browser_layout.setContentsMargins(5, 5, 5, 5)
-        
-        # Filters
-        filter_layout = QHBoxLayout()
-        filter_layout.addWidget(QLabel("Customer:"))
-        self.add_customer_combo = QComboBox()
-        self.add_customer_combo.setMinimumWidth(150)
-        self.add_customer_combo.currentTextChanged.connect(self.refresh_job_tree)
-        filter_layout.addWidget(self.add_customer_combo)
-
-        # ITAR filter radio buttons
-        self.add_filter_group = QButtonGroup()
-        self.add_all_radio = QRadioButton("All Jobs")
-        self.add_standard_radio = QRadioButton("Standard Only")
-        self.add_itar_radio = QRadioButton("ITAR Only")
-        self.add_all_radio.setChecked(True)
-
+        # Create button groups (not visual in Designer)
+        self.add_filter_group = QButtonGroup(self)
         self.add_filter_group.addButton(self.add_all_radio)
         self.add_filter_group.addButton(self.add_standard_radio)
         self.add_filter_group.addButton(self.add_itar_radio)
 
-        self.add_all_radio.toggled.connect(self.refresh_job_tree)
-        self.add_standard_radio.toggled.connect(self.refresh_job_tree)
-        self.add_itar_radio.toggled.connect(self.refresh_job_tree)
-
-        filter_layout.addWidget(self.add_all_radio)
-        filter_layout.addWidget(self.add_standard_radio)
-        filter_layout.addWidget(self.add_itar_radio)
-        filter_layout.addStretch()
-        browser_layout.addLayout(filter_layout)
-        
-        # Search
-        search_layout = QHBoxLayout()
-        search_layout.addWidget(QLabel("Search:"))
-        self.add_search_edit = QLineEdit()
-        self.add_search_edit.setPlaceholderText("job number or customer...")
-        self.add_search_edit.returnPressed.connect(self.search_jobs)
-        search_layout.addWidget(self.add_search_edit)
-        
-        search_btn = QPushButton("Search")
-        search_btn.clicked.connect(self.search_jobs)
-        search_layout.addWidget(search_btn)
-        
-        clear_search_btn = QPushButton("Clear")
-        clear_search_btn.clicked.connect(self.clear_job_search)
-        search_layout.addWidget(clear_search_btn)
-        browser_layout.addLayout(search_layout)
-        
-        # Tree
-        self.job_tree = QTreeWidget()
-        self.job_tree.setHeaderLabels(["Customer / Job"])
-        self.job_tree.setColumnCount(1)
-        self.job_tree.itemSelectionChanged.connect(self.on_job_tree_select)
-        browser_layout.addWidget(self.job_tree)
-        
-        self.selected_job_label = QLabel("No job selected")
-        self.selected_job_label.setStyleSheet("color: gray;")
-        browser_layout.addWidget(self.selected_job_label)
-
-        left_layout.addWidget(browser_group, 1)
-        splitter.addWidget(left_widget)
-        
-        # Right - Add files
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(3, 0, 0, 0)
-        right_layout.setSpacing(3)
-
-        add_group = QGroupBox("Add Files")
-        add_layout = QVBoxLayout(add_group)
-        add_layout.setSpacing(3)
-        add_layout.setContentsMargins(5, 5, 5, 5)
-        
-        # Destination options
-        dest_group = QGroupBox("Destination")
-        dest_layout = QVBoxLayout(dest_group)
-        dest_layout.setSpacing(2)
-        dest_layout.setContentsMargins(5, 5, 5, 5)
-
         self.dest_button_group = QButtonGroup(self)
-        self.dest_both_radio = QRadioButton("Blueprints + Job")
-        self.dest_both_radio.setChecked(True)
-        self.dest_blueprints_radio = QRadioButton("Blueprints only")
-        self.dest_job_radio = QRadioButton("Job only")
-
         self.dest_button_group.addButton(self.dest_both_radio)
         self.dest_button_group.addButton(self.dest_blueprints_radio)
         self.dest_button_group.addButton(self.dest_job_radio)
 
-        dest_layout.addWidget(self.dest_both_radio)
-        dest_layout.addWidget(self.dest_blueprints_radio)
-        dest_layout.addWidget(self.dest_job_radio)
-        add_layout.addWidget(dest_group)
-        
-        # Drop zone
+        # Replace DropZone placeholder
+        placeholder = widget.add_drop_zone
+        parent = placeholder.parent()
+        layout = parent.layout()
+        index = layout.indexOf(placeholder)
+        placeholder.deleteLater()
         self.add_drop_zone = DropZone("Drop files")
-        self.add_drop_zone.files_dropped.connect(self.handle_add_files)
         self.add_drop_zone.setMinimumHeight(60)
-        add_layout.addWidget(self.add_drop_zone)
+        layout.insertWidget(index, self.add_drop_zone)
 
-        # File list
-        self.add_files_list = QListWidget()
-        self.add_files_list.setMaximumHeight(90)
-        add_layout.addWidget(self.add_files_list)
-        
-        # Buttons
-        add_btn_layout = QHBoxLayout()
-        remove_add_btn = QPushButton("Remove Selected")
-        remove_add_btn.clicked.connect(self.remove_add_file)
-        add_btn_layout.addWidget(remove_add_btn)
-        
-        clear_add_btn = QPushButton("Clear All")
-        clear_add_btn.clicked.connect(self.clear_add_files)
-        add_btn_layout.addWidget(clear_add_btn)
-        add_btn_layout.addStretch()
-        add_layout.addLayout(add_btn_layout)
-        
-        # Add button
-        add_files_btn = QPushButton("Add Files to Job")
-        add_files_btn.setStyleSheet("font-weight: bold; padding: 6px;")
-        add_files_btn.clicked.connect(self.add_files_to_job)
-        add_layout.addWidget(add_files_btn)
-        
-        self.add_status_label = QLabel("")
-        add_layout.addWidget(self.add_status_label)
+        # Set splitter sizes
+        widget.mainSplitter.setSizes([450, 450])
 
-        right_layout.addWidget(add_group, 1)
-        splitter.addWidget(right_widget)
+        # Connect signals
+        self.add_customer_combo.currentTextChanged.connect(self.refresh_job_tree)
+        self.add_all_radio.toggled.connect(self.refresh_job_tree)
+        self.add_standard_radio.toggled.connect(self.refresh_job_tree)
+        self.add_itar_radio.toggled.connect(self.refresh_job_tree)
+        self.add_search_edit.returnPressed.connect(self.search_jobs)
+        widget.search_btn.clicked.connect(self.search_jobs)
+        widget.clear_search_btn.clicked.connect(self.clear_job_search)
+        self.job_tree.itemSelectionChanged.connect(self.on_job_tree_select)
+        self.add_drop_zone.files_dropped.connect(self.handle_add_files)
+        widget.remove_add_btn.clicked.connect(self.remove_add_file)
+        widget.clear_add_btn.clicked.connect(self.clear_add_files)
+        widget.add_files_btn.clicked.connect(self.add_files_to_job)
 
-        splitter.setSizes([450, 450])
-        layout.addWidget(splitter, 1)
-        
         # Initialize
         QTimer.singleShot(100, self.populate_add_customer_list)
-        
+
         return widget
     
     def create_bulk_tab(self) -> QWidget:
+        """Create bulk tab by loading UI and connecting signals"""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        ui_file = self.get_ui_path('tabs/bulk_tab.ui')
+        uic.loadUi(ui_file, widget)
 
-        # Instructions
-        inst_group = QGroupBox("Bulk Job Creation")
-        inst_layout = QVBoxLayout(inst_group)
-        inst_layout.setSpacing(2)
-        inst_layout.setContentsMargins(5, 5, 5, 5)
-        inst_layout.addWidget(QLabel("Format: customer, job#, description, drawings..."))
-        inst_layout.addWidget(QLabel("Example: Acme Corp, 12345, Widget Assembly, DWG-001"))
+        # Store widget references as instance attributes
+        self.bulk_itar_check = widget.bulk_itar_check
+        self.bulk_text = widget.bulk_text
+        self.bulk_table = widget.bulk_table
+        self.bulk_status_label = widget.bulk_status_label
+        self.bulk_progress = widget.bulk_progress
 
-        self.bulk_itar_check = QCheckBox("All jobs are ITAR")
-        inst_layout.addWidget(self.bulk_itar_check)
-        layout.addWidget(inst_group)
-        
-        # Text input
-        text_group = QGroupBox("Job Data (CSV Format)")
-        text_layout = QVBoxLayout(text_group)
-        text_layout.setSpacing(3)
-        text_layout.setContentsMargins(5, 5, 5, 5)
-
-        toolbar = QHBoxLayout()
-        import_btn = QPushButton("Import CSV")
-        import_btn.clicked.connect(self.import_bulk_csv)
-        toolbar.addWidget(import_btn)
-
-        clear_bulk_btn = QPushButton("Clear")
-        clear_bulk_btn.clicked.connect(lambda: self.bulk_text.clear())
-        toolbar.addWidget(clear_bulk_btn)
-
-        validate_btn = QPushButton("Validate")
-        validate_btn.clicked.connect(self.validate_bulk_data)
-        toolbar.addWidget(validate_btn)
-        toolbar.addStretch()
-        text_layout.addLayout(toolbar)
-
-        self.bulk_text = QPlainTextEdit()
-        self.bulk_text.setPlaceholderText(
-            "# CSV format (# = comments)\n"
-            "Acme Corp, 12345, Widget Assembly, DWG-001\n"
-            "Beta Inc, 54321, Custom Part"
-        )
-        self.bulk_text.setMaximumHeight(150)
-        text_layout.addWidget(self.bulk_text)
-        layout.addWidget(text_group)
-
-        # Preview table
-        preview_group = QGroupBox("Preview / Validation")
-        preview_layout = QVBoxLayout(preview_group)
-        preview_layout.setContentsMargins(5, 5, 5, 5)
-
-        self.bulk_table = QTableWidget()
-        self.bulk_table.setColumnCount(5)
-        self.bulk_table.setHorizontalHeaderLabels(["Status", "Customer", "Job #", "Description", "Drawings"])
+        # Setup table properties
         self.bulk_table.horizontalHeader().setStretchLastSection(True)
-        self.bulk_table.setMaximumHeight(150)
-        preview_layout.addWidget(self.bulk_table)
-        layout.addWidget(preview_group)
-        
-        # Buttons
-        btn_layout = QHBoxLayout()
-        create_bulk_btn = QPushButton("Create All Jobs")
-        create_bulk_btn.setStyleSheet("font-weight: bold; padding: 6px;")
-        create_bulk_btn.clicked.connect(self.create_bulk_jobs)
-        btn_layout.addWidget(create_bulk_btn)
-        
-        self.bulk_status_label = QLabel("")
-        btn_layout.addWidget(self.bulk_status_label)
-        btn_layout.addStretch()
-        
-        self.bulk_progress = QProgressBar()
-        self.bulk_progress.setMaximumWidth(200)
-        self.bulk_progress.hide()
-        btn_layout.addWidget(self.bulk_progress)
-        layout.addLayout(btn_layout)
-        
+
+        # Connect signals
+        widget.import_btn.clicked.connect(self.import_bulk_csv)
+        widget.clear_bulk_btn.clicked.connect(lambda: self.bulk_text.clear())
+        widget.validate_btn.clicked.connect(self.validate_bulk_data)
+        widget.create_bulk_btn.clicked.connect(self.create_bulk_jobs)
+
         return widget
     
     def create_search_tab(self) -> QWidget:
+        """Create search tab by loading UI and connecting signals"""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        ui_file = self.get_ui_path('tabs/search_tab.ui')
+        uic.loadUi(ui_file, widget)
 
-        # Search controls
-        search_group = QGroupBox("Search Criteria")
-        search_layout = QVBoxLayout(search_group)
-        search_layout.setSpacing(3)
-        search_layout.setContentsMargins(5, 5, 5, 5)
-        
-        top_row = QHBoxLayout()
-        top_row.addWidget(QLabel("Search:"))
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Enter search term...")
-        self.search_edit.returnPressed.connect(self.perform_search)
-        top_row.addWidget(self.search_edit)
-        
-        search_btn = QPushButton("Search")
-        search_btn.clicked.connect(self.perform_search)
-        top_row.addWidget(search_btn)
-        
-        clear_btn = QPushButton("Clear")
-        clear_btn.clicked.connect(self.clear_search)
-        top_row.addWidget(clear_btn)
-        search_layout.addLayout(top_row)
-        
-        # Checkboxes
-        check_row = QHBoxLayout()
-        check_row.addWidget(QLabel("Search in:"))
-        self.search_customer_check = QCheckBox("Customer")
-        self.search_customer_check.setChecked(True)
-        check_row.addWidget(self.search_customer_check)
-        
-        self.search_job_check = QCheckBox("Job #")
-        self.search_job_check.setChecked(True)
-        check_row.addWidget(self.search_job_check)
-        
-        self.search_desc_check = QCheckBox("Description")
-        self.search_desc_check.setChecked(True)
-        check_row.addWidget(self.search_desc_check)
-        
-        self.search_drawing_check = QCheckBox("Drawings")
-        self.search_drawing_check.setChecked(True)
-        check_row.addWidget(self.search_drawing_check)
-        check_row.addStretch()
-        search_layout.addLayout(check_row)
-        
-        # Mode (wrapped in container widget for show/hide control)
-        self.mode_row_widget = QWidget()
-        mode_row = QHBoxLayout(self.mode_row_widget)
-        mode_row.setContentsMargins(0, 0, 0, 0)
+        # Store widget references as instance attributes
+        self.search_edit = widget.search_edit
+        self.search_customer_check = widget.search_customer_check
+        self.search_job_check = widget.search_job_check
+        self.search_desc_check = widget.search_desc_check
+        self.search_drawing_check = widget.search_drawing_check
+        self.mode_row_widget = widget.mode_row_widget
+        self.search_all_radio = widget.search_all_radio
+        self.search_strict_radio = widget.search_strict_radio
+        self.legacy_options_widget = widget.legacy_options_widget
+        self.search_blueprints_check = widget.search_blueprints_check
+        self.search_table = widget.search_table
+        self.search_status_label = widget.search_status_label
+        self.search_progress = widget.search_progress
 
-        mode_row.addWidget(QLabel("Mode:"))
-
+        # Create button group (not visual in Designer)
         self.search_mode_group = QButtonGroup(self)
-        self.search_all_radio = QRadioButton("Search All Folders")
-        self.search_strict_radio = QRadioButton("Strict Format (faster)")
+        self.search_mode_group.addButton(self.search_all_radio)
+        self.search_mode_group.addButton(self.search_strict_radio)
 
         # Set default based on legacy_mode setting
         is_legacy = self.settings.get('legacy_mode', True)
@@ -1685,285 +1330,102 @@ class JobDocs(QMainWindow):
         else:
             self.search_strict_radio.setChecked(True)
 
-        self.search_mode_group.addButton(self.search_all_radio)
-        self.search_mode_group.addButton(self.search_strict_radio)
+        # Setup table properties
+        self.search_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.search_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
-        mode_row.addWidget(self.search_all_radio)
-        mode_row.addWidget(self.search_strict_radio)
-        mode_row.addStretch()
-
-        search_layout.addWidget(self.mode_row_widget)
-
-        # Legacy search options (shown only in "Search All Folders" mode)
-        self.legacy_options_widget = QWidget()
-        legacy_options_row = QHBoxLayout(self.legacy_options_widget)
-        legacy_options_row.setContentsMargins(0, 0, 0, 0)
-
-        legacy_options_row.addWidget(QLabel("Also search:"))
-        self.search_blueprints_check = QCheckBox("Blueprints directories")
-        self.search_blueprints_check.setChecked(False)
-        legacy_options_row.addWidget(self.search_blueprints_check)
-        legacy_options_row.addStretch()
-
-        search_layout.addWidget(self.legacy_options_widget)
-
-        # Connect mode change to update checkbox states
+        # Connect signals
+        self.search_edit.returnPressed.connect(self.perform_search)
+        widget.search_btn.clicked.connect(self.perform_search)
+        widget.clear_btn.clicked.connect(self.clear_search)
         self.search_all_radio.toggled.connect(self.update_search_field_checkboxes)
         self.search_strict_radio.toggled.connect(self.update_search_field_checkboxes)
-
-        # Initialize checkbox states and visibility based on legacy mode
-        self.update_search_field_checkboxes()
-
-        layout.addWidget(search_group)
-
-        # Note: update_legacy_mode_ui() will be called after all tabs are created
-        
-        # Results
-        results_group = QGroupBox("Search Results")
-        results_layout = QVBoxLayout(results_group)
-        results_layout.setContentsMargins(5, 5, 5, 5)
-
-        self.search_table = QTableWidget()
-        self.search_table.setColumnCount(5)
-        self.search_table.setHorizontalHeaderLabels(["Date", "Customer", "Job #", "Description", "Drawings"])
-        self.search_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.search_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.search_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.search_table.customContextMenuRequested.connect(self.show_search_context_menu)
         self.search_table.doubleClicked.connect(self.open_selected_search_job)
-        results_layout.addWidget(self.search_table)
-        
-        self.search_status_label = QLabel("")
-        results_layout.addWidget(self.search_status_label)
-        
-        self.search_progress = QProgressBar()
-        self.search_progress.hide()
-        results_layout.addWidget(self.search_progress)
-        
-        layout.addWidget(results_group)
-        
+
+        # Initialize checkbox states and visibility
+        self.update_search_field_checkboxes()
+
         return widget
     
     def create_import_tab(self) -> QWidget:
+        """Create import tab by loading UI and connecting signals"""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        ui_file = self.get_ui_path('tabs/import_tab.ui')
+        uic.loadUi(ui_file, widget)
 
-        layout.addWidget(QLabel("Import files to blueprints folder"))
+        # Store widget references as instance attributes
+        self.import_customer_combo = widget.import_customer_combo
+        self.import_itar_check = widget.import_itar_check
+        self.import_files_list = widget.import_files_list
+        self.import_log = widget.import_log
 
-        # Customer selection
-        select_group = QGroupBox("Customer")
-        select_layout = QVBoxLayout(select_group)
-        select_layout.setContentsMargins(5, 5, 5, 5)
-
-        customer_row = QHBoxLayout()
-        customer_row.addWidget(QLabel("Customer:"))
-        self.import_customer_combo = QComboBox()
-        self.import_customer_combo.setEditable(True)
-        self.import_customer_combo.setMinimumWidth(200)
-        customer_row.addWidget(self.import_customer_combo)
-        customer_row.addStretch()
-        select_layout.addLayout(customer_row)
-
-        self.import_itar_check = QCheckBox("ITAR (uses ITAR blueprints directory)")
-        select_layout.addWidget(self.import_itar_check)
-
-        layout.addWidget(select_group)
-
-        # Drop zone
-        files_group = QGroupBox("Files to Import")
-        files_layout = QVBoxLayout(files_group)
-        files_layout.setSpacing(3)
-        files_layout.setContentsMargins(5, 5, 5, 5)
-
+        # Replace QFrame placeholder with actual DropZone widget
+        placeholder = widget.import_drop_zone
+        parent = placeholder.parent()
+        layout = parent.layout()
+        index = layout.indexOf(placeholder)
+        placeholder.deleteLater()
         self.import_drop_zone = DropZone("Drop files")
-        self.import_drop_zone.files_dropped.connect(self.handle_import_files)
         self.import_drop_zone.setMinimumHeight(60)
-        files_layout.addWidget(self.import_drop_zone)
+        layout.insertWidget(index, self.import_drop_zone)
 
-        self.import_files_list = QListWidget()
-        self.import_files_list.setMaximumHeight(120)
-        files_layout.addWidget(self.import_files_list)
-        
-        btn_layout = QHBoxLayout()
-        import_btn = QPushButton("Check && Import")
-        import_btn.clicked.connect(self.check_and_import)
-        btn_layout.addWidget(import_btn)
-        
-        clear_btn = QPushButton("Clear List")
-        clear_btn.clicked.connect(self.clear_import_list)
-        btn_layout.addWidget(clear_btn)
-        btn_layout.addStretch()
-        files_layout.addLayout(btn_layout)
-        
-        layout.addWidget(files_group)
-        
-        # Results
-        results_group = QGroupBox("Results")
-        results_layout = QVBoxLayout(results_group)
-        results_layout.setContentsMargins(5, 5, 5, 5)
-        self.import_log = QPlainTextEdit()
-        self.import_log.setReadOnly(True)
-        self.import_log.setMaximumHeight(120)
-        results_layout.addWidget(self.import_log)
-        layout.addWidget(results_group)
-        
+        # Connect signals
+        self.import_drop_zone.files_dropped.connect(self.handle_import_files)
+        widget.import_btn.clicked.connect(self.check_and_import)
+        widget.clear_btn.clicked.connect(self.clear_import_list)
+
         return widget
     
     def create_history_tab(self) -> QWidget:
+        """Create history tab by loading UI and connecting signals"""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        ui_file = self.get_ui_path('tabs/history_tab.ui')
+        uic.loadUi(ui_file, widget)
 
-        # History table
-        history_group = QGroupBox("Recent Jobs")
-        history_layout = QVBoxLayout(history_group)
-        history_layout.setContentsMargins(5, 5, 5, 5)
+        # Store widget references as instance attributes
+        self.history_table = widget.history_table
 
-        self.history_table = QTableWidget()
-        self.history_table.setColumnCount(5)
-        self.history_table.setHorizontalHeaderLabels(["Date", "Customer", "Job #", "Description", "Drawings"])
+        # Setup table properties
         self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.history_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        history_layout.addWidget(self.history_table)
-        
-        btn_layout = QHBoxLayout()
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self.refresh_history)
-        btn_layout.addWidget(refresh_btn)
-        
-        clear_btn = QPushButton("Clear History")
-        clear_btn.clicked.connect(self.clear_history)
-        btn_layout.addWidget(clear_btn)
-        btn_layout.addStretch()
-        history_layout.addLayout(btn_layout)
-        
-        layout.addWidget(history_group)
-        
-        self.refresh_history()
+
+        # Connect signals
+        widget.refresh_btn.clicked.connect(self.refresh_history)
+        widget.clear_btn.clicked.connect(self.clear_history)
+
+        # Initialize content
+        QTimer.singleShot(100, self.refresh_history)
 
         return widget
 
     def create_reporting_tab(self) -> QWidget:
-        """Create experimental reporting tab for database integration"""
+        """Create experimental reporting tab by loading UI and connecting signals"""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        ui_file = self.get_ui_path('tabs/reporting_tab.ui')
+        uic.loadUi(ui_file, widget)
 
-        # Info banner
-        info_group = QGroupBox("Experimental Feature")
-        info_layout = QVBoxLayout(info_group)
-        info_layout.setContentsMargins(5, 5, 5, 5)
-        info_label = QLabel(
-            "This is an experimental feature for database integration with JobBOSS and other ERP systems.\n"
-            "Configure database connection in Settings > Advanced Settings > Experimental."
-        )
-        info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #666; padding: 5px;")
-        info_layout.addWidget(info_label)
-        layout.addWidget(info_group)
+        # Store widget references
+        self.db_status_label = widget.db_status_label
+        self.connect_db_btn = widget.connect_db_btn
+        self.disconnect_db_btn = widget.disconnect_db_btn
+        self.report_type_combo = widget.report_type_combo
+        self.report_customer_combo = widget.report_customer_combo
+        self.report_start_date = widget.report_start_date
+        self.report_end_date = widget.report_end_date
+        self.generate_report_btn = widget.generate_report_btn
+        self.export_report_btn = widget.export_report_btn
+        self.report_table = widget.report_table
+        self.report_status_label = widget.report_status_label
 
-        # Database connection status
-        status_group = QGroupBox("Database Connection")
-        status_layout = QVBoxLayout(status_group)
-        status_layout.setContentsMargins(5, 5, 5, 5)
-
-        self.db_status_label = QLabel("Status: Not connected")
-        self.db_status_label.setStyleSheet("color: #999;")
-        status_layout.addWidget(self.db_status_label)
-
-        db_btn_layout = QHBoxLayout()
-        self.connect_db_btn = QPushButton("Connect to Database")
-        self.connect_db_btn.clicked.connect(self.connect_to_database)
-        db_btn_layout.addWidget(self.connect_db_btn)
-
-        self.disconnect_db_btn = QPushButton("Disconnect")
-        self.disconnect_db_btn.clicked.connect(self.disconnect_from_database)
-        self.disconnect_db_btn.setEnabled(False)
-        db_btn_layout.addWidget(self.disconnect_db_btn)
-
-        db_btn_layout.addStretch()
-        status_layout.addLayout(db_btn_layout)
-        layout.addWidget(status_group)
-
-        # Report selection
-        report_group = QGroupBox("Generate Reports")
-        report_layout = QVBoxLayout(report_group)
-        report_layout.setContentsMargins(5, 5, 5, 5)
-        report_layout.setSpacing(5)
-
-        # Report type selection
-        type_layout = QHBoxLayout()
-        type_layout.addWidget(QLabel("Report Type:"))
-        self.report_type_combo = QComboBox()
-        self.report_type_combo.addItems([
-            "Job Statistics",
-            "Jobs by Customer",
-            "Jobs by Date Range",
-            "Recent Jobs",
-            "Top Customers"
-        ])
-        type_layout.addWidget(self.report_type_combo)
-        type_layout.addStretch()
-        report_layout.addLayout(type_layout)
-
-        # Filter options
-        filter_layout = QGridLayout()
-
-        filter_layout.addWidget(QLabel("Customer:"), 0, 0)
-        self.report_customer_combo = QComboBox()
-        self.report_customer_combo.setEditable(True)
-        self.report_customer_combo.addItem("All Customers")
-        filter_layout.addWidget(self.report_customer_combo, 0, 1)
-
-        filter_layout.addWidget(QLabel("Start Date:"), 1, 0)
-        self.report_start_date = QLineEdit()
-        self.report_start_date.setPlaceholderText("YYYY-MM-DD")
-        filter_layout.addWidget(self.report_start_date, 1, 1)
-
-        filter_layout.addWidget(QLabel("End Date:"), 1, 2)
-        self.report_end_date = QLineEdit()
-        self.report_end_date.setPlaceholderText("YYYY-MM-DD")
-        filter_layout.addWidget(self.report_end_date, 1, 3)
-
-        report_layout.addLayout(filter_layout)
-
-        # Generate button
-        gen_btn_layout = QHBoxLayout()
-        self.generate_report_btn = QPushButton("Generate Report")
-        self.generate_report_btn.clicked.connect(self.generate_report)
-        self.generate_report_btn.setStyleSheet("font-weight: bold; padding: 6px;")
-        gen_btn_layout.addWidget(self.generate_report_btn)
-
-        self.export_report_btn = QPushButton("Export to CSV")
-        self.export_report_btn.clicked.connect(self.export_report)
-        gen_btn_layout.addWidget(self.export_report_btn)
-
-        gen_btn_layout.addStretch()
-        report_layout.addLayout(gen_btn_layout)
-
-        layout.addWidget(report_group)
-
-        # Results
-        results_group = QGroupBox("Report Results")
-        results_layout = QVBoxLayout(results_group)
-        results_layout.setContentsMargins(5, 5, 5, 5)
-
-        self.report_table = QTableWidget()
-        self.report_table.setColumnCount(5)
-        self.report_table.setHorizontalHeaderLabels(["Date", "Customer", "Job #", "Description", "Status"])
+        # Setup table properties
         self.report_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.report_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        results_layout.addWidget(self.report_table)
 
-        self.report_status_label = QLabel("No data loaded. Connect to database and generate a report.")
-        self.report_status_label.setStyleSheet("color: #666;")
-        results_layout.addWidget(self.report_status_label)
-
-        layout.addWidget(results_group)
+        # Connect signals
+        self.connect_db_btn.clicked.connect(self.connect_to_database)
+        self.disconnect_db_btn.clicked.connect(self.disconnect_from_database)
+        self.generate_report_btn.clicked.connect(self.generate_report)
+        self.export_report_btn.clicked.connect(self.export_report)
 
         return widget
 
@@ -3430,6 +2892,21 @@ def main():
 
     # Set the style
     app.setStyle(ui_style)
+
+    # Show deprecation warning
+    print("\n" + "="*70)
+    print("⚠️  DEPRECATION WARNING")
+    print("="*70)
+    print("You are running the legacy monolithic version of JobDocs.")
+    print("Please use 'python main.py' instead for the new modular version.")
+    print("\nThe new version includes:")
+    print("  • Modular plugin architecture")
+    print("  • Quote management")
+    print("  • Copy From dialog")
+    print("  • Better customer list handling")
+    print("  • Bug fixes and improvements")
+    print("\nSee MIGRATION_COMPLETE.md for details.")
+    print("="*70 + "\n")
 
     window = JobDocs()
     window.show()

@@ -1,0 +1,374 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>AddToJobTab</class>
+ <widget class="QWidget" name="AddToJobTab">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>880</width>
+    <height>650</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <property name="spacing">
+    <number>3</number>
+   </property>
+   <property name="leftMargin">
+    <number>5</number>
+   </property>
+   <property name="topMargin">
+    <number>5</number>
+   </property>
+   <property name="rightMargin">
+    <number>5</number>
+   </property>
+   <property name="bottomMargin">
+    <number>5</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="titleLabel">
+     <property name="text">
+      <string>Add documents to existing job</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QSplitter" name="mainSplitter">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <widget class="QWidget" name="leftWidget" native="true">
+      <layout class="QVBoxLayout" name="leftLayout">
+       <property name="spacing">
+        <number>3</number>
+       </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>3</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QGroupBox" name="selectJobGroup">
+         <property name="title">
+          <string>Select Job</string>
+         </property>
+         <layout class="QVBoxLayout" name="selectJobLayout">
+          <property name="spacing">
+           <number>3</number>
+          </property>
+          <property name="leftMargin">
+           <number>5</number>
+          </property>
+          <property name="topMargin">
+           <number>5</number>
+          </property>
+          <property name="rightMargin">
+           <number>5</number>
+          </property>
+          <property name="bottomMargin">
+           <number>5</number>
+          </property>
+          <item>
+           <layout class="QHBoxLayout" name="filterLayout">
+            <item>
+             <widget class="QLabel" name="customerFilterLabel">
+              <property name="text">
+               <string>Customer:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="add_customer_combo">
+              <property name="minimumSize">
+               <size>
+                <width>150</width>
+                <height>0</height>
+               </size>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QRadioButton" name="add_all_radio">
+              <property name="text">
+               <string>All Jobs</string>
+              </property>
+              <property name="checked">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QRadioButton" name="add_standard_radio">
+              <property name="text">
+               <string>Standard Only</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QRadioButton" name="add_itar_radio">
+              <property name="text">
+               <string>ITAR Only</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="horizontalSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="searchLayout">
+            <item>
+             <widget class="QLabel" name="searchLabel">
+              <property name="text">
+               <string>Search:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLineEdit" name="add_search_edit">
+              <property name="placeholderText">
+               <string>job number or customer...</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="search_btn">
+              <property name="text">
+               <string>Search</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="clear_search_btn">
+              <property name="text">
+               <string>Clear</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QTreeWidget" name="job_tree">
+            <property name="columnCount">
+             <number>1</number>
+            </property>
+            <column>
+             <property name="text">
+              <string>Customer / Job</string>
+             </property>
+            </column>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="selected_job_label">
+            <property name="styleSheet">
+             <string notr="true">color: gray;</string>
+            </property>
+            <property name="text">
+             <string>No job selected</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="rightWidget" native="true">
+      <layout class="QVBoxLayout" name="rightLayout">
+       <property name="spacing">
+        <number>3</number>
+       </property>
+       <property name="leftMargin">
+        <number>3</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QGroupBox" name="addFilesGroup">
+         <property name="title">
+          <string>Add Files</string>
+         </property>
+         <layout class="QVBoxLayout" name="addFilesLayout">
+          <property name="spacing">
+           <number>3</number>
+          </property>
+          <property name="leftMargin">
+           <number>5</number>
+          </property>
+          <property name="topMargin">
+           <number>5</number>
+          </property>
+          <property name="rightMargin">
+           <number>5</number>
+          </property>
+          <property name="bottomMargin">
+           <number>5</number>
+          </property>
+          <item>
+           <widget class="QGroupBox" name="destinationGroup">
+            <property name="title">
+             <string>Destination</string>
+            </property>
+            <layout class="QVBoxLayout" name="destinationLayout">
+             <property name="spacing">
+              <number>2</number>
+             </property>
+             <property name="leftMargin">
+              <number>5</number>
+             </property>
+             <property name="topMargin">
+              <number>5</number>
+             </property>
+             <property name="rightMargin">
+              <number>5</number>
+             </property>
+             <property name="bottomMargin">
+              <number>5</number>
+             </property>
+             <item>
+              <widget class="QRadioButton" name="dest_both_radio">
+               <property name="text">
+                <string>Blueprints + Job</string>
+               </property>
+               <property name="checked">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QRadioButton" name="dest_blueprints_radio">
+               <property name="text">
+                <string>Blueprints only</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QRadioButton" name="dest_job_radio">
+               <property name="text">
+                <string>Job only</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item>
+           <widget class="QFrame" name="add_drop_zone">
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>60</height>
+             </size>
+            </property>
+            <property name="frameShape">
+             <enum>QFrame::StyledPanel</enum>
+            </property>
+            <property name="frameShadow">
+             <enum>QFrame::Sunken</enum>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QListWidget" name="add_files_list">
+            <property name="maximumSize">
+             <size>
+              <width>16777215</width>
+              <height>90</height>
+             </size>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="fileButtonsLayout">
+            <item>
+             <widget class="QPushButton" name="remove_add_btn">
+              <property name="text">
+               <string>Remove Selected</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="clear_add_btn">
+              <property name="text">
+               <string>Clear All</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="horizontalSpacer_2">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QPushButton" name="add_files_btn">
+            <property name="styleSheet">
+             <string notr="true">font-weight: bold; padding: 6px;</string>
+            </property>
+            <property name="text">
+             <string>Add Files to Job</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="add_status_label">
+            <property name="text">
+             <string/>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>DropZone</class>
+   <extends>QFrame</extends>
+   <header>dropzone_widget.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

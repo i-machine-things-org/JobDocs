@@ -1,10 +1,12 @@
 # JobDocs
 
-A tool for managing blueprint files and customer job directories with support for file linking, ITAR compliance, and comprehensive job tracking.
+A modular tool for managing blueprint files and customer job directories with support for file linking, ITAR compliance, and comprehensive job tracking.
 
 ## Features
 
+- **Modular Plugin Architecture** - Extensible system with drop-in modules
 - **Single and Bulk Job Creation** - Create individual jobs or import multiple jobs from CSV
+- **Quote Management** - Create quotes that can be converted to jobs
 - **Blueprint File Management** - Centralized blueprint storage with hard linking to save disk space
 - **ITAR Support** - Separate directories and workflows for ITAR-controlled projects
 - **Advanced Search** - Find jobs by customer, job number, description, or drawing number
@@ -12,7 +14,6 @@ A tool for managing blueprint files and customer job directories with support fo
 - **Import Tools** - Direct import of files to blueprint folders
 - **History Tracking** - Keep track of recent jobs and customer information
 - **Cross-Platform** - Works on Windows, macOS, and Linux
-- **Database Integration (Experimental)** - Connect to JobBOSS or other ERP systems for automated job creation and reporting (see [DATABASE_INTEGRATION.md](DATABASE_INTEGRATION.md))
 
 ## Installation
 
@@ -22,7 +23,12 @@ A tool for managing blueprint files and customer job directories with support fo
 
 ### Install Dependencies
 
-#### On Arch Linux (recommended):
+#### On Debian/Ubuntu:
+```bash
+sudo apt install python3-pyqt6
+```
+
+#### On Arch Linux:
 ```bash
 sudo pacman -S python-pyqt6
 ```
@@ -42,7 +48,7 @@ pip install PyQt6
 Run the application:
 
 ```bash
-python JobDocs-qt.py
+python main.py
 ```
 
 ### First Time Setup
@@ -54,6 +60,17 @@ python JobDocs-qt.py
    - **ITAR Directories**: Optional separate directories for ITAR-controlled projects
 3. Choose your link type (Hard Link recommended to save disk space)
 4. Set blueprint file extensions (default: .pdf, .dwg, .dxf)
+
+### Creating Quotes
+
+1. Go to the **Create Quote** tab
+2. Enter customer name (auto-completes from existing customers)
+3. Enter quote number(s) - supports ranges like Q12345-Q12350
+4. Enter description
+5. Optionally add drawing numbers (comma-separated)
+6. Add files by dragging/dropping
+7. Click **Create Quote**
+8. Use **Copy From...** to copy information from existing quotes or jobs
 
 ### Creating Jobs
 
@@ -68,6 +85,7 @@ python JobDocs-qt.py
 5. Optionally add drawing numbers (comma-separated)
 6. Add files by dragging/dropping or browsing
 7. Click **Create Job**
+8. Use **Copy From...** to copy information from existing quotes or jobs
 
 #### Bulk Job Creation
 1. Go to the **Bulk Create** tab
@@ -103,14 +121,15 @@ Use the **Import Blueprints** tab to:
 The **Search** tab provides powerful search capabilities:
 - Search by customer name, job number, description, or drawing
 - Two search modes:
-  - **Search All Folders** (Legacy mode): Full recursive search through all folders in customer directories
+  - **Search All Folders** (Legacy mode): Full recursive search through all folders
     - Handles inconsistent folder structures from legacy files
     - Optional: Also search blueprints directories
     - Slower but comprehensive
-  - **Strict Format** (Faster): Only searches properly formatted job folders (job#_description_drawings)
+  - **Strict Format** (Faster): Only searches properly formatted job folders
     - Filter by specific fields (customer, job #, description, drawings)
     - Much faster for well-organized structures
 - Double-click results to open job folders
+- Right-click for context menu (copy path, open location)
 
 ## File Structure
 
@@ -119,12 +138,16 @@ JobDocs creates the following directory structure:
 ```
 Customer Files Directory/
 ├── Customer Name/
-│       ├── 12345_Job Description/
-│       │       └── job documents/       
-│       │               ├── blueprint1.pdf (hard link)
-│       │               └── other_file.doc (copy)
-│       └── 12346_Another Job/
-│               └── ...
+│   ├── 12345_Job Description/
+│   │   └── job documents/
+│   │       ├── blueprint1.pdf (hard link)
+│   │       └── other_file.doc (copy)
+│   ├── 12346_Another Job/
+│   │   └── ...
+│   └── Quotes/
+│       └── Q12345_Quote Description/
+│           ├── blueprint1.pdf (hard link)
+│           └── ...
 
 Blueprints Directory/
 └── Customer Name/
@@ -162,6 +185,56 @@ Files stored:
 - Uses double disk space
 - Files are independent
 
+## Modular Architecture
+
+JobDocs uses a plugin-based architecture:
+
+### Available Modules
+1. **Create Quote** - Quote creation and management
+2. **Create Job** - Job folder creation with duplicate detection
+3. **Add to Job** - Add files to existing jobs
+4. **Bulk Create** - Bulk job creation from CSV
+5. **Search** - Advanced job search
+6. **Import Blueprints** - Import blueprints to customer folders
+7. **History** - View recent job history
+8. **Reporting** (Experimental) - Generate and export reports
+
+### Creating Custom Modules
+
+See [MODULAR_SYSTEM.md](MODULAR_SYSTEM.md) for details on creating custom modules.
+
+## Development
+
+### Project Structure
+```
+JobDocs/
+├── main.py              # Main application
+├── core/                # Core framework
+│   ├── base_module.py   # Module base class
+│   ├── app_context.py   # Shared application context
+│   └── module_loader.py # Auto module discovery
+├── shared/              # Shared utilities
+│   ├── utils.py         # File operations, parsing
+│   └── widgets.py       # Custom UI widgets
+├── modules/             # Plugin modules
+│   ├── quote/           # Quote module
+│   ├── job/             # Job module
+│   ├── bulk/            # Bulk creation module
+│   └── ...
+├── settings_dialog.py   # Settings UI
+├── docs/                # Documentation
+├── old/                 # Legacy code (archived)
+└── README.md            # This file
+```
+
+### Building
+
+See [BUILD.md](BUILD.md) for instructions on creating standalone executables.
+
+### Testing
+
+See [TESTING.md](TESTING.md) for testing instructions.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
@@ -171,22 +244,14 @@ MIT License - see [LICENSE](LICENSE) file for details.
 For issues or questions, please visit:
 https://github.com/i-machine-things/JobDocs
 
-## Development
-
-### Project Structure
-- `JobDocs-qt.py` - Main application file
-- `db_integration.py` - Database integration module (experimental)
-- `LICENSE` - MIT License
-- `requirements.txt` - Python dependencies
-- `README.md` - This file
-- `DATABASE_INTEGRATION.md` - Database integration guide (experimental)
-- `TODO_DATABASE_INTEGRATION.md` - Database implementation tasks
-- `BUILD.md` - Build instructions for packaging
-- `CHANGELOG.md` - Version history
-
-### Contributing
+## Contributing
 
 Contributions are welcome! Feel free to submit issues or pull requests.
+
+### Development Notes
+- The modular architecture allows for easy extension and customization
+- Each module is self-contained and can be developed independently
+- Use `modules/_template/` as a starting point for new modules
 
 ---
 

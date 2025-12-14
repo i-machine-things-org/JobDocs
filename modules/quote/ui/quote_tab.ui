@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>QuoteTab</class>
+ <widget class="QWidget" name="QuoteTab">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>880</width>
+    <height>491</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <property name="spacing">
+    <number>5</number>
+   </property>
+   <property name="leftMargin">
+    <number>5</number>
+   </property>
+   <property name="topMargin">
+    <number>5</number>
+   </property>
+   <property name="rightMargin">
+    <number>5</number>
+   </property>
+   <property name="bottomMargin">
+    <number>5</number>
+   </property>
+   <item>
+    <widget class="QGroupBox" name="quoteInfoGroup">
+     <property name="maximumSize">
+      <size>
+       <width>16777215</width>
+       <height>200</height>
+      </size>
+     </property>
+     <property name="title">
+      <string>Quote Information</string>
+     </property>
+     <layout class="QGridLayout" name="quoteInfoLayout">
+      <property name="leftMargin">
+       <number>5</number>
+      </property>
+      <property name="topMargin">
+       <number>5</number>
+      </property>
+      <property name="rightMargin">
+       <number>5</number>
+      </property>
+      <property name="bottomMargin">
+       <number>5</number>
+      </property>
+      <property name="spacing">
+       <number>3</number>
+      </property>
+      <item row="0" column="0">
+       <widget class="QLabel" name="customerLabel">
+        <property name="text">
+         <string>Customer:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QComboBox" name="quote_customer_combo">
+        <property name="minimumSize">
+         <size>
+          <width>250</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="editable">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="quoteNumberLabel">
+        <property name="text">
+         <string>Quote #:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLineEdit" name="quote_number_edit">
+        <property name="placeholderText">
+         <string>e.g., Q12345 or Q12345-Q12350</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="2">
+       <widget class="QLabel" name="quote_status_label">
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="descriptionLabel">
+        <property name="text">
+         <string>Description:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QLineEdit" name="quote_description_edit"/>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="drawingsLabel">
+        <property name="text">
+         <string>Drawings:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QLineEdit" name="quote_drawings_edit">
+        <property name="placeholderText">
+         <string>comma-separated</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QCheckBox" name="quote_itar_check">
+        <property name="text">
+         <string>ITAR Quote (uses separate directories)</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="quoteFilesGroup">
+     <property name="title">
+      <string>Quote Files (Optional)</string>
+     </property>
+     <layout class="QVBoxLayout" name="quoteFilesLayout">
+      <property name="spacing">
+       <number>3</number>
+      </property>
+      <property name="leftMargin">
+       <number>5</number>
+      </property>
+      <property name="topMargin">
+       <number>5</number>
+      </property>
+      <property name="rightMargin">
+       <number>5</number>
+      </property>
+      <property name="bottomMargin">
+       <number>5</number>
+      </property>
+      <item>
+       <widget class="QLabel" name="filesInfoLabel">
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>20</height>
+         </size>
+        </property>
+        <property name="text">
+         <string>Blueprints → blueprints folder, others → quote folder</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QFrame" name="quote_drop_zone">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>60</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>200</height>
+         </size>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::Shape::StyledPanel</enum>
+        </property>
+        <property name="frameShadow">
+         <enum>QFrame::Shadow::Sunken</enum>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QListWidget" name="quote_files_list">
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>200</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="removeButtonLayout">
+        <item>
+         <widget class="QPushButton" name="remove_btn">
+          <property name="text">
+           <string>Remove Selected</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer">
+          <property name="orientation">
+           <enum>Qt::Orientation::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="bottomButtonLayout">
+     <item>
+      <widget class="QPushButton" name="create_btn">
+       <property name="text">
+        <string>Create Quote &amp;&amp; Link Files</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="clear_btn">
+       <property name="text">
+        <string>Clear</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="copy_from_btn">
+       <property name="text">
+        <string>Copy From...</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="horizontalSpacer_3">
+       <property name="orientation">
+        <enum>Qt::Orientation::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="open_bp_btn">
+       <property name="text">
+        <string>Open Blueprints</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="open_cf_btn">
+       <property name="text">
+        <string>Open Customer Files</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
