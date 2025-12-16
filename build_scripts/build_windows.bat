@@ -56,26 +56,15 @@ if errorlevel 1 (
 REM Clean previous builds
 echo [3/5] Cleaning previous builds...
 if exist build rmdir /s /q build
-if exist dist rmdir /s /q dist
-if exist *.spec del /q *.spec
+if exist dist0 rmdir /s /q dist0
 echo       Cleaned
 echo.
 
 REM Build the executable
 echo [4/5] Building executable...
 py -m PyInstaller ^
-    --onefile ^
-    --windowed ^
-    --noconsole ^
-    --name jobdocs ^
-    --add-data "core;core" ^
-    --add-data "shared;shared" ^
-    --add-data "modules;modules" ^
-    --hidden-import PyQt6.QtCore ^
-    --hidden-import PyQt6.QtGui ^
-    --hidden-import PyQt6.QtWidgets ^
-    --hidden-import PyQt6.uic ^
-    main.py
+    --distpath "dist0" ^
+    jobdocs.spec
 
 if errorlevel 1 (
     echo       Build failed!
@@ -92,7 +81,7 @@ if exist JobDocs-Windows rmdir /s /q JobDocs-Windows
 mkdir JobDocs-Windows
 
 REM Copy executable
-copy dist\jobdocs.exe JobDocs-Windows\ >nul
+copy dist0\jobdocs.exe JobDocs-Windows\ >nul
 
 REM Create README
 echo Creating README...

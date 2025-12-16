@@ -41,7 +41,7 @@ class QuoteModule(BaseModule):
         self.quote_drop_zone = None
 
     def get_name(self) -> str:
-        return "Create Quote"
+        return "Create Quote folder"
 
     def get_order(self) -> int:
         return 10  # First tab

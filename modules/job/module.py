@@ -42,7 +42,7 @@ class JobModule(BaseModule):
         self.job_drop_zone = None
 
     def get_name(self) -> str:
-        return "Create Job"
+        return "Create Job Folder"
 
     def get_order(self) -> int:
         return 20  # Second tab

@@ -37,6 +37,7 @@ class JobDocsMainWindow(QMainWindow):
         'legacy_mode': True,
         'default_tab': 0,
         'experimental_features': False,
+        'disabled_modules': [],  # List of disabled module names
         'db_type': 'mssql',
         'db_host': 'localhost',
         'db_port': 1433,
@@ -59,7 +60,7 @@ class JobDocsMainWindow(QMainWindow):
 
         # Setup UI
         self.setWindowTitle("JobDocs")
-        self.resize(1200, 800)
+        self.resize(700, 600)
 
         # Create tab widget
         self.tabs = QTabWidget()
@@ -145,9 +146,10 @@ class JobDocsMainWindow(QMainWindow):
         loader = ModuleLoader(modules_dir)
 
         try:
-            # Load modules with experimental flag
+            # Load modules with experimental flag and disabled modules list
             experimental_enabled = self.settings.get('experimental_features', False)
-            self.modules = loader.load_all_modules(self.app_context, experimental_enabled)
+            disabled_modules = self.settings.get('disabled_modules', [])
+            self.modules = loader.load_all_modules(self.app_context, experimental_enabled, disabled_modules)
 
             if not self.modules:
                 QMessageBox.warning(
@@ -216,7 +218,25 @@ class JobDocsMainWindow(QMainWindow):
         # Import here to avoid circular dependency
         from settings_dialog import SettingsDialog
 
-        dialog = SettingsDialog(self.settings, self)
+        # Discover all available modules for the settings dialog
+        modules_dir = Path(__file__).parent / 'modules'
+        loader = ModuleLoader(modules_dir)
+        available_module_names = loader.discover_modules()
+
+        # Create list of (module_name, display_name) tuples
+        available_modules = []
+        for module_name in available_module_names:
+            try:
+                # Try to load the module class to get its display name
+                module_class = loader.load_module(module_name)
+                instance = module_class()
+                display_name = instance.get_name()
+                available_modules.append((module_name, display_name))
+            except Exception:
+                # If we can't load it, just use the module name
+                available_modules.append((module_name, module_name))
+
+        dialog = SettingsDialog(self.settings, self, available_modules)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.settings = dialog.settings
             self.save_settings()

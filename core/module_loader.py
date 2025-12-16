@@ -106,7 +106,8 @@ class ModuleLoader:
     def load_all_modules(
         self,
         app_context: AppContext,
-        experimental_enabled: bool = False
+        experimental_enabled: bool = False,
+        disabled_modules: List[str] = None
     ) -> List[BaseModule]:
         """
         Discover and load all modules.
@@ -114,6 +115,7 @@ class ModuleLoader:
         Args:
             app_context: Application context to pass to modules
             experimental_enabled: Whether to load experimental modules
+            disabled_modules: List of module names to skip loading
 
         Returns:
             List of initialized module instances, sorted by order
@@ -121,9 +123,17 @@ class ModuleLoader:
         module_names = self.discover_modules()
         self.loaded_modules = []
         errors = []
+        disabled_modules = disabled_modules or []
 
         for module_name in module_names:
             try:
+                # Skip disabled modules
+                if module_name in disabled_modules:
+                    app_context.log_message(
+                        f"Skipping disabled module: {module_name}"
+                    )
+                    continue
+
                 module_class = self.load_module(module_name)
                 instance = module_class()
 

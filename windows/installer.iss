@@ -28,7 +28,7 @@ AllowNoIcons=yes
 LicenseFile=..\LICENSE
 OutputDir=..\
 OutputBaseFilename=JobDocs-Setup-{#VERSION}
-SetupIconFile=..\icon.ico
+SetupIconFile=icon.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -51,10 +51,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 
 [Files]
-Source: "..\dist\jobdocs.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist_temp\jobdocs.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
-Source: "..\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\JobDocs"; Filename: "{app}\jobdocs.exe"; IconFilename: "{app}\icon.ico"

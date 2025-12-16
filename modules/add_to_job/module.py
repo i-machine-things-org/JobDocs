@@ -13,12 +13,65 @@ from typing import List
 from PyQt6.QtWidgets import (
     QWidget, QMessageBox, QTreeWidgetItem, QButtonGroup
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6 import uic
 
 from core.base_module import BaseModule
 from shared.widgets import DropZone
 from shared.utils import create_file_link
+
+
+class JobTreeWorker(QThread):
+    """Background worker for loading job tree data"""
+
+    # Signal emitted when a customer with jobs is found
+    customer_loaded = pyqtSignal(str, str, list)  # (display_name, customer_path, jobs_list)
+    # Signal emitted when loading is complete
+    finished = pyqtSignal()
+
+    def __init__(self, dirs_to_search, selected_customer, show_all_customers, app_context):
+        super().__init__()
+        self.dirs_to_search = dirs_to_search
+        self.selected_customer = selected_customer
+        self.show_all_customers = show_all_customers
+        self.app_context = app_context
+        self._is_cancelled = False
+
+    def cancel(self):
+        """Cancel the worker"""
+        self._is_cancelled = True
+
+    def run(self):
+        """Run the background job loading"""
+        for prefix, cf_dir in self.dirs_to_search:
+            if self._is_cancelled:
+                break
+
+            try:
+                if self.show_all_customers:
+                    customers = [d for d in os.listdir(cf_dir) if os.path.isdir(os.path.join(cf_dir, d))]
+                else:
+                    customers = [self.selected_customer] if os.path.isdir(os.path.join(cf_dir, self.selected_customer)) else []
+
+                for customer in sorted(customers):
+                    if self._is_cancelled:
+                        break
+
+                    customer_path = os.path.join(cf_dir, customer)
+                    if not os.path.exists(customer_path):
+                        continue
+
+                    display_name = f"[{prefix}] {customer}" if prefix else customer
+                    jobs = self.app_context.find_job_folders(customer_path)
+
+                    # Only emit if customer has jobs
+                    if jobs:
+                        self.customer_loaded.emit(display_name, customer_path, jobs)
+
+            except OSError as e:
+                print(f"[JobTreeWorker] OSError: {e}", flush=True)
+
+        self.finished.emit()
 
 
 class AddToJobModule(BaseModule):
@@ -28,6 +81,7 @@ class AddToJobModule(BaseModule):
         super().__init__()
         self.add_files: List[str] = []
         self._widget = None
+        self._worker = None  # Background thread worker
         # Widget references
         self.add_customer_combo = None
         self.add_search_edit = None
@@ -159,71 +213,54 @@ class AddToJobModule(BaseModule):
     # ==================== Job Tree Management ====================
 
     def refresh_job_tree(self):
-        """Refresh the job tree with current filter settings"""
-        print(f"\n[refresh_job_tree] === START ===", flush=True)
+        """Refresh the job tree with current filter settings (async with background thread)"""
+        # Cancel any existing worker
+        if self._worker and self._worker.isRunning():
+            self._worker.cancel()
+            self._worker.wait()
+
         self.job_tree.clear()
+        self.add_status_label.setText("Loading jobs...")
 
         selected_customer = self.add_customer_combo.currentText()
         show_all_customers = selected_customer == "(All Customers)" or not selected_customer
-        print(f"[refresh_job_tree] Selected customer: '{selected_customer}'", flush=True)
-        print(f"[refresh_job_tree] Show all customers: {show_all_customers}", flush=True)
 
         # Get directories based on filter selection
         dirs_to_search = []
 
         if self.add_all_radio.isChecked():
-            print(f"[refresh_job_tree] Filter: All", flush=True)
             dirs_to_search = self._get_customer_files_dirs()
         elif self.add_standard_radio.isChecked():
-            print(f"[refresh_job_tree] Filter: Standard only", flush=True)
             cf_dir = self.app_context.get_setting('customer_files_dir', '')
             if cf_dir and os.path.exists(cf_dir):
                 dirs_to_search.append(('', cf_dir))
         else:  # ITAR only
-            print(f"[refresh_job_tree] Filter: ITAR only", flush=True)
             itar_cf_dir = self.app_context.get_setting('itar_customer_files_dir', '')
             if itar_cf_dir and os.path.exists(itar_cf_dir):
                 dirs_to_search.append(('ITAR', itar_cf_dir))
 
-        print(f"[refresh_job_tree] Dirs to search: {len(dirs_to_search)}", flush=True)
+        # Start background worker
+        self._worker = JobTreeWorker(dirs_to_search, selected_customer, show_all_customers, self.app_context)
+        self._worker.customer_loaded.connect(self._on_customer_loaded)
+        self._worker.finished.connect(self._on_loading_finished)
+        self._worker.start()
 
-        for prefix, cf_dir in dirs_to_search:
-            try:
-                if show_all_customers:
-                    customers = [d for d in os.listdir(cf_dir) if os.path.isdir(os.path.join(cf_dir, d))]
-                else:
-                    customers = [selected_customer] if os.path.isdir(os.path.join(cf_dir, selected_customer)) else []
+    def _on_customer_loaded(self, display_name: str, customer_path: str, jobs: list):
+        """Slot called when a customer with jobs is loaded"""
+        customer_item = QTreeWidgetItem([display_name])
+        customer_item.setData(0, Qt.ItemDataRole.UserRole, customer_path)
 
-                for customer in sorted(customers):
-                    customer_path = os.path.join(cf_dir, customer)
-                    if not os.path.exists(customer_path):
-                        continue
+        for job_name, job_docs_path in sorted(jobs):
+            job_item = QTreeWidgetItem([job_name])
+            job_item.setData(0, Qt.ItemDataRole.UserRole, job_docs_path)
+            customer_item.addChild(job_item)
 
-                    display_name = f"[{prefix}] {customer}" if prefix else customer
-                    customer_item = QTreeWidgetItem([display_name])
-                    customer_item.setData(0, Qt.ItemDataRole.UserRole, customer_path)
+        self.job_tree.addTopLevelItem(customer_item)
 
-                    jobs = self.app_context.find_job_folders(customer_path)
-                    print(f"[AddToJob] Customer: {customer}, Found {len(jobs)} jobs", flush=True)
-                    for job_name, job_docs_path in jobs:
-                        print(f"  Job: {job_name} -> {job_docs_path}", flush=True)
-
-                    for job_name, job_docs_path in sorted(jobs):
-                        job_item = QTreeWidgetItem([job_name])
-                        job_item.setData(0, Qt.ItemDataRole.UserRole, job_docs_path)
-                        customer_item.addChild(job_item)
-                        print(f"[refresh_job_tree]     Added job to tree: {job_name}", flush=True)
-
-                    if customer_item.childCount() > 0:
-                        print(f"[refresh_job_tree]   Adding customer '{display_name}' to tree with {customer_item.childCount()} jobs", flush=True)
-                        self.job_tree.addTopLevelItem(customer_item)
-                    else:
-                        print(f"[refresh_job_tree]   Skipping customer '{display_name}' (no jobs)", flush=True)
-
-            except OSError as e:
-                print(f"[refresh_job_tree] OSError in main loop: {e}", flush=True)
-
-        print(f"[refresh_job_tree] === END === Total items in tree: {self.job_tree.topLevelItemCount()}\n", flush=True)
+    def _on_loading_finished(self):
+        """Slot called when loading is complete"""
+        total_items = self.job_tree.topLevelItemCount()
+        self.add_status_label.setText(f"Loaded {total_items} customer(s) with jobs")
 
     def search_jobs(self):
         """Search for jobs matching the search term"""
@@ -422,4 +459,8 @@ class AddToJobModule(BaseModule):
 
     def cleanup(self):
         """Cleanup resources"""
+        # Stop any running worker thread
+        if self._worker and self._worker.isRunning():
+            self._worker.cancel()
+            self._worker.wait()
         self.add_files.clear()

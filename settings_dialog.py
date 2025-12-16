@@ -9,7 +9,7 @@ Provides a UI for configuring application settings including:
 - Experimental features
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QGroupBox, QLabel, QLineEdit, QPushButton, QCheckBox,
@@ -24,9 +24,11 @@ from shared.utils import get_os_type, get_os_text
 class SettingsDialog(QDialog):
     """Settings dialog"""
 
-    def __init__(self, settings: Dict[str, Any], parent=None):
+    def __init__(self, settings: Dict[str, Any], parent=None, available_modules: List[tuple] = None):
         super().__init__(parent)
         self.settings = settings.copy()
+        self.available_modules = available_modules or []  # List of (module_name, display_name) tuples
+        self.module_checkboxes = {}  # Store module checkboxes
         self.setWindowTitle("Settings")
         self.setMinimumWidth(600)
         self.setup_ui()
@@ -167,6 +169,23 @@ class SettingsDialog(QDialog):
 
         scroll_layout.addWidget(options_group)
 
+        # Modules section
+        if self.available_modules:
+            modules_group = QGroupBox("Modules")
+            modules_layout = QVBoxLayout(modules_group)
+
+            modules_layout.addWidget(QLabel("Enable or disable modules (requires restart):"))
+
+            disabled_modules = self.settings.get('disabled_modules', [])
+
+            for module_name, display_name in sorted(self.available_modules, key=lambda x: x[1]):
+                checkbox = QCheckBox(display_name)
+                checkbox.setChecked(module_name not in disabled_modules)
+                self.module_checkboxes[module_name] = checkbox
+                modules_layout.addWidget(checkbox)
+
+            scroll_layout.addWidget(modules_group)
+
         # Appearance
         appearance_group = QGroupBox("Appearance")
         appearance_layout = QGridLayout(appearance_group)
@@ -274,5 +293,12 @@ class SettingsDialog(QDialog):
         self.settings['ui_style'] = self.style_combo.currentText()
         self.settings['default_tab'] = self.default_tab_combo.currentIndex()
         self.settings['experimental_features'] = self.experimental_check.isChecked()
+
+        # Save disabled modules
+        disabled_modules = []
+        for module_name, checkbox in self.module_checkboxes.items():
+            if not checkbox.isChecked():
+                disabled_modules.append(module_name)
+        self.settings['disabled_modules'] = disabled_modules
 
         self.accept()
