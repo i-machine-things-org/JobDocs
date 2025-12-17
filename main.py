@@ -32,7 +32,7 @@ class JobDocsMainWindow(QMainWindow):
         'blueprint_extensions': ['.pdf', '.dwg', '.dxf'],
         'allow_duplicate_jobs': False,
         'ui_style': 'Fusion',
-        'job_folder_structure': '{customer}/{job_folder}/job documents',
+        'job_folder_structure': '{customer}/job documents/{job_folder}',
         'quote_folder_path': 'Quotes',
         'legacy_mode': True,
         'default_tab': 0,

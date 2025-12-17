@@ -2,16 +2,20 @@
 REM Build Windows Installer for JobDocs
 REM This script builds the executable and creates an installer using Inno Setup
 
-REM Version number - update this when releasing new versions
-set VERSION=0.2.0-alpha
-
 echo ==========================================
 echo JobDocs Windows Installer Build Script
 echo ==========================================
 echo.
 
+REM Read version from VERSION file
+cd ..
+set /p VERSION=<VERSION
+cd windows
+echo Version: %VERSION%
+echo.
+
 REM Step 1: Build the executable using the existing script
-echo [Step 1/2] Building JobDocs executable...
+echo [Step 1/3] Building JobDocs executable...
 echo.
 cd ..
 call build_scripts\build_windows.bat
@@ -26,8 +30,22 @@ echo.
 echo ==========================================
 echo.
 
-REM Step 2: Create installer with Inno Setup
-echo [Step 2/2] Creating installer...
+REM Step 2: Generate installer script with version
+echo [Step 2/3] Generating installer script...
+echo.
+python generate_installer.py %VERSION%
+if errorlevel 1 (
+    echo ERROR: Failed to generate installer script
+    pause
+    exit /b 1
+)
+
+echo.
+echo ==========================================
+echo.
+
+REM Step 3: Create installer with Inno Setup
+echo [Step 3/3] Creating installer...
 echo.
 
 REM Check if Inno Setup is installed
@@ -55,7 +73,7 @@ if not exist %INNO_PATH% (
 
 REM Build installer
 echo Building installer with Inno Setup...
-%INNO_PATH% /DVERSION=%VERSION% installer.iss
+%INNO_PATH% installer.iss
 
 if errorlevel 1 (
     echo ERROR: Failed to create installer

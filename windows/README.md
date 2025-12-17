@@ -4,12 +4,14 @@ This directory contains everything needed to build a Windows installer for JobDo
 
 ## Files
 
-- **installer.iss** - Inno Setup script (recommended installer)
+- **generate_installer.py** - Python script that generates the Inno Setup script with version
+- **installer.iss** - Auto-generated Inno Setup script (DO NOT EDIT MANUALLY)
 - **installer.nsi** - NSIS script (alternative installer)
 - **build_windows_installer.bat** - Automated build script
 - **WINDOWS_INSTALLER.md** - Complete documentation
 - **INSTALL_GUIDE_WINDOWS.md** - End-user installation guide
 - **README_FOR_USERS.txt** - Simple instructions for end users
+- **icon.ico** - Application icon
 
 ## Quick Start
 
@@ -28,9 +30,23 @@ build_windows_installer.bat
 ```
 
 This will:
-1. Build the JobDocs executable using PyInstaller
-2. Create the Windows installer package
-3. Output: `JobDocs-Setup-0.2.0-alpha.exe` in the parent directory
+1. Read version from `../VERSION` file
+2. Build the JobDocs executable using PyInstaller
+3. Generate the `installer.iss` file with the correct version
+4. Create the Windows installer package
+5. Output: `JobDocs-Setup-{version}.exe` in the parent directory
+
+## Version Management
+
+The version is controlled by the `VERSION` file in the project root. To update:
+
+1. Edit `../VERSION` (e.g., change `0.2.0-alpha` to `0.3.0`)
+2. Run `build_windows_installer.bat`
+
+The version will automatically be:
+- Used in the installer filename (e.g., `JobDocs-Setup-0.3.0.exe`)
+- Embedded in the Windows executable metadata
+- Shown in the installer UI
 
 ## Manual Build
 
