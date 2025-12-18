@@ -291,7 +291,7 @@ class BulkModule(BaseModule):
         # Get job module reference for creating jobs
         job_module = None
         for module in self.app_context.main_window.modules:
-            if module.get_name() == "Create Job":
+            if module.get_name() == "Create Job Folder":
                 job_module = module
                 break
 
