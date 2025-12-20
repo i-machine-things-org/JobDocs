@@ -109,6 +109,16 @@
          </widget>
         </item>
         <item>
+         <widget class="QCheckBox" name="search_po_check">
+          <property name="text">
+           <string>PO #</string>
+          </property>
+          <property name="checked">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QCheckBox" name="search_desc_check">
           <property name="text">
            <string>Description</string>
@@ -285,6 +295,11 @@
         <column>
          <property name="text">
           <string>Job #</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>PO #</string>
          </property>
         </column>
         <column>

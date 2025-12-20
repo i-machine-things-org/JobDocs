@@ -116,20 +116,23 @@ class BulkModule(BaseModule):
             except (csv.Error, StopIteration):
                 parts = [p.strip() for p in line.split(',')]
 
-            if len(parts) < 3:
-                jobs.append({'line': line_num, 'valid': False, 'error': 'Need customer, job#, description'})
+            if len(parts) < 4:
+                jobs.append({'line': line_num, 'valid': False, 'error': 'Need customer, job#, PO#, description'})
                 continue
 
             customer = parts[0].strip()
             job_number = parts[1].strip()
-            description = parts[2].strip()
-            drawings = [d.strip() for d in parts[3:] if d.strip()]
+            po_number = parts[2].strip()
+            description = parts[3].strip()
+            drawings = [d.strip() for d in parts[4:] if d.strip()]
 
             errors = []
             if not customer:
                 errors.append("Missing customer")
             if not job_number:
                 errors.append("Missing job#")
+            if not po_number:
+                errors.append("Missing PO#")
             if not description:
                 errors.append("Missing description")
 
@@ -139,6 +142,7 @@ class BulkModule(BaseModule):
                 'error': '; '.join(errors) if errors else None,
                 'customer': customer,
                 'job_number': job_number,
+                'po_number': po_number,
                 'description': description,
                 'drawings': drawings
             })
@@ -172,8 +176,9 @@ class BulkModule(BaseModule):
             self.bulk_table.setItem(row, 0, QTableWidgetItem(status))
             self.bulk_table.setItem(row, 1, QTableWidgetItem(job.get('customer', '')))
             self.bulk_table.setItem(row, 2, QTableWidgetItem(job.get('job_number', '')))
-            self.bulk_table.setItem(row, 3, QTableWidgetItem(job.get('description', '')))
-            self.bulk_table.setItem(row, 4, QTableWidgetItem(', '.join(job.get('drawings', []))))
+            self.bulk_table.setItem(row, 3, QTableWidgetItem(job.get('po_number', '')))
+            self.bulk_table.setItem(row, 4, QTableWidgetItem(job.get('description', '')))
+            self.bulk_table.setItem(row, 5, QTableWidgetItem(', '.join(job.get('drawings', []))))
 
         self.bulk_status_label.setText(f"Valid: {valid} | Invalid: {invalid}")
         return invalid == 0
@@ -308,7 +313,7 @@ class BulkModule(BaseModule):
             if self.job_exists(customer, job['job_number'], is_itar):
                 skipped += 1
             else:
-                if job_module.create_single_job(customer, job['job_number'], job['description'], job['drawings'], is_itar, []):
+                if job_module.create_single_job(customer, job['job_number'], job['po_number'], job['description'], job['drawings'], is_itar, []):
                     created += 1
 
             self.bulk_progress.setValue(i + 1)

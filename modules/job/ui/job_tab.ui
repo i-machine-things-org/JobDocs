@@ -95,30 +95,44 @@
        </widget>
       </item>
       <item row="2" column="0">
+       <widget class="QLabel" name="poNumberLabel">
+        <property name="text">
+         <string>PO #:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QLineEdit" name="po_number_edit">
+        <property name="placeholderText">
+         <string>Customer PO Number (Optional)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
        <widget class="QLabel" name="descriptionLabel">
         <property name="text">
          <string>Description:</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="3" column="1">
        <widget class="QLineEdit" name="description_edit"/>
       </item>
-      <item row="3" column="0">
+      <item row="4" column="0">
        <widget class="QLabel" name="drawingsLabel">
         <property name="text">
          <string>Drawings:</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="1">
+      <item row="4" column="1">
        <widget class="QLineEdit" name="drawings_edit">
         <property name="placeholderText">
          <string>comma-separated</string>
         </property>
        </widget>
       </item>
-      <item row="4" column="1">
+      <item row="5" column="1">
        <widget class="QCheckBox" name="itar_check">
         <property name="text">
          <string>ITAR Job (uses separate directories)</string>

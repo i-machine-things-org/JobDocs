@@ -32,6 +32,7 @@ class JobModule(BaseModule):
         # Widget references
         self.customer_combo = None
         self.job_number_edit = None
+        self.po_number_edit = None
         self.job_status_label = None
         self.description_edit = None
         self.drawings_edit = None
@@ -66,6 +67,7 @@ class JobModule(BaseModule):
         # Store widget references
         self.customer_combo = widget.customer_combo
         self.job_number_edit = widget.job_number_edit
+        self.po_number_edit = widget.po_number_edit
         self.job_status_label = widget.job_status_label
         self.description_edit = widget.description_edit
         self.drawings_edit = widget.drawings_edit
@@ -135,6 +137,7 @@ class JobModule(BaseModule):
         """Create job folder(s) from form data"""
         customer = self.customer_combo.currentText().strip()
         job_input = self.job_number_edit.text().strip()
+        po_number = self.po_number_edit.text().strip()
         description = self.description_edit.text().strip()
         drawings_str = self.drawings_edit.text().strip()
         is_itar = self.itar_check.isChecked()
@@ -180,7 +183,7 @@ class JobModule(BaseModule):
 
         created = 0
         for job_num in job_numbers:
-            if self.create_single_job(customer, job_num, description, drawings, is_itar, self.job_files):
+            if self.create_single_job(customer, job_num, po_number, description, drawings, is_itar, self.job_files):
                 created += 1
 
         if created > 0:
@@ -196,13 +199,13 @@ class JobModule(BaseModule):
         else:
             self.show_error("Error", "Failed to create jobs")
 
-    def create_single_job(self, customer: str, job_number: str, description: str,
+    def create_single_job(self, customer: str, job_number: str, po_number: str, description: str,
                          drawings: List[str], is_itar: bool, files: List[str]) -> bool:
         """Create a single job folder"""
         try:
             bp_dir, cf_dir = self.app_context.get_directories(is_itar)
 
-            # Build job folder name
+            # Build job folder name with description and drawings
             if drawings:
                 job_dir_name = f"{job_number}_{description}_{'-'.join(drawings)}"
             else:
@@ -211,7 +214,7 @@ class JobModule(BaseModule):
             job_dir_name = sanitize_filename(job_dir_name)
 
             # Build job path using configured structure
-            job_path = self.app_context.build_job_path(cf_dir, customer, job_dir_name)
+            job_path = self.app_context.build_job_path(cf_dir, customer, job_dir_name, po_number)
             job_path.mkdir(parents=True, exist_ok=True)
 
             customer_bp = Path(bp_dir) / customer
@@ -269,6 +272,7 @@ class JobModule(BaseModule):
                 'date': datetime.now().isoformat(),
                 'customer': customer,
                 'job_number': job_number,
+                'po_number': po_number,
                 'description': description,
                 'drawings': drawings,
                 'path': str(job_path)
@@ -320,6 +324,7 @@ class JobModule(BaseModule):
         """Clear all form fields"""
         self.customer_combo.setCurrentText("")
         self.job_number_edit.clear()
+        self.po_number_edit.clear()
         self.description_edit.clear()
         self.drawings_edit.clear()
         self.itar_check.setChecked(False)

@@ -69,6 +69,11 @@
         </column>
         <column>
          <property name="text">
+          <string>PO #</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
           <string>Description</string>
          </property>
         </column>

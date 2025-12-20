@@ -185,22 +185,28 @@ class AppContext:
             self._settings.get('customer_files_dir')
         )
 
-    def build_job_path(self, base_dir: str, customer: str, job_folder_name: str) -> Path:
+    def build_job_path(self, base_dir: str, customer: str, job_folder_name: str, po_number: str = "") -> Path:
         """
         Build job path based on the configured structure template.
 
         Args:
             base_dir: Base customer files directory
             customer: Customer name
-            job_folder_name: Job folder name (e.g., "12345_Description_Drawing")
+            job_folder_name: Job folder name (e.g., "12345" or "12345_Description")
+            po_number: Purchase order number (optional)
 
         Returns:
             Path to the job folder
         """
-        structure = self._settings.get('job_folder_structure', '{customer}/{job_folder}/job documents')
+        structure = self._settings.get('job_folder_structure', '{customer}/{po_number}/{job_folder}')
 
         # Replace placeholders
-        path_str = structure.replace('{customer}', customer).replace('{job_folder}', job_folder_name)
+        path_str = structure.replace('{customer}', customer).replace('{job_folder}', job_folder_name).replace('{po_number}', po_number)
+
+        # Clean up any double slashes from empty placeholders
+        path_str = path_str.replace('//', '/')
+        # Remove leading/trailing slashes
+        path_str = path_str.strip('/')
 
         return Path(base_dir) / path_str
 
