@@ -18,6 +18,7 @@ from PyQt6.QtCore import Qt
 from core.module_loader import ModuleLoader
 from core.app_context import AppContext
 from shared.utils import get_config_dir, get_os_text
+from shared.remote_sync import RemoteSyncManager
 
 
 class JobDocsMainWindow(QMainWindow):
@@ -43,7 +44,8 @@ class JobDocsMainWindow(QMainWindow):
         'db_port': 1433,
         'db_name': '',
         'db_username': '',
-        'db_password': ''
+        'db_password': '',
+        'remote_server_path': ''  # Network path or URL for remote settings sync
     }
 
     def __init__(self):
@@ -54,7 +56,13 @@ class JobDocsMainWindow(QMainWindow):
         self.settings_file = self.config_dir / 'settings.json'
         self.history_file = self.config_dir / 'history.json'
 
+        # Load settings first (needed for remote sync setup)
         self.settings = self.load_settings()
+
+        # Initialize remote sync manager
+        remote_path = self.settings.get('remote_server_path', '')
+        self.remote_sync = RemoteSyncManager(remote_path)
+
         self.history = self.load_history()
         self.modules = []  # Store loaded modules
 
@@ -100,41 +108,89 @@ class JobDocsMainWindow(QMainWindow):
     # ==================== Settings & History ====================
 
     def load_settings(self) -> Dict[str, Any]:
-        """Load settings from file"""
+        """Load settings from file, trying remote server first if configured"""
+        # First try to load from local to get remote_server_path
+        local_settings = None
         if self.settings_file.exists():
             try:
                 with open(self.settings_file, 'r') as f:
-                    settings = json.load(f)
-                    merged = self.DEFAULT_SETTINGS.copy()
-                    merged.update(settings)
-                    return merged
+                    local_settings = json.load(f)
             except (json.JSONDecodeError, IOError) as e:
-                print(f"Warning: Could not load settings: {e}")
+                print(f"Warning: Could not load local settings: {e}")
+
+        # If we have a remote path configured, try loading from remote (remote is source of truth)
+        if local_settings and local_settings.get('remote_server_path'):
+            remote_sync = RemoteSyncManager(local_settings['remote_server_path'])
+            remote_settings = remote_sync.load_json_from_remote('settings.json')
+            if remote_settings:
+                # Remote settings loaded successfully - use them
+                merged = self.DEFAULT_SETTINGS.copy()
+                merged.update(remote_settings)
+                # Save to local to keep in sync
+                try:
+                    with open(self.settings_file, 'w') as f:
+                        json.dump(merged, f, indent=2)
+                except IOError:
+                    pass
+                return merged
+
+        # Fall back to local settings
+        if local_settings:
+            merged = self.DEFAULT_SETTINGS.copy()
+            merged.update(local_settings)
+            return merged
+
         return self.DEFAULT_SETTINGS.copy()
 
     def save_settings(self):
-        """Save settings to file"""
+        """Save settings to file and sync to remote server if configured"""
         try:
+            # Save locally first
             with open(self.settings_file, 'w') as f:
                 json.dump(self.settings, f, indent=2)
+
+            # Sync to remote if configured
+            if self.remote_sync.is_enabled():
+                self.remote_sync.save_json_to_remote('settings.json', self.settings)
+
         except IOError as e:
             self.show_error_dialog("Error", f"Failed to save settings: {e}")
 
     def load_history(self) -> Dict[str, Any]:
-        """Load history from file"""
+        """Load history from file, trying remote server first if configured"""
+        # Try loading from remote first (remote is source of truth)
+        if self.remote_sync.is_enabled():
+            remote_history = self.remote_sync.load_json_from_remote('history.json')
+            if remote_history:
+                # Save to local to keep in sync
+                try:
+                    with open(self.history_file, 'w') as f:
+                        json.dump(remote_history, f, indent=2)
+                except IOError:
+                    pass
+                return remote_history
+
+        # Fall back to local history
         if self.history_file.exists():
             try:
                 with open(self.history_file, 'r') as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError) as e:
                 print(f"Warning: Could not load history: {e}")
+
         return {'customers': {}, 'recent_jobs': []}
 
     def save_history(self):
-        """Save history to file"""
+        """Save history to file and sync to remote server if configured"""
         try:
+            # Save locally first
             with open(self.history_file, 'w') as f:
                 json.dump(self.history, f, indent=2)
+
+            # Sync to remote if configured
+            if self.remote_sync.is_enabled():
+                self.remote_sync.save_json_to_remote('history.json', self.history)
+
         except IOError as e:
             self.show_error_dialog("Error", f"Failed to save history: {e}")
 
@@ -239,6 +295,11 @@ class JobDocsMainWindow(QMainWindow):
         dialog = SettingsDialog(self.settings, self, available_modules)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.settings = dialog.settings
+
+            # Reinitialize remote sync manager if path changed
+            remote_path = self.settings.get('remote_server_path', '')
+            self.remote_sync = RemoteSyncManager(remote_path)
+
             self.save_settings()
             self.populate_customer_lists()
             QMessageBox.information(self, "Settings", "Settings saved. Please restart for all changes to take effect.")
