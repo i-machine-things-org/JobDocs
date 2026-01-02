@@ -200,3 +200,43 @@ def open_folder(path: str) -> Tuple[bool, Optional[str]]:
         return False, f"Permission denied: {path}"
     except Exception as e:
         return False, f"Failed to open folder: {e}"
+
+
+def get_next_number(history: Dict[str, Any], entry_type: str, start_number: int = 10000) -> str:
+    """
+    Get the next sequential number for jobs or quotes (tracked separately).
+
+    Args:
+        history: Application history dictionary
+        entry_type: Type of entry ('job' or 'quote')
+        start_number: Starting number if no history exists (default: 10000)
+
+    Returns:
+        Next number as a string
+    """
+    max_number = start_number - 1
+
+    # Determine which history key to use (jobs and quotes are tracked separately)
+    if entry_type == 'job':
+        history_key = 'recent_jobs'
+        number_key = 'job_number'
+    elif entry_type == 'quote':
+        history_key = 'recent_quotes'
+        number_key = 'quote_number'
+    else:
+        return str(start_number)
+
+    # Check history for the highest number
+    recent_entries = history.get(history_key, [])
+    for entry in recent_entries:
+        number_str = entry.get(number_key, '')
+        # Try to parse as integer
+        try:
+            number = int(number_str)
+            if number > max_number:
+                max_number = number
+        except ValueError:
+            # Not a pure number, skip it
+            continue
+
+    return str(max_number + 1)
