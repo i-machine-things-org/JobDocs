@@ -5,6 +5,7 @@ A modular tool for managing blueprint files and customer job directories with su
 ## Features
 
 - **Modular Plugin Architecture** - Extensible system with drop-in modules
+- **Auto-Generate Numbers** - Automatically generate next sequential job/quote number (starting at 10000)
 - **Single and Bulk Job Creation** - Create individual jobs or import multiple jobs from CSV
 - **Quote Management** - Create quotes that can be converted to jobs
 - **Blueprint File Management** - Centralized blueprint storage with hard linking to save disk space
@@ -65,7 +66,9 @@ python main.py
 
 1. Go to the **Create Quote** tab
 2. Enter customer name (auto-completes from existing customers)
-3. Enter quote number(s) - supports ranges like Q12345-Q12350
+3. Enter quote number(s):
+   - Click **Auto** button to auto-generate next number (starts at 10000)
+   - Or manually enter - supports ranges like Q12345-Q12350
 4. Enter description
 5. Optionally add drawing numbers (comma-separated)
 6. Add files by dragging/dropping
@@ -77,10 +80,12 @@ python main.py
 #### Single Job Creation
 1. Go to the **Create Job** tab
 2. Enter customer name (auto-completes from history)
-3. Enter job number(s) - supports:
-   - Single: `12345`
-   - Multiple: `12345, 12346, 12347`
-   - Range: `12345-12350`
+3. Enter job number(s):
+   - Click **Auto** button to auto-generate next number (starts at 10000)
+   - Or manually enter - supports:
+     - Single: `12345`
+     - Multiple: `12345, 12346, 12347`
+     - Range: `12345-12350`
 4. Enter description
 5. Optionally add drawing numbers (comma-separated)
 6. Add files by dragging/dropping or browsing
