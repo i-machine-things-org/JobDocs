@@ -1,7 +1,3 @@
-# Test/sample directories
-sample_files/
-test_jobs.csv
-
 # Claude Code and development notes
 .claude/
 .github-push-checklist.md
