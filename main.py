@@ -216,7 +216,7 @@ class JobDocsMainWindow(QMainWindow):
     def open_settings(self):
         """Open settings dialog"""
         # Import here to avoid circular dependency
-        from settings_dialog import SettingsDialog
+        from core.settings_dialog import SettingsDialog
 
         # Discover all available modules for the settings dialog
         modules_dir = Path(__file__).parent / 'modules'
