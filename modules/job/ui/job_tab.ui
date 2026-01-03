@@ -81,11 +81,31 @@
        </widget>
       </item>
       <item row="1" column="1">
-       <widget class="QLineEdit" name="job_number_edit">
-        <property name="placeholderText">
-         <string>e.g., 12345 or 12345-12350</string>
-        </property>
-       </widget>
+       <layout class="QHBoxLayout" name="jobNumberLayout">
+        <item>
+         <widget class="QLineEdit" name="job_number_edit">
+          <property name="placeholderText">
+           <string>e.g., 12345 or 12345-12350</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="auto_gen_job_btn">
+          <property name="maximumSize">
+           <size>
+            <width>40</width>
+            <height>16777215</height>
+           </size>
+          </property>
+          <property name="text">
+           <string>Auto</string>
+          </property>
+          <property name="toolTip">
+           <string>Auto-generate next job number</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
       <item row="1" column="2">
        <widget class="QLabel" name="job_status_label">

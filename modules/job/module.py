@@ -18,7 +18,7 @@ from core.base_module import BaseModule
 from shared.widgets import DropZone, JobSearchDialog
 from shared.utils import (
     is_blueprint_file, parse_job_numbers, create_file_link,
-    sanitize_filename, open_folder
+    sanitize_filename, open_folder, get_next_number
 )
 
 
@@ -90,6 +90,7 @@ class JobModule(BaseModule):
         widget.copy_from_btn.clicked.connect(self.show_copy_from_dialog)
         widget.create_btn.clicked.connect(self.create_job)
         widget.clear_btn.clicked.connect(self.clear_job_form)
+        widget.auto_gen_job_btn.clicked.connect(self.auto_generate_job_number)
         widget.open_bp_btn.clicked.connect(self.open_blueprints_folder)
         widget.open_cf_btn.clicked.connect(self.open_customer_files_folder)
 
@@ -325,6 +326,12 @@ class JobModule(BaseModule):
         self.itar_check.setChecked(False)
         self.job_files.clear()
         self.job_files_list.clear()
+
+    def auto_generate_job_number(self):
+        """Auto-generate the next job number"""
+        next_number = get_next_number(self.app_context.history, 'job', start_number=10000)
+        self.job_number_edit.setText(next_number)
+        self.log_message(f"Auto-generated job number: {next_number}")
 
     # ==================== Search & Copy Functions ====================
 
