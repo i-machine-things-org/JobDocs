@@ -4,8 +4,10 @@ This directory contains scripts for building standalone executables of JobDocs.
 
 ## Files
 
+- **JobDocs.spec** - PyInstaller specification file (used by both build scripts)
 - **build_linux.sh** - Build standalone executable for Linux
 - **build_windows.bat** - Build standalone executable for Windows
+- **README.md** - This file
 
 ## Important Note
 
@@ -24,7 +26,7 @@ cd /path/to/JobDocs
 ./build_scripts/build_linux.sh
 ```
 
-Output: `dist/jobdocs` (standalone executable)
+Output: `dist/JobDocs/` (directory with executable and dependencies)
 
 ### Windows Executable
 
@@ -33,7 +35,7 @@ cd C:\path\to\JobDocs
 build_scripts\build_windows.bat
 ```
 
-Output: `dist\jobdocs.exe` (standalone executable)
+Output: `build_scripts\JobDocs-Windows\` (distribution package ready to share)
 
 ## What These Scripts Do
 
@@ -41,8 +43,18 @@ Both scripts:
 1. Check Python version
 2. Install PyInstaller and PyQt6 if needed
 3. Clean previous builds
-4. Build a standalone executable using PyInstaller
-5. Bundle Python runtime and all dependencies
+4. Build using the `JobDocs.spec` file
+5. Bundle Python runtime and all dependencies into a distributable package
+
+## The Spec File
+
+The `JobDocs.spec` file contains all the build configuration:
+- Automatically collects all `.ui` files from modules
+- Includes all icons from `JobDocs.iconset/`
+- Bundles sample files and documentation
+- Specifies all hidden imports for dynamically loaded modules
+- Cross-platform support (Windows, Linux, macOS)
+- UPX compression enabled for smaller file size
 
 ## Standalone vs Installer
 

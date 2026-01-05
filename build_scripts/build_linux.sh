@@ -53,23 +53,13 @@ fi
 
 # Clean previous builds
 echo "[3/5] Cleaning previous builds..."
-rm -rf build/ dist/ *.spec
+cd ..
+rm -rf build/ dist/
 echo "      Cleaned"
 
 # Build the executable
 echo "[4/5] Building executable..."
-python3 -m PyInstaller \
-    --onefile \
-    --windowed \
-    --name jobdocs \
-    --add-data "core:core" \
-    --add-data "shared:shared" \
-    --add-data "modules:modules" \
-    --hidden-import PyQt6.QtCore \
-    --hidden-import PyQt6.QtGui \
-    --hidden-import PyQt6.QtWidgets \
-    --hidden-import PyQt6.uic \
-    main.py
+python3 -m PyInstaller build_scripts/JobDocs.spec
 
 if [ $? -eq 0 ]; then
     echo "      Build successful!"
@@ -78,29 +68,27 @@ else
     exit 1
 fi
 
-# Create symlink for capitalized version
-echo "Creating JobDocs symlink..."
-cd dist
-ln -sf jobdocs JobDocs
-cd ..
-
 # Show build info
 echo "[5/5] Build complete!"
 echo ""
 echo "======================================"
-echo "Output: dist/jobdocs (with JobDocs symlink)"
-echo "Size: $(du -h dist/jobdocs | cut -f1)"
+echo "Output: dist/JobDocs/"
+echo "Main executable: dist/JobDocs/JobDocs"
+if [ -f dist/JobDocs/JobDocs ]; then
+    echo "Size: $(du -sh dist/JobDocs | cut -f1)"
+fi
 echo "======================================"
 echo ""
+echo "To run:"
+echo "  ./dist/JobDocs/JobDocs"
+echo ""
 echo "To install system-wide:"
-echo "  sudo cp dist/jobdocs /usr/local/bin/"
-echo "  sudo ln -sf /usr/local/bin/jobdocs /usr/local/bin/JobDocs"
+echo "  sudo cp -r dist/JobDocs /opt/"
+echo "  sudo ln -sf /opt/JobDocs/JobDocs /usr/local/bin/jobdocs"
 echo ""
 echo "To install for current user:"
+echo "  mkdir -p ~/.local/share"
+echo "  cp -r dist/JobDocs ~/.local/share/"
 echo "  mkdir -p ~/.local/bin"
-echo "  cp dist/jobdocs ~/.local/bin/"
-echo "  ln -sf ~/.local/bin/jobdocs ~/.local/bin/JobDocs"
-echo ""
-echo "To run:"
-echo "  ./dist/jobdocs  (or ./dist/JobDocs)"
+echo "  ln -sf ~/.local/share/JobDocs/JobDocs ~/.local/bin/jobdocs"
 echo ""
