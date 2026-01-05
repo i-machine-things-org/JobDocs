@@ -190,6 +190,7 @@ class JobDocsMainWindow(QMainWindow):
     def setup_menu(self):
         """Setup application menu"""
         menubar = self.menuBar()
+        menubar.setNativeMenuBar(False)  # Force menu to appear in window (not system menu bar)
 
         # File menu
         file_menu = menubar.addMenu("&File")
