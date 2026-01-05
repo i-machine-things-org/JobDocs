@@ -55,16 +55,16 @@ if errorlevel 1 (
 
 REM Clean previous builds
 echo [3/5] Cleaning previous builds...
-if exist build rmdir /s /q build
-if exist dist0 rmdir /s /q dist0
+if exist ..\build rmdir /s /q ..\build
+if exist ..\dist rmdir /s /q ..\dist
 echo       Cleaned
 echo.
 
 REM Build the executable
 echo [4/5] Building executable...
-py -m PyInstaller ^
-    --distpath "dist0" ^
-    jobdocs.spec
+cd ..
+py -m PyInstaller build_scripts\JobDocs.spec
+cd build_scripts
 
 if errorlevel 1 (
     echo       Build failed!
@@ -80,8 +80,9 @@ echo [5/5] Creating distribution package...
 if exist JobDocs-Windows rmdir /s /q JobDocs-Windows
 mkdir JobDocs-Windows
 
-REM Copy executable
-copy dist0\jobdocs.exe JobDocs-Windows\ >nul
+REM Copy executable and all dependencies
+echo       Copying files...
+xcopy /E /I /Q ..\dist\JobDocs JobDocs-Windows\JobDocs >nul
 
 REM Create README
 echo Creating README...
@@ -91,14 +92,13 @@ echo ==============================
 echo.
 echo Installation:
 echo   1. Copy this folder to your desired location ^(e.g., C:\Program Files\JobDocs^)
-echo   2. Right-click on jobdocs.exe and select "Send to" ^> "Desktop ^(create shortcut^)"
+echo   2. Right-click on JobDocs\JobDocs.exe and select "Send to" ^> "Desktop ^(create shortcut^)"
 echo   3. ^(Optional^) Pin the shortcut to Start Menu or Taskbar
 echo.
 echo Running JobDocs:
-echo   - Double-click jobdocs.exe
+echo   - Double-click JobDocs\JobDocs.exe
 echo   - Or use the desktop shortcut
-echo.
-echo Note: Windows is case-insensitive, so you can type "jobdocs" or "JobDocs".
+echo   - Or run Create-Desktop-Shortcut.bat to create a shortcut automatically
 echo.
 echo First-time setup:
 echo   On first launch, JobDocs will ask you to configure:
@@ -124,8 +124,8 @@ echo.
 echo echo Set oWS = WScript.CreateObject^("WScript.Shell"^) ^> %%SCRIPT%%
 echo echo sLinkFile = oWS.SpecialFolders^("Desktop"^) ^& "\JobDocs.lnk" ^>^> %%SCRIPT%%
 echo echo Set oLink = oWS.CreateShortcut^(sLinkFile^) ^>^> %%SCRIPT%%
-echo echo oLink.TargetPath = "%%~dp0jobdocs.exe" ^>^> %%SCRIPT%%
-echo echo oLink.WorkingDirectory = "%%~dp0" ^>^> %%SCRIPT%%
+echo echo oLink.TargetPath = "%%~dp0JobDocs\JobDocs.exe" ^>^> %%SCRIPT%%
+echo echo oLink.WorkingDirectory = "%%~dp0JobDocs" ^>^> %%SCRIPT%%
 echo echo oLink.Description = "JobDocs - Job and Quote Management" ^>^> %%SCRIPT%%
 echo echo oLink.Save ^>^> %%SCRIPT%%
 echo.
@@ -145,11 +145,11 @@ echo.
 echo Distribution package: JobDocs-Windows\
 echo.
 echo Contents:
-echo   - jobdocs.exe
+echo   - JobDocs\ (application folder with all dependencies)
 echo   - README.txt
 echo   - Create-Desktop-Shortcut.bat
 echo.
-for %%I in (JobDocs-Windows\jobdocs.exe) do echo Size: %%~zI bytes
+for %%I in (JobDocs-Windows\JobDocs\JobDocs.exe) do echo Executable size: %%~zI bytes
 echo.
 echo Next steps:
 echo   1. Copy the JobDocs-Windows folder to your desired location
