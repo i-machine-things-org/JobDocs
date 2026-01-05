@@ -80,9 +80,8 @@ echo [5/5] Creating distribution package...
 if exist JobDocs-Windows rmdir /s /q JobDocs-Windows
 mkdir JobDocs-Windows
 
-REM Copy executable and all dependencies
-echo       Copying files...
-xcopy /E /I /Q ..\dist\JobDocs JobDocs-Windows\JobDocs >nul
+REM Copy executable
+copy ..\dist\JobDocs.exe JobDocs-Windows\ >nul
 
 REM Create README
 echo Creating README...
@@ -92,11 +91,11 @@ echo ==============================
 echo.
 echo Installation:
 echo   1. Copy this folder to your desired location ^(e.g., C:\Program Files\JobDocs^)
-echo   2. Right-click on JobDocs\JobDocs.exe and select "Send to" ^> "Desktop ^(create shortcut^)"
+echo   2. Right-click on JobDocs.exe and select "Send to" ^> "Desktop ^(create shortcut^)"
 echo   3. ^(Optional^) Pin the shortcut to Start Menu or Taskbar
 echo.
 echo Running JobDocs:
-echo   - Double-click JobDocs\JobDocs.exe
+echo   - Double-click JobDocs.exe
 echo   - Or use the desktop shortcut
 echo   - Or run Create-Desktop-Shortcut.bat to create a shortcut automatically
 echo.
@@ -124,8 +123,8 @@ echo.
 echo echo Set oWS = WScript.CreateObject^("WScript.Shell"^) ^> %%SCRIPT%%
 echo echo sLinkFile = oWS.SpecialFolders^("Desktop"^) ^& "\JobDocs.lnk" ^>^> %%SCRIPT%%
 echo echo Set oLink = oWS.CreateShortcut^(sLinkFile^) ^>^> %%SCRIPT%%
-echo echo oLink.TargetPath = "%%~dp0JobDocs\JobDocs.exe" ^>^> %%SCRIPT%%
-echo echo oLink.WorkingDirectory = "%%~dp0JobDocs" ^>^> %%SCRIPT%%
+echo echo oLink.TargetPath = "%%~dp0JobDocs.exe" ^>^> %%SCRIPT%%
+echo echo oLink.WorkingDirectory = "%%~dp0" ^>^> %%SCRIPT%%
 echo echo oLink.Description = "JobDocs - Job and Quote Management" ^>^> %%SCRIPT%%
 echo echo oLink.Save ^>^> %%SCRIPT%%
 echo.
@@ -145,11 +144,11 @@ echo.
 echo Distribution package: JobDocs-Windows\
 echo.
 echo Contents:
-echo   - JobDocs\ (application folder with all dependencies)
+echo   - JobDocs.exe (standalone single-file executable)
 echo   - README.txt
 echo   - Create-Desktop-Shortcut.bat
 echo.
-for %%I in (JobDocs-Windows\JobDocs\JobDocs.exe) do echo Executable size: %%~zI bytes
+for %%I in (JobDocs-Windows\JobDocs.exe) do echo Executable size: %%~zI bytes
 echo.
 echo Next steps:
 echo   1. Copy the JobDocs-Windows folder to your desired location

@@ -26,7 +26,7 @@ cd /path/to/JobDocs
 ./build_scripts/build_linux.sh
 ```
 
-Output: `dist/JobDocs/` (directory with executable and dependencies)
+Output: `dist/JobDocs` (single-file standalone executable)
 
 ### Windows Executable
 
@@ -35,7 +35,7 @@ cd C:\path\to\JobDocs
 build_scripts\build_windows.bat
 ```
 
-Output: `build_scripts\JobDocs-Windows\` (distribution package ready to share)
+Output: `build_scripts\JobDocs-Windows\JobDocs.exe` (single-file standalone executable)
 
 ## What These Scripts Do
 
@@ -49,12 +49,14 @@ Both scripts:
 ## The Spec File
 
 The `JobDocs.spec` file contains all the build configuration:
+- **Single-file build** - Creates one standalone executable
 - Automatically collects all `.ui` files from modules
 - Includes all icons from `JobDocs.iconset/`
 - Bundles sample files and documentation
 - Specifies all hidden imports for dynamically loaded modules
 - Cross-platform support (Windows, Linux, macOS)
 - UPX compression enabled for smaller file size
+- No external dependencies or DLL files needed
 
 ## Standalone vs Installer
 
