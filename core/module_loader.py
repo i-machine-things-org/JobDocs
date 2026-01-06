@@ -42,17 +42,35 @@ class ModuleLoader:
         Returns:
             List of module names (directory names)
         """
-        if not self.modules_dir.exists():
-            return []
+        # Check if running in a PyInstaller frozen environment
+        is_frozen = getattr(sys, 'frozen', False)
 
-        module_names = []
-        for item in self.modules_dir.iterdir():
-            if item.is_dir() and not item.name.startswith('_'):
-                module_file = item / 'module.py'
-                if module_file.exists():
-                    module_names.append(item.name)
+        if is_frozen:
+            # In frozen mode, return hardcoded list of modules
+            # These must match the modules in the spec file's hiddenimports
+            return [
+                'quote',
+                'job',
+                'add_to_job',
+                'bulk',
+                'search',
+                'import_bp',
+                'history',
+                'reporting'
+            ]
+        else:
+            # In development mode, discover from filesystem
+            if not self.modules_dir.exists():
+                return []
 
-        return module_names
+            module_names = []
+            for item in self.modules_dir.iterdir():
+                if item.is_dir() and not item.name.startswith('_'):
+                    module_file = item / 'module.py'
+                    if module_file.exists():
+                        module_names.append(item.name)
+
+            return module_names
 
     def load_module(self, module_name: str) -> Type[BaseModule]:
         """
@@ -68,22 +86,34 @@ class ModuleLoader:
             ImportError: If module cannot be loaded
             ValueError: If module doesn't contain a valid BaseModule subclass
         """
-        module_path = self.modules_dir / module_name / 'module.py'
+        # Check if running in a PyInstaller frozen environment
+        is_frozen = getattr(sys, 'frozen', False)
 
-        if not module_path.exists():
-            raise ImportError(f"Module file not found: {module_path}")
+        if is_frozen:
+            # In frozen mode, use standard import (modules are bundled in executable)
+            module_import_name = f"modules.{module_name}.module"
+            try:
+                module = importlib.import_module(module_import_name)
+            except ImportError as e:
+                raise ImportError(f"Could not import frozen module {module_import_name}: {e}")
+        else:
+            # In development mode, load from file path
+            module_path = self.modules_dir / module_name / 'module.py'
 
-        # Load the module
-        spec = importlib.util.spec_from_file_location(
-            f"modules.{module_name}.module",
-            module_path
-        )
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Could not load module spec for {module_name}")
+            if not module_path.exists():
+                raise ImportError(f"Module file not found: {module_path}")
 
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
+            # Load the module
+            spec = importlib.util.spec_from_file_location(
+                f"modules.{module_name}.module",
+                module_path
+            )
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Could not load module spec for {module_name}")
+
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
 
         # Find the BaseModule subclass in the module
         module_class = None

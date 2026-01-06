@@ -60,7 +60,6 @@ windows/Output/
 JobDocs-Setup-*.exe
 
 # PyInstaller
-*.spec
 JobDocs-Windows/
 ignore.me.md
 sample file structure

@@ -28,6 +28,11 @@ cd /path/to/JobDocs
 
 Output: `dist/JobDocs` (single-file standalone executable)
 
+**Custom output directory:**
+```bash
+DIST_PATH="my_builds" BUILD_PATH="temp" ./build_scripts/build_linux.sh
+```
+
 ### Windows Executable
 
 ```cmd
@@ -36,6 +41,13 @@ build_scripts\build_windows.bat
 ```
 
 Output: `build_scripts\JobDocs-Windows\JobDocs.exe` (single-file standalone executable)
+
+**Custom output directory:**
+Edit the configuration section at the top of `build_windows.bat`:
+```batch
+set DIST_PATH=my_builds
+set BUILD_PATH=temp
+```
 
 ## What These Scripts Do
 
@@ -57,6 +69,23 @@ The `JobDocs.spec` file contains all the build configuration:
 - Cross-platform support (Windows, Linux, macOS)
 - UPX compression enabled for smaller file size
 - No external dependencies or DLL files needed
+
+### Customizing Build Paths
+
+You can override the output paths in three ways:
+
+1. **Environment variables** (Linux):
+   ```bash
+   DIST_PATH="output" BUILD_PATH="temp" ./build_scripts/build_linux.sh
+   ```
+
+2. **Edit build script** (Windows):
+   Modify lines 13-14 in `build_windows.bat`
+
+3. **Direct PyInstaller command**:
+   ```bash
+   pyinstaller --distpath my_output --workpath my_temp build_scripts/JobDocs.spec
+   ```
 
 ## Standalone vs Installer
 
