@@ -4,6 +4,18 @@
 
 set -e  # Exit on error
 
+# ============================================================================
+# Configuration
+# ============================================================================
+# You can customize these paths:
+# DIST_PATH="custom_dist"
+# BUILD_PATH="custom_build"
+
+# Default paths (relative to project root):
+DIST_PATH="${DIST_PATH:-dist}"
+BUILD_PATH="${BUILD_PATH:-build}"
+# ============================================================================
+
 echo "======================================"
 echo "JobDocs Linux Build Script"
 echo "======================================"
@@ -54,12 +66,12 @@ fi
 # Clean previous builds
 echo "[3/5] Cleaning previous builds..."
 cd ..
-rm -rf build/ dist/
+rm -rf "${BUILD_PATH}/" "${DIST_PATH}/"
 echo "      Cleaned"
 
 # Build the executable
 echo "[4/5] Building executable..."
-python3 -m PyInstaller build_scripts/JobDocs.spec
+python3 -m PyInstaller --distpath "${DIST_PATH}" --workpath "${BUILD_PATH}" build_scripts/JobDocs.spec
 
 if [ $? -eq 0 ]; then
     echo "      Build successful!"
@@ -72,21 +84,21 @@ fi
 echo "[5/5] Build complete!"
 echo ""
 echo "======================================"
-echo "Output: dist/JobDocs (single-file executable)"
-if [ -f dist/JobDocs ]; then
-    echo "Size: $(du -h dist/JobDocs | cut -f1)"
+echo "Output: ${DIST_PATH}/JobDocs (single-file executable)"
+if [ -f "${DIST_PATH}/JobDocs" ]; then
+    echo "Size: $(du -h "${DIST_PATH}/JobDocs" | cut -f1)"
 fi
 echo "======================================"
 echo ""
 echo "To run:"
-echo "  ./dist/JobDocs"
+echo "  ./${DIST_PATH}/JobDocs"
 echo ""
 echo "To install system-wide:"
-echo "  sudo cp dist/JobDocs /usr/local/bin/jobdocs"
+echo "  sudo cp ${DIST_PATH}/JobDocs /usr/local/bin/jobdocs"
 echo "  sudo chmod +x /usr/local/bin/jobdocs"
 echo ""
 echo "To install for current user:"
 echo "  mkdir -p ~/.local/bin"
-echo "  cp dist/JobDocs ~/.local/bin/jobdocs"
+echo "  cp ${DIST_PATH}/JobDocs ~/.local/bin/jobdocs"
 echo "  chmod +x ~/.local/bin/jobdocs"
 echo ""

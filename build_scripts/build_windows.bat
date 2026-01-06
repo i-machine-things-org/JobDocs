@@ -2,6 +2,18 @@
 REM Build script for JobDocs on Windows
 REM Creates a standalone executable using PyInstaller
 
+REM ============================================================================
+REM Configuration
+REM ============================================================================
+REM You can customize these paths:
+REM set DIST_PATH=custom_dist
+REM set BUILD_PATH=custom_build
+
+REM Default paths (relative to project root):
+set DIST_PATH=dist2
+set BUILD_PATH=build
+REM ============================================================================
+
 echo ======================================
 echo JobDocs Windows Build Script
 echo ======================================
@@ -55,15 +67,15 @@ if errorlevel 1 (
 
 REM Clean previous builds
 echo [3/5] Cleaning previous builds...
-if exist ..\build rmdir /s /q ..\build
-if exist ..\dist rmdir /s /q ..\dist
+if exist "..\%BUILD_PATH%" rmdir /s /q "..\%BUILD_PATH%"
+if exist "..\%DIST_PATH%" rmdir /s /q "..\%DIST_PATH%"
 echo       Cleaned
 echo.
 
 REM Build the executable
 echo [4/5] Building executable...
 cd ..
-py -m PyInstaller build_scripts\JobDocs.spec
+py -m PyInstaller --distpath "%DIST_PATH%" --workpath "%BUILD_PATH%" build_scripts\JobDocs.spec
 cd build_scripts
 
 if errorlevel 1 (
@@ -81,7 +93,7 @@ if exist JobDocs-Windows rmdir /s /q JobDocs-Windows
 mkdir JobDocs-Windows
 
 REM Copy executable
-copy ..\dist\JobDocs.exe JobDocs-Windows\ >nul
+copy "..\%DIST_PATH%\JobDocs.exe" JobDocs-Windows\ >nul
 
 REM Create README
 echo Creating README...
