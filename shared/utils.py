@@ -230,13 +230,16 @@ def get_next_number(history: Dict[str, Any], entry_type: str, start_number: int 
     recent_entries = history.get(history_key, [])
     for entry in recent_entries:
         number_str = entry.get(number_key, '')
-        # Try to parse as integer
+        # Try to parse as integer, stripping any leading non-digits (like 'Q' prefix)
         try:
-            number = int(number_str)
-            if number > max_number:
-                max_number = number
-        except ValueError:
-            # Not a pure number, skip it
+            # Extract only digits from the string
+            digits = ''.join(filter(str.isdigit, number_str))
+            if digits:
+                number = int(digits)
+                if number > max_number:
+                    max_number = number
+        except (ValueError, TypeError):
+            # Not parseable, skip it
             continue
 
     return str(max_number + 1)

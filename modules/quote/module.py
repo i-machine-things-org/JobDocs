@@ -1,17 +1,23 @@
 """
-Quote Module - Create Quote Folders
+Quote Module - Create Quote Folders and Add Files to Existing Quotes
 
-This module handles creation of quote folders in the customer files directory.
-Supports ITAR quotes, file linking, and conversion to jobs.
+This module handles:
+- Creation of new quote folders in the customer files directory
+- Adding files to existing quote folders
+- ITAR quote support, file linking, and conversion to jobs
 """
 
 import os
 import sys
+import shutil
 from pathlib import Path
 from typing import List
-from PyQt6.QtWidgets import QWidget, QMessageBox, QFileDialog
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import (
+    QWidget, QMessageBox, QFileDialog, QTreeWidgetItem, QButtonGroup
+)
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6 import uic
+from datetime import datetime
 
 from core.base_module import BaseModule
 from shared.widgets import DropZone, JobSearchDialog
@@ -21,24 +27,95 @@ from shared.utils import (
 )
 
 
+class QuoteTreeWorker(QThread):
+    """Background worker for loading quote tree data"""
+
+    # Signal emitted when a customer with quotes is found
+    customer_loaded = pyqtSignal(str, str, list)  # (display_name, customer_path, quotes_list)
+    # Signal emitted when loading is complete
+    finished = pyqtSignal()
+
+    def __init__(self, dirs_to_search, selected_customer, show_all_customers, app_context):
+        super().__init__()
+        self.dirs_to_search = dirs_to_search
+        self.selected_customer = selected_customer
+        self.show_all_customers = show_all_customers
+        self.app_context = app_context
+        self._is_cancelled = False
+
+    def cancel(self):
+        """Cancel the worker"""
+        self._is_cancelled = True
+
+    def run(self):
+        """Run the background quote loading"""
+        for prefix, cf_dir in self.dirs_to_search:
+            if self._is_cancelled:
+                break
+
+            try:
+                if self.show_all_customers:
+                    customers = [d for d in os.listdir(cf_dir) if os.path.isdir(os.path.join(cf_dir, d))]
+                else:
+                    customers = [self.selected_customer] if os.path.isdir(os.path.join(cf_dir, self.selected_customer)) else []
+
+                for customer in sorted(customers):
+                    if self._is_cancelled:
+                        break
+
+                    customer_path = os.path.join(cf_dir, customer)
+                    if not os.path.exists(customer_path):
+                        continue
+
+                    display_name = f"[{prefix}] {customer}" if prefix else customer
+                    quotes = self.app_context.find_quote_folders(customer_path)
+
+                    # Only emit if customer has quotes
+                    if quotes:
+                        self.customer_loaded.emit(display_name, customer_path, quotes)
+
+            except OSError as e:
+                print(f"[QuoteTreeWorker] OSError: {e}", flush=True)
+
+        self.finished.emit()
+
+
 class QuoteModule(BaseModule):
-    """Module for creating quote folders"""
+    """Module for creating and managing quote folders"""
 
     def __init__(self):
         super().__init__()
-        # Instance variables
-        self.quote_files: List[str] = []
-        # Widget references (set in _create_widget)
+        # File lists
+        self.quote_files: List[str] = []  # For "Create New" tab
+        self.add_files: List[str] = []  # For "Add to Existing" tab
         self._widget = None
+        self._worker = None  # Background thread worker
+
+        # Create New tab widget references
         self.quote_customer_combo = None
         self.quote_number_edit = None
         self.quote_description_edit = None
         self.quote_drawings_edit = None
         self.quote_itar_check = None
         self.quote_files_list = None
-        self.quote_search_input = None
-        self.quote_search_results = None
         self.quote_drop_zone = None
+
+        # Add to Existing tab widget references
+        self.add_customer_combo = None
+        self.add_search_edit = None
+        self.quote_tree = None
+        self.selected_quote_label = None
+        self.add_files_list = None
+        self.add_status_label = None
+        self.add_all_radio = None
+        self.add_standard_radio = None
+        self.add_itar_radio = None
+        self.dest_both_radio = None
+        self.dest_blueprints_radio = None
+        self.dest_quote_radio = None
+        self.add_drop_zone = None
+        self.add_filter_group = None
+        self.dest_button_group = None
 
     def get_name(self) -> str:
         return "Create Quote folder"
@@ -55,14 +132,14 @@ class QuoteModule(BaseModule):
         return self._widget
 
     def _create_widget(self) -> QWidget:
-        """Create the quote tab widget"""
+        """Create the quote tab widget with both Create and Add tabs"""
         widget = QWidget()
 
         # Load UI file
         ui_file = self._get_ui_path('quote/ui/quote_tab.ui')
         uic.loadUi(ui_file, widget)
 
-        # Store widget references
+        # ===== Setup "Create New" Tab =====
         self.quote_customer_combo = widget.quote_customer_combo
         self.quote_number_edit = widget.quote_number_edit
         self.quote_description_edit = widget.quote_description_edit
@@ -80,7 +157,7 @@ class QuoteModule(BaseModule):
         self.quote_drop_zone.setMinimumHeight(60)
         layout.insertWidget(index, self.quote_drop_zone)
 
-        # Connect signals - use lambda to ensure proper connection
+        # Connect Create New tab signals
         self.quote_drop_zone.files_dropped.connect(lambda files: self.add_quote_files(files))
         widget.remove_btn.clicked.connect(self.remove_quote_file)
         widget.copy_from_btn.clicked.connect(self.show_copy_from_dialog)
@@ -90,7 +167,59 @@ class QuoteModule(BaseModule):
         widget.open_bp_btn.clicked.connect(self.open_blueprints_folder)
         widget.open_cf_btn.clicked.connect(self.open_customer_files_folder)
 
-        # Customer list will be populated by main window after all modules load
+        # ===== Setup "Add to Existing" Tab =====
+        self.add_customer_combo = widget.add_customer_combo
+        self.add_search_edit = widget.add_search_edit
+        self.quote_tree = widget.quote_tree
+        self.selected_quote_label = widget.selected_quote_label
+        self.add_files_list = widget.add_files_list
+        self.add_status_label = widget.add_status_label
+
+        # Store radio button references
+        self.add_all_radio = widget.add_all_radio
+        self.add_standard_radio = widget.add_standard_radio
+        self.add_itar_radio = widget.add_itar_radio
+        self.dest_both_radio = widget.dest_both_radio
+        self.dest_blueprints_radio = widget.dest_blueprints_radio
+        self.dest_quote_radio = widget.dest_quote_radio
+
+        # Create button groups
+        self.add_filter_group = QButtonGroup(widget)
+        self.add_filter_group.addButton(self.add_all_radio)
+        self.add_filter_group.addButton(self.add_standard_radio)
+        self.add_filter_group.addButton(self.add_itar_radio)
+
+        self.dest_button_group = QButtonGroup(widget)
+        self.dest_button_group.addButton(self.dest_both_radio)
+        self.dest_button_group.addButton(self.dest_blueprints_radio)
+        self.dest_button_group.addButton(self.dest_quote_radio)
+
+        # Replace DropZone placeholder for Add tab
+        add_placeholder = widget.add_drop_zone
+        add_parent = add_placeholder.parent()
+        add_layout = add_parent.layout()
+        add_index = add_layout.indexOf(add_placeholder)
+        add_placeholder.deleteLater()
+        self.add_drop_zone = DropZone("Drop files")
+        self.add_drop_zone.setMinimumHeight(60)
+        add_layout.insertWidget(add_index, self.add_drop_zone)
+
+        # Set splitter sizes for Add tab
+        widget.addSplitter.setSizes([450, 450])
+
+        # Connect Add to Existing tab signals
+        self.add_customer_combo.currentTextChanged.connect(self.refresh_quote_tree)
+        self.add_all_radio.toggled.connect(self.refresh_quote_tree)
+        self.add_standard_radio.toggled.connect(self.refresh_quote_tree)
+        self.add_itar_radio.toggled.connect(self.refresh_quote_tree)
+        self.add_search_edit.returnPressed.connect(self.search_quotes)
+        widget.search_btn.clicked.connect(self.search_quotes)
+        widget.clear_search_btn.clicked.connect(self.clear_quote_search)
+        self.quote_tree.itemSelectionChanged.connect(self.on_quote_tree_select)
+        self.add_drop_zone.files_dropped.connect(lambda files: self.handle_add_files(files))
+        widget.remove_add_btn.clicked.connect(self.remove_add_file)
+        widget.clear_add_btn.clicked.connect(self.clear_add_files)
+        widget.add_files_btn.clicked.connect(self.add_files_to_quote)
 
         return widget
 
@@ -107,7 +236,7 @@ class QuoteModule(BaseModule):
         return ui_file
 
     def populate_quote_customer_list(self):
-        """Populate customer combo box"""
+        """Populate customer combo box for Create New tab"""
         if self.app_context is None:
             return
 
@@ -123,10 +252,29 @@ class QuoteModule(BaseModule):
         except Exception as e:
             self.app_context.log_message(f"Quote module error populating customers: {e}")
 
-    # ==================== File Management ====================
+    def populate_add_customer_list(self):
+        """Populate customer combo box for Add to Existing tab"""
+        customers = set()
+        for dir_key in ['customer_files_dir', 'itar_customer_files_dir']:
+            dir_path = self.app_context.get_setting(dir_key, '')
+            if dir_path and os.path.exists(dir_path):
+                try:
+                    for d in os.listdir(dir_path):
+                        if os.path.isdir(os.path.join(dir_path, d)):
+                            customers.add(d)
+                except OSError:
+                    pass
+
+        self.add_customer_combo.clear()
+        self.add_customer_combo.addItem("(All Customers)")
+        self.add_customer_combo.addItems(sorted(customers))
+
+        self.refresh_quote_tree()
+
+    # ==================== Create New Tab: File Management ====================
 
     def add_quote_files(self, files: List[str]):
-        """Add files to the quote files list"""
+        """Add files to the quote files list (Create New tab)"""
         if self.quote_files_list is None:
             return
 
@@ -136,7 +284,7 @@ class QuoteModule(BaseModule):
                 self.quote_files_list.addItem(os.path.basename(file))
 
     def remove_quote_file(self):
-        """Remove selected file from quote files list"""
+        """Remove selected file from quote files list (Create New tab)"""
         row = self.quote_files_list.currentRow()
         if row >= 0:
             self.quote_files_list.takeItem(row)
@@ -147,7 +295,7 @@ class QuoteModule(BaseModule):
         self.quote_files.clear()
         self.quote_files_list.clear()
 
-    # ==================== Quote Creation ====================
+    # ==================== Create New Tab: Quote Creation ====================
 
     def create_quote(self):
         """Create quote folder(s) from form data"""
@@ -207,13 +355,15 @@ class QuoteModule(BaseModule):
 
             # Build quote path
             quote_folder_path = self.app_context.get_setting('quote_folder_path', 'Quotes')
-            quote_path = Path(cf_dir) / customer / quote_folder_path / quote_dir_name
+            customer_dir = Path(cf_dir) / customer
+            quotes_dir = customer_dir / quote_folder_path
+            quote_path = quotes_dir / quote_dir_name
             quote_path.mkdir(parents=True, exist_ok=True)
 
             customer_bp = Path(bp_dir) / customer
             customer_bp.mkdir(parents=True, exist_ok=True)
 
-            # Get blueprint extensions
+            # Get settings
             blueprint_extensions = self.app_context.get_setting('blueprint_extensions', ['.pdf', '.dwg', '.dxf'])
             link_type = self.app_context.get_setting('link_type', 'hard')
 
@@ -222,28 +372,23 @@ class QuoteModule(BaseModule):
                 file_name = os.path.basename(file_path)
 
                 if is_blueprint_file(file_name, blueprint_extensions):
-                    # Copy to blueprints folder
                     bp_dest = customer_bp / file_name
                     try:
-                        import shutil
                         shutil.copy2(file_path, bp_dest)
                     except FileExistsError:
                         pass
 
-                    # Link to quote folder
                     quote_dest = quote_path / file_name
                     if not quote_dest.exists():
                         create_file_link(bp_dest, quote_dest, link_type)
                 else:
-                    # Other files go directly to quote folder
                     quote_dest = quote_path / file_name
                     try:
-                        import shutil
                         shutil.copy2(file_path, quote_dest)
                     except FileExistsError:
                         pass
 
-            # Link existing drawings from blueprints
+            # Link existing drawings
             if drawings:
                 exts = blueprint_extensions
                 available_bps = {}
@@ -265,75 +410,41 @@ class QuoteModule(BaseModule):
 
             # Add to history
             self.app_context.add_to_history('quote', {
+                'date': datetime.now().isoformat(),
                 'customer': customer,
                 'quote_number': quote_number,
                 'description': description,
                 'drawings': drawings,
-                'is_itar': is_itar,
                 'path': str(quote_path)
             })
             self.app_context.save_history()
 
+            self.log_message(f"Created: {quote_path}")
             return True
 
         except Exception as e:
+            self.log_message(f"Error: {e}")
             self.show_error("Error", f"Error creating quote {quote_number}: {e}")
             return False
 
     def clear_quote_form(self):
-        """Clear all form fields"""
+        """Clear all form fields (Create New tab)"""
         self.quote_customer_combo.setCurrentText("")
         self.quote_number_edit.clear()
         self.quote_description_edit.clear()
         self.quote_drawings_edit.clear()
-        self.clear_quote_files()
+        self.quote_itar_check.setChecked(False)
+        self.quote_files.clear()
+        self.quote_files_list.clear()
 
     def auto_generate_quote_number(self):
         """Auto-generate the next quote number"""
-        next_number = get_next_number(self.app_context.history, 'quote', start_number=10000)
-        self.quote_number_edit.setText(next_number)
-        self.log_message(f"Auto-generated quote number: {next_number}")
+        next_number = get_next_number(self.app_context.history, 'quote', start_number=90000)
+        quote_number = f"Q{next_number}"
+        self.quote_number_edit.setText(quote_number)
+        self.log_message(f"Auto-generated quote number: {quote_number}")
 
-    # ==================== Quote to Job Conversion ====================
-
-    def convert_current_quote_to_job(self):
-        """Convert current quote form data to Create Job tab"""
-        customer = self.quote_customer_combo.currentText().strip()
-        quote_number = self.quote_number_edit.text().strip()
-        description = self.quote_description_edit.text().strip()
-        drawings = self.quote_drawings_edit.text().strip()
-
-        if not customer or not quote_number or not description:
-            self.show_error("Error", "Please fill in Customer, Quote #, and Description before converting")
-            return
-
-        # Get main window reference
-        main_window = self.app_context.main_window
-        if not main_window:
-            self.show_error("Error", "Cannot access main window")
-            return
-
-        # Switch to Create Job tab (tab index 1)
-        main_window.tabs.setCurrentIndex(1)
-
-        # Populate job fields with quote data
-        main_window.customer_combo.setCurrentText(customer)
-        main_window.job_number_edit.setText(quote_number)
-        main_window.description_edit.setText(description)
-        main_window.drawings_edit.setText(drawings)
-
-        # Copy ITAR setting
-        main_window.itar_check.setChecked(self.quote_itar_check.isChecked())
-
-        # Copy files
-        main_window.job_files = self.quote_files.copy()
-        main_window.job_files_list.clear()
-        for file in main_window.job_files:
-            main_window.job_files_list.addItem(os.path.basename(file))
-
-        self.show_info("Quote Converted", f"Quote {quote_number} data copied to Create Job tab.\n\nYou can now create the job from this quote.")
-
-    # ==================== Search & Copy Functions ====================
+    # ==================== Create New Tab: Search & Copy Functions ====================
 
     def show_copy_from_dialog(self):
         """Show popup dialog to search and copy from existing job/quote"""
@@ -346,7 +457,6 @@ class QuoteModule(BaseModule):
 
     def _copy_info_from_folder(self, folder_path: str):
         """Copy job/quote info from folder to form"""
-        # Parse folder name (format: quote#_description_drawings or quote#_description)
         folder_name = os.path.basename(folder_path)
         parts = folder_name.split('_', 2)
 
@@ -355,18 +465,266 @@ class QuoteModule(BaseModule):
             description = parts[1]
             drawings = parts[2] if len(parts) > 2 else ""
 
-            # Get customer name (parent folder or grandparent if in Quotes subfolder)
+            # Get customer name from parent directory
             parent = os.path.dirname(folder_path)
             customer = os.path.basename(parent)
+
+            # Check if parent is "Quotes" or similar subfolder
             quote_folder_path = self.app_context.get_setting('quote_folder_path', 'Quotes')
             if customer.lower() == 'quotes' or customer.lower() == quote_folder_path.lower():
                 customer = os.path.basename(os.path.dirname(parent))
 
-            # Populate form
             self.quote_customer_combo.setCurrentText(customer)
             self.quote_number_edit.setText(quote_number)
             self.quote_description_edit.setText(description)
             self.quote_drawings_edit.setText(drawings)
+
+    # ==================== Add to Existing Tab: Quote Tree Management ====================
+
+    def refresh_quote_tree(self):
+        """Refresh the quote tree with current filter settings (async with background thread)"""
+        # Cancel any existing worker
+        if self._worker and self._worker.isRunning():
+            self._worker.cancel()
+            self._worker.wait()
+
+        self.quote_tree.clear()
+        self.add_status_label.setText("Loading quotes...")
+
+        selected_customer = self.add_customer_combo.currentText()
+        show_all_customers = selected_customer == "(All Customers)" or not selected_customer
+
+        # Get directories based on filter selection
+        dirs_to_search = []
+
+        if self.add_all_radio.isChecked():
+            dirs_to_search = self._get_customer_files_dirs()
+        elif self.add_standard_radio.isChecked():
+            cf_dir = self.app_context.get_setting('customer_files_dir', '')
+            if cf_dir and os.path.exists(cf_dir):
+                dirs_to_search.append(('', cf_dir))
+        else:  # ITAR only
+            itar_cf_dir = self.app_context.get_setting('itar_customer_files_dir', '')
+            if itar_cf_dir and os.path.exists(itar_cf_dir):
+                dirs_to_search.append(('ITAR', itar_cf_dir))
+
+        # Start background worker
+        self._worker = QuoteTreeWorker(dirs_to_search, selected_customer, show_all_customers, self.app_context)
+        self._worker.customer_loaded.connect(self._on_customer_loaded)
+        self._worker.finished.connect(self._on_loading_finished)
+        self._worker.start()
+
+    def _on_customer_loaded(self, display_name: str, customer_path: str, quotes: list):
+        """Slot called when a customer with quotes is loaded"""
+        customer_item = QTreeWidgetItem([display_name])
+        customer_item.setData(0, Qt.ItemDataRole.UserRole, customer_path)
+
+        for quote_name, quote_path in sorted(quotes):
+            quote_item = QTreeWidgetItem([quote_name])
+            quote_item.setData(0, Qt.ItemDataRole.UserRole, quote_path)
+            customer_item.addChild(quote_item)
+
+        self.quote_tree.addTopLevelItem(customer_item)
+
+    def _on_loading_finished(self):
+        """Slot called when loading is complete"""
+        total_items = self.quote_tree.topLevelItemCount()
+        self.add_status_label.setText(f"Loaded {total_items} customer(s) with quotes")
+
+    def search_quotes(self):
+        """Search for quotes matching the search term"""
+        search_term = self.add_search_edit.text().strip().lower()
+
+        if not search_term:
+            self.refresh_quote_tree()
+            return
+
+        self.quote_tree.clear()
+        dirs_to_search = self._get_customer_files_dirs()
+        results = 0
+
+        for prefix, cf_dir in dirs_to_search:
+            try:
+                customers = [d for d in os.listdir(cf_dir) if os.path.isdir(os.path.join(cf_dir, d))]
+
+                for customer in sorted(customers):
+                    customer_path = os.path.join(cf_dir, customer)
+                    if not os.path.exists(customer_path):
+                        continue
+
+                    matching_quotes = []
+                    quotes = self.app_context.find_quote_folders(customer_path)
+                    for quote_name, quote_path in quotes:
+                        if search_term in quote_name.lower() or search_term in customer.lower():
+                            matching_quotes.append((quote_name, quote_path))
+
+                    if matching_quotes:
+                        display_name = f"[{prefix}] {customer}" if prefix else customer
+                        customer_item = QTreeWidgetItem([display_name])
+                        customer_item.setData(0, Qt.ItemDataRole.UserRole, customer_path)
+
+                        for quote, quote_path in sorted(matching_quotes):
+                            quote_item = QTreeWidgetItem([quote])
+                            quote_item.setData(0, Qt.ItemDataRole.UserRole, quote_path)
+                            customer_item.addChild(quote_item)
+                            results += 1
+
+                        self.quote_tree.addTopLevelItem(customer_item)
+                        customer_item.setExpanded(True)
+
+            except OSError:
+                pass
+
+        self.selected_quote_label.setText(f"Found {results} quote(s)" if results else "No matches")
+
+    def clear_quote_search(self):
+        """Clear search and refresh tree"""
+        self.add_search_edit.clear()
+        self.refresh_quote_tree()
+
+    def on_quote_tree_select(self):
+        """Update label when quote tree selection changes"""
+        items = self.quote_tree.selectedItems()
+        if not items:
+            self.selected_quote_label.setText("No quote selected")
+            return
+
+        item = items[0]
+        if item.parent():
+            self.selected_quote_label.setText(f"Selected: {item.text(0)}")
+            self.selected_quote_label.setStyleSheet("color: green;")
+        else:
+            self.selected_quote_label.setText("Select a quote, not customer")
+            self.selected_quote_label.setStyleSheet("color: orange;")
+
+    def _get_customer_files_dirs(self):
+        """Get list of (prefix, path) tuples for customer file directories"""
+        dirs = []
+        cf_dir = self.app_context.get_setting('customer_files_dir', '')
+        if cf_dir and os.path.exists(cf_dir):
+            dirs.append(('', cf_dir))
+        itar_cf_dir = self.app_context.get_setting('itar_customer_files_dir', '')
+        if itar_cf_dir and os.path.exists(itar_cf_dir):
+            dirs.append(('ITAR', itar_cf_dir))
+        return dirs
+
+    # ==================== Add to Existing Tab: File Management ====================
+
+    def handle_add_files(self, files: List[str]):
+        """Add files to the add files list (Add to Existing tab)"""
+        for f in files:
+            if f not in self.add_files:
+                self.add_files.append(f)
+                self.add_files_list.addItem(os.path.basename(f))
+
+    def remove_add_file(self):
+        """Remove selected file from add files list"""
+        row = self.add_files_list.currentRow()
+        if row >= 0:
+            self.add_files_list.takeItem(row)
+            del self.add_files[row]
+
+    def clear_add_files(self):
+        """Clear all files from add files list"""
+        self.add_files.clear()
+        self.add_files_list.clear()
+
+    # ==================== Add to Existing Tab: Add Files to Quote ====================
+
+    def add_files_to_quote(self):
+        """Add files to the selected quote"""
+        items = self.quote_tree.selectedItems()
+        if not items:
+            self.show_error("No Selection", "Please select a quote folder")
+            return
+
+        item = items[0]
+        if not item.parent():
+            self.show_error("Invalid Selection", "Please select a quote, not a customer")
+            return
+
+        if not self.add_files:
+            self.show_error("No Files", "Please add files")
+            return
+
+        quote_path = item.data(0, Qt.ItemDataRole.UserRole)
+        quote_name = item.text(0)
+
+        customer_text = item.parent().text(0)
+        if customer_text.startswith('[ITAR] '):
+            customer = customer_text[7:]
+            is_itar = True
+        else:
+            customer = customer_text
+            itar_cf = self.app_context.get_setting('itar_customer_files_dir', '')
+            is_itar = itar_cf and quote_path.startswith(itar_cf)
+
+        bp_dir, _ = self.app_context.get_directories(is_itar)
+        if not bp_dir:
+            self.show_error("Error", "Blueprints directory not configured")
+            return
+
+        customer_bp = Path(bp_dir) / customer
+
+        if self.dest_blueprints_radio.isChecked():
+            dest = 'blueprints'
+        elif self.dest_quote_radio.isChecked():
+            dest = 'quote'
+        else:
+            dest = 'both'
+
+        added = 0
+        skipped = 0
+
+        # Ensure blueprint directory exists if needed
+        if dest in ('blueprints', 'both'):
+            customer_bp.mkdir(parents=True, exist_ok=True)
+
+        link_type = self.app_context.get_setting('link_type', 'hard')
+
+        for file_path in self.add_files:
+            file_name = os.path.basename(file_path)
+
+            try:
+                if dest == 'blueprints':
+                    bp_dest = customer_bp / file_name
+                    try:
+                        shutil.copy2(file_path, bp_dest)
+                        added += 1
+                    except FileExistsError:
+                        skipped += 1
+
+                elif dest == 'quote':
+                    quote_dest = Path(quote_path) / file_name
+                    try:
+                        shutil.copy2(file_path, quote_dest)
+                        added += 1
+                    except FileExistsError:
+                        skipped += 1
+
+                else:  # both
+                    bp_dest = customer_bp / file_name
+                    try:
+                        shutil.copy2(file_path, bp_dest)
+                    except FileExistsError:
+                        pass
+
+                    quote_dest = Path(quote_path) / file_name
+                    if not quote_dest.exists():
+                        create_file_link(bp_dest, quote_dest, link_type)
+                        added += 1
+                    else:
+                        skipped += 1
+
+            except Exception as e:
+                self.log_message(f"Error adding {file_name}: {e}")
+                skipped += 1
+
+        self.add_status_label.setText(f"Added: {added}, Skipped: {skipped}")
+
+        if added > 0:
+            self.show_info("Files Added", f"Added {added} file(s) to {quote_name}")
+            self.clear_add_files()
 
     # ==================== Folder Operations ====================
 
@@ -392,4 +750,9 @@ class QuoteModule(BaseModule):
 
     def cleanup(self):
         """Cleanup resources"""
+        # Stop any running worker thread
+        if self._worker and self._worker.isRunning():
+            self._worker.cancel()
+            self._worker.wait()
         self.quote_files.clear()
+        self.add_files.clear()

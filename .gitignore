@@ -21,6 +21,7 @@ __pycache__/
 dist/
 build/
 *.spec
+!build_scripts/JobDocs.spec
 
 # Virtual environments
 venv/
