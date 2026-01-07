@@ -202,6 +202,25 @@ class SettingsDialog(QDialog):
 
         scroll_layout.addWidget(appearance_group)
 
+        # Remote Sync
+        remote_group = QGroupBox("Remote Sync")
+        remote_layout = QGridLayout(remote_group)
+
+        remote_layout.addWidget(QLabel("Remote Server Path:"), 0, 0)
+        self.remote_server_edit = QLineEdit(self.settings.get('remote_server_path', ''))
+        self.remote_server_edit.setPlaceholderText(r"\\server\share\jobdocs or /mnt/share/jobdocs")
+        remote_layout.addWidget(self.remote_server_edit, 0, 1)
+        remote_browse_btn = QPushButton("Browse...")
+        remote_browse_btn.clicked.connect(lambda: self.browse_dir(self.remote_server_edit))
+        remote_layout.addWidget(remote_browse_btn, 0, 2)
+
+        remote_info = QLabel("Settings and history will sync to/from remote server on startup/shutdown")
+        remote_info.setWordWrap(True)
+        remote_info.setStyleSheet("color: gray; font-size: 9pt;")
+        remote_layout.addWidget(remote_info, 1, 0, 1, 3)
+
+        scroll_layout.addWidget(remote_group)
+
         # Advanced Settings (collapsible)
         self.advanced_group = QGroupBox("Advanced Settings")
         self.advanced_group.setCheckable(True)
@@ -300,5 +319,8 @@ class SettingsDialog(QDialog):
             if not checkbox.isChecked():
                 disabled_modules.append(module_name)
         self.settings['disabled_modules'] = disabled_modules
+
+        # Save remote server path
+        self.settings['remote_server_path'] = self.remote_server_edit.text().strip()
 
         self.accept()

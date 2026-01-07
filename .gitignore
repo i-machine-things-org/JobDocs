@@ -1,3 +1,9 @@
+# Test/sample directories
+itar/
+not itar/
+sample_files/
+test_jobs.csv
+
 # Claude Code and development notes
 .claude/
 .github-push-checklist.md
@@ -14,6 +20,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+*.spec
+!build_scripts/JobDocs.spec
 
 # Virtual environments
 venv/
@@ -53,7 +61,6 @@ windows/Output/
 JobDocs-Setup-*.exe
 
 # PyInstaller
-*.spec
 JobDocs-Windows/
 ignore.me.md
 sample file structure

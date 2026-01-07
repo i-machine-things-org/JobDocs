@@ -45,10 +45,13 @@ class ModuleLoader:
         # Check if running in a PyInstaller frozen environment
         is_frozen = getattr(sys, 'frozen', False)
 
+        # Deprecated modules (kept in codebase but not loaded)
+        deprecated_modules = {'add_to_job'}
+
         if is_frozen:
             # In frozen mode, return hardcoded list of modules
             # These must match the modules in the spec file's hiddenimports
-            return [
+            all_modules = [
                 'quote',
                 'job',
                 'add_to_job',
@@ -58,6 +61,7 @@ class ModuleLoader:
                 'history',
                 'reporting'
             ]
+            return [m for m in all_modules if m not in deprecated_modules]
         else:
             # In development mode, discover from filesystem
             if not self.modules_dir.exists():
@@ -66,6 +70,9 @@ class ModuleLoader:
             module_names = []
             for item in self.modules_dir.iterdir():
                 if item.is_dir() and not item.name.startswith('_'):
+                    # Skip deprecated modules
+                    if item.name in deprecated_modules:
+                        continue
                     module_file = item / 'module.py'
                     if module_file.exists():
                         module_names.append(item.name)

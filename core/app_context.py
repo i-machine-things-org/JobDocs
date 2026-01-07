@@ -287,3 +287,31 @@ class AppContext:
 
         print(f"[find_job_folders] Returning {len(jobs)} jobs", flush=True)
         return jobs
+
+    def find_quote_folders(self, customer_path: str) -> List[Tuple[str, str]]:
+        """
+        Find all quote folders in a customer directory.
+        Quotes are located in customer/{quote_folder_path}/quote_folders
+
+        Args:
+            customer_path: Path to customer directory
+
+        Returns:
+            List of (quote_name, quote_path) tuples
+        """
+        quote_folder_path = self._settings.get('quote_folder_path', 'Quotes')
+        quotes_dir = os.path.join(customer_path, quote_folder_path)
+
+        quotes = []
+
+        if os.path.exists(quotes_dir):
+            try:
+                items = os.listdir(quotes_dir)
+                for item in items:
+                    item_path = os.path.join(quotes_dir, item)
+                    if os.path.isdir(item_path):
+                        quotes.append((item, item_path))
+            except OSError:
+                pass
+
+        return quotes
