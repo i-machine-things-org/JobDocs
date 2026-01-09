@@ -10,7 +10,7 @@ REM set DIST_PATH=custom_dist
 REM set BUILD_PATH=custom_build
 
 REM Default paths (relative to project root):
-set DIST_PATH=dist4
+set DIST_PATH=output
 set BUILD_PATH=build
 REM ============================================================================
 

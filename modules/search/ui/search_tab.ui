@@ -71,6 +71,16 @@
          </widget>
         </item>
         <item>
+         <widget class="QPushButton" name="cancel_btn">
+          <property name="text">
+           <string>Cancel</string>
+          </property>
+          <property name="visible">
+           <bool>false</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QPushButton" name="clear_btn">
           <property name="text">
            <string>Clear</string>

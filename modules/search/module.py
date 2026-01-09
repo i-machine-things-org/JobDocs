@@ -3,6 +3,7 @@ Search Module - Search for Jobs Across Customer Directories
 
 This module provides powerful search functionality across all job folders.
 Supports both strict format (fast) and legacy recursive search modes.
+Uses background threading to prevent UI lockup during searches.
 """
 
 import os
@@ -14,11 +15,206 @@ from typing import List, Dict, Any
 from PyQt6.QtWidgets import (
     QWidget, QMessageBox, QTableWidgetItem, QApplication, QMenu
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6 import uic
 
 from core.base_module import BaseModule
 from shared.utils import open_folder
+
+
+class SearchWorker(QThread):
+    """Background worker for performing searches without blocking UI"""
+
+    # Signals
+    result_found = pyqtSignal(dict)  # Emitted for each search result
+    progress_update = pyqtSignal(str)  # Emitted with status updates
+    finished = pyqtSignal(int)  # Emitted when search completes with result count
+
+    def __init__(self, dirs_to_search, search_term, strict_mode,
+                 search_customer, search_job, search_desc, search_drawing, app_context):
+        super().__init__()
+        self.dirs_to_search = dirs_to_search
+        self.search_term = search_term
+        self.strict_mode = strict_mode
+        self.search_customer = search_customer
+        self.search_job = search_job
+        self.search_desc = search_desc
+        self.search_drawing = search_drawing
+        self.app_context = app_context
+        self._is_cancelled = False
+        self.result_count = 0
+
+    def cancel(self):
+        """Cancel the search"""
+        self._is_cancelled = True
+
+    def run(self):
+        """Run the search in background"""
+        try:
+            if self.strict_mode:
+                self._strict_search()
+            else:
+                self._legacy_search()
+        except Exception as e:
+            self.progress_update.emit(f"Error: {e}")
+
+        self.finished.emit(self.result_count)
+
+    def _strict_search(self):
+        """Structured search using parsed folder names"""
+        for prefix, base_dir in self.dirs_to_search:
+            if self._is_cancelled:
+                break
+
+            self.progress_update.emit(f"Searching {prefix if prefix else 'standard'} directories...")
+
+            try:
+                customers = [d for d in os.listdir(base_dir)
+                           if os.path.isdir(os.path.join(base_dir, d))]
+            except OSError:
+                continue
+
+            for customer in customers:
+                if self._is_cancelled:
+                    break
+
+                customer_path = os.path.join(base_dir, customer)
+                display_customer = f"[ITAR] {customer}" if prefix == 'ITAR' else customer
+
+                # Check if searching by customer name
+                customer_match = self.search_customer and self.search_term in customer.lower()
+
+                # Find job folders
+                jobs = self.app_context.find_job_folders(customer_path)
+
+                for dir_name, job_docs_path in jobs:
+                    if self._is_cancelled:
+                        break
+
+                    # Apply strict mode filter
+                    if not dir_name or not dir_name[0].isdigit():
+                        continue
+
+                    # Parse folder name into components
+                    parts = dir_name.split('_')
+                    job_num = parts[0] if parts else ""
+                    remaining_parts = parts[1:] if len(parts) > 1 else []
+
+                    drawings = []
+                    desc_parts = []
+
+                    if remaining_parts:
+                        if '-' in remaining_parts[-1]:
+                            drawings = [d.strip() for d in remaining_parts[-1].split('-') if d.strip()]
+                            desc_parts = remaining_parts[:-1]
+                        else:
+                            desc_parts = remaining_parts
+
+                    desc = ' '.join(desc_parts) if desc_parts else ""
+
+                    # Check for matches
+                    match = customer_match
+                    if not match and self.search_job and self.search_term in job_num.lower():
+                        match = True
+                    if not match and self.search_desc and self.search_term in desc.lower():
+                        match = True
+                    if not match and self.search_drawing:
+                        for drawing in drawings:
+                            if self.search_term in drawing.lower():
+                                match = True
+                                break
+
+                    if match:
+                        try:
+                            mod_time = datetime.fromtimestamp(Path(job_docs_path).stat().st_mtime)
+                        except (OSError, FileNotFoundError):
+                            mod_time = datetime.now()
+
+                        result = {
+                            'date': mod_time,
+                            'customer': display_customer,
+                            'job_number': job_num,
+                            'description': desc,
+                            'drawings': drawings,
+                            'path': job_docs_path
+                        }
+                        self.result_found.emit(result)
+                        self.result_count += 1
+
+    def _legacy_search(self):
+        """Recursive search through all directories"""
+        for prefix, base_dir in self.dirs_to_search:
+            if self._is_cancelled:
+                break
+            self.progress_update.emit(f"Searching {prefix if prefix else 'standard'} directories...")
+            self._legacy_recursive_search(base_dir, prefix)
+
+    def _legacy_recursive_search(self, base_dir: str, prefix: str):
+        """Recursively search all folders in legacy mode"""
+        try:
+            for root, dirs, files in os.walk(base_dir):
+                if self._is_cancelled:
+                    break
+
+                folder_name = os.path.basename(root)
+
+                # Try to extract customer from path
+                rel_path = os.path.relpath(root, base_dir)
+                path_parts = rel_path.split(os.sep)
+                customer = path_parts[0] if path_parts and path_parts[0] != '.' else "Unknown"
+
+                # Check if folder name or path contains search term
+                if self.search_term in folder_name.lower() or self.search_term in rel_path.lower():
+                    # Try to parse folder name for job info
+                    parts = folder_name.split('_')
+                    job_num = ""
+                    desc = ""
+                    drawings = []
+
+                    # Try to extract job number
+                    for part in parts:
+                        if part and part[0].isdigit():
+                            job_num = part
+                            break
+
+                    # If no structured format, use folder name as description
+                    if not job_num:
+                        match = re.match(r'^(\d+)', folder_name)
+                        if match:
+                            job_num = match.group(1)
+                            desc = folder_name[len(job_num):].strip(' -_')
+                        else:
+                            desc = folder_name
+                    else:
+                        # Parse remaining parts
+                        remaining_parts = [p for p in parts if p != job_num]
+                        if remaining_parts:
+                            if '-' in remaining_parts[-1]:
+                                drawings = [d.strip() for d in remaining_parts[-1].split('-') if d.strip()]
+                                desc = ' '.join(remaining_parts[:-1])
+                            else:
+                                desc = ' '.join(remaining_parts)
+
+                    display_customer = f"[{prefix}] {customer}" if prefix else customer
+
+                    try:
+                        mod_time = datetime.fromtimestamp(Path(root).stat().st_mtime)
+                    except (OSError, FileNotFoundError):
+                        mod_time = datetime.now()
+
+                    result = {
+                        'date': mod_time,
+                        'customer': display_customer,
+                        'job_number': job_num if job_num else "(no job #)",
+                        'description': desc,
+                        'drawings': drawings,
+                        'path': root
+                    }
+                    self.result_found.emit(result)
+                    self.result_count += 1
+        except Exception:
+            # Skip directories that cause errors
+            pass
 
 
 class SearchModule(BaseModule):
@@ -28,6 +224,8 @@ class SearchModule(BaseModule):
         super().__init__()
         self._widget = None
         self.search_results: List[Dict[str, Any]] = []
+        self._worker = None  # Background search worker
+
         # Widget references
         self.search_edit = None
         self.search_table = None
@@ -42,6 +240,8 @@ class SearchModule(BaseModule):
         self.search_blueprints_check = None
         self.mode_row_widget = None
         self.legacy_options_widget = None
+        self.search_btn = None
+        self.cancel_btn = None
 
     def get_name(self) -> str:
         return "Search"
@@ -79,16 +279,20 @@ class SearchModule(BaseModule):
         self.search_blueprints_check = widget.search_blueprints_check
         self.mode_row_widget = widget.mode_row_widget
         self.legacy_options_widget = widget.legacy_options_widget
+        self.search_btn = widget.search_btn
+        self.cancel_btn = widget.cancel_btn
 
         # Setup table properties
         self.search_table.horizontalHeader().setStretchLastSection(True)
         self.search_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
-        # Hide progress bar initially
+        # Hide progress bar and cancel button initially
         self.search_progress.hide()
+        self.cancel_btn.hide()
 
         # Connect signals
-        widget.search_btn.clicked.connect(self.perform_search)
+        self.search_btn.clicked.connect(self.perform_search)
+        self.cancel_btn.clicked.connect(self.cancel_search)
         self.search_edit.returnPressed.connect(self.perform_search)
         widget.clear_btn.clicked.connect(self.clear_search)
         self.search_all_radio.toggled.connect(self.update_search_field_checkboxes)
@@ -151,6 +355,11 @@ class SearchModule(BaseModule):
             self.show_error("Search", "Please enter at least 2 characters")
             return
 
+        # Cancel any existing search
+        if self._worker and self._worker.isRunning():
+            self.cancel_search()
+            return
+
         self.search_table.setRowCount(0)
         self.search_results.clear()
 
@@ -181,11 +390,6 @@ class SearchModule(BaseModule):
             if itar_bp_dir and os.path.exists(itar_bp_dir):
                 dirs_to_search.append(('ITAR-BP', itar_bp_dir))
 
-        self.search_progress.setMaximum(0)
-        self.search_progress.show()
-        self.search_status_label.setText("Searching...")
-        QApplication.processEvents()
-
         # Determine which fields to search
         if strict_mode:
             search_customer = self.search_customer_check.isChecked()
@@ -196,175 +400,82 @@ class SearchModule(BaseModule):
             # Legacy mode: search all fields
             search_customer = search_job = search_desc = search_drawing = True
 
-        try:
-            if strict_mode:
-                self._strict_search(dirs_to_search, search_term,
-                                  search_customer, search_job, search_desc, search_drawing)
-            else:
-                self._legacy_search(dirs_to_search, search_term)
+        # Show progress UI
+        self.search_progress.setMaximum(0)  # Indeterminate progress
+        self.search_progress.show()
+        self.search_status_label.setText("Starting search...")
+        self.search_btn.setEnabled(False)
+        self.cancel_btn.show()
 
-            # Sort results by date (newest first)
-            self.search_results.sort(key=lambda x: x['date'], reverse=True)
+        # Start background search worker
+        self._worker = SearchWorker(
+            dirs_to_search, search_term, strict_mode,
+            search_customer, search_job, search_desc, search_drawing,
+            self.app_context
+        )
+        self._worker.result_found.connect(self._on_result_found)
+        self._worker.progress_update.connect(self._on_progress_update)
+        self._worker.finished.connect(self._on_search_finished)
+        self._worker.start()
 
-            # Display results
-            for result in self.search_results:
-                row = self.search_table.rowCount()
-                self.search_table.insertRow(row)
-                self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
-                self.search_table.setItem(row, 1, QTableWidgetItem(result['customer']))
-                self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
-                self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
-                self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
+    def cancel_search(self):
+        """Cancel the running search"""
+        if self._worker and self._worker.isRunning():
+            self._worker.cancel()
+            self.search_status_label.setText("Cancelling search...")
 
-            self.search_status_label.setText(f"Found {len(self.search_results)} result(s)")
+    def _on_result_found(self, result: dict):
+        """Slot called when a search result is found"""
+        self.search_results.append(result)
 
-        except Exception as e:
-            self.show_error("Error", f"Search error: {e}")
+        # Add to table immediately
+        row = self.search_table.rowCount()
+        self.search_table.insertRow(row)
+        self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
+        self.search_table.setItem(row, 1, QTableWidgetItem(result['customer']))
+        self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
+        self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
+        self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
 
+    def _on_progress_update(self, status: str):
+        """Slot called with progress updates"""
+        self.search_status_label.setText(status)
+
+    def _on_search_finished(self, result_count: int):
+        """Slot called when search completes"""
+        # Sort results by date (newest first)
+        self.search_results.sort(key=lambda x: x['date'], reverse=True)
+
+        # Rebuild table with sorted results
+        self.search_table.setRowCount(0)
+        for result in self.search_results:
+            row = self.search_table.rowCount()
+            self.search_table.insertRow(row)
+            self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
+            self.search_table.setItem(row, 1, QTableWidgetItem(result['customer']))
+            self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
+            self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
+            self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
+
+        self.search_status_label.setText(f"Found {result_count} result(s)")
         self.search_progress.hide()
-
-    def _strict_search(self, dirs_to_search, search_term,
-                      search_customer, search_job, search_desc, search_drawing):
-        """Structured search using parsed folder names"""
-        for prefix, base_dir in dirs_to_search:
-            try:
-                customers = [d for d in os.listdir(base_dir)
-                           if os.path.isdir(os.path.join(base_dir, d))]
-            except OSError:
-                continue
-
-            for customer in customers:
-                customer_path = os.path.join(base_dir, customer)
-                display_customer = f"[ITAR] {customer}" if prefix == 'ITAR' else customer
-
-                # Check if searching by customer name
-                customer_match = search_customer and search_term in customer.lower()
-
-                # Find job folders
-                jobs = self.app_context.find_job_folders(customer_path)
-
-                for dir_name, job_docs_path in jobs:
-                    # Apply strict mode filter
-                    if not dir_name or not dir_name[0].isdigit():
-                        continue
-
-                    # Parse folder name into components
-                    parts = dir_name.split('_')
-                    job_num = parts[0] if parts else ""
-                    remaining_parts = parts[1:] if len(parts) > 1 else []
-
-                    drawings = []
-                    desc_parts = []
-
-                    if remaining_parts:
-                        if '-' in remaining_parts[-1]:
-                            drawings = [d.strip() for d in remaining_parts[-1].split('-') if d.strip()]
-                            desc_parts = remaining_parts[:-1]
-                        else:
-                            desc_parts = remaining_parts
-
-                    desc = ' '.join(desc_parts) if desc_parts else ""
-
-                    # Check for matches
-                    match = customer_match
-                    if not match and search_job and search_term in job_num.lower():
-                        match = True
-                    if not match and search_desc and search_term in desc.lower():
-                        match = True
-                    if not match and search_drawing:
-                        for drawing in drawings:
-                            if search_term in drawing.lower():
-                                match = True
-                                break
-
-                    if match:
-                        try:
-                            mod_time = datetime.fromtimestamp(Path(job_docs_path).stat().st_mtime)
-                        except (OSError, FileNotFoundError):
-                            mod_time = datetime.now()
-
-                        self.search_results.append({
-                            'date': mod_time,
-                            'customer': display_customer,
-                            'job_number': job_num,
-                            'description': desc,
-                            'drawings': drawings,
-                            'path': job_docs_path
-                        })
-
-    def _legacy_search(self, dirs_to_search, search_term):
-        """Recursive search through all directories"""
-        for prefix, base_dir in dirs_to_search:
-            self._legacy_recursive_search(base_dir, prefix, search_term)
-
-    def _legacy_recursive_search(self, base_dir: str, prefix: str, search_term: str):
-        """Recursively search all folders in legacy mode"""
-        try:
-            for root, dirs, files in os.walk(base_dir):
-                folder_name = os.path.basename(root)
-
-                # Try to extract customer from path
-                rel_path = os.path.relpath(root, base_dir)
-                path_parts = rel_path.split(os.sep)
-                customer = path_parts[0] if path_parts and path_parts[0] != '.' else "Unknown"
-
-                # Check if folder name or path contains search term
-                if search_term in folder_name.lower() or search_term in rel_path.lower():
-                    # Try to parse folder name for job info
-                    parts = folder_name.split('_')
-                    job_num = ""
-                    desc = ""
-                    drawings = []
-
-                    # Try to extract job number
-                    for part in parts:
-                        if part and part[0].isdigit():
-                            job_num = part
-                            break
-
-                    # If no structured format, use folder name as description
-                    if not job_num:
-                        match = re.match(r'^(\d+)', folder_name)
-                        if match:
-                            job_num = match.group(1)
-                            desc = folder_name[len(job_num):].strip(' -_')
-                        else:
-                            desc = folder_name
-                    else:
-                        # Parse remaining parts
-                        remaining_parts = [p for p in parts if p != job_num]
-                        if remaining_parts:
-                            if '-' in remaining_parts[-1]:
-                                drawings = [d.strip() for d in remaining_parts[-1].split('-') if d.strip()]
-                                desc = ' '.join(remaining_parts[:-1])
-                            else:
-                                desc = ' '.join(remaining_parts)
-
-                    display_customer = f"[{prefix}] {customer}" if prefix else customer
-
-                    try:
-                        mod_time = datetime.fromtimestamp(Path(root).stat().st_mtime)
-                    except (OSError, FileNotFoundError):
-                        mod_time = datetime.now()
-
-                    self.search_results.append({
-                        'date': mod_time,
-                        'customer': display_customer,
-                        'job_number': job_num if job_num else "(no job #)",
-                        'description': desc,
-                        'drawings': drawings,
-                        'path': root
-                    })
-        except Exception:
-            # Skip directories that cause errors
-            pass
+        self.search_btn.setEnabled(True)
+        self.cancel_btn.hide()
 
     def clear_search(self):
         """Clear search results and input"""
+        # Cancel any running search
+        if self._worker and self._worker.isRunning():
+            self._worker.cancel()
+            self._worker.wait()
+
         self.search_edit.clear()
         self.search_table.setRowCount(0)
         self.search_results.clear()
         self.search_status_label.setText("")
+        self.search_progress.hide()
+        self.search_btn.setEnabled(True)
+        self.cancel_btn.hide()
 
     # ==================== Helper Methods ====================
 
@@ -437,4 +548,8 @@ class SearchModule(BaseModule):
 
     def cleanup(self):
         """Cleanup resources"""
+        # Stop any running worker thread
+        if self._worker and self._worker.isRunning():
+            self._worker.cancel()
+            self._worker.wait()
         self.search_results.clear()
