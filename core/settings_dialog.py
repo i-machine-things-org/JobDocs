@@ -236,7 +236,7 @@ class SettingsDialog(QDialog):
         legacy_example = f"{{customer}}{path_sep}job documents{path_sep}{{job_folder}}"
 
         advanced_content_layout.addWidget(QLabel("Job Folder Structure:"))
-        advanced_content_layout.addWidget(QLabel("Available placeholders: {customer}, {job_folder}"))
+        advanced_content_layout.addWidget(QLabel("Available placeholders: {customer}, {job_folder}, {po_number}"))
         advanced_content_layout.addWidget(QLabel(f"Default: {path_example}"))
         advanced_content_layout.addWidget(QLabel(f"Legacy: {legacy_example}"))
 
