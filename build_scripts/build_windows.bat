@@ -102,7 +102,11 @@ echo JobDocs - Windows Distribution
 echo ==============================
 echo.
 echo Installation:
-echo   1. Copy this folder to your desired location ^(e.g., C:\Program Files\JobDocs^)
+echo   If running build script as Administrator, JobDocs is automatically
+echo   installed to C:\Program Files\JobDocs
+echo.
+echo   Manual installation:
+echo   1. Copy this folder to your desired location
 echo   2. Right-click on JobDocs.exe and select "Send to" ^> "Desktop ^(create shortcut^)"
 echo   3. ^(Optional^) Pin the shortcut to Start Menu or Taskbar
 echo.
@@ -112,15 +116,24 @@ echo   - Or use the desktop shortcut
 echo   - Or run Create-Desktop-Shortcut.bat to create a shortcut automatically
 echo.
 echo First-time setup:
-echo   On first launch, JobDocs will ask you to configure:
-echo   - ITAR directory ^(for controlled files^)
-echo   - Non-ITAR directory ^(for regular files^)
-echo   - Blueprints directory
+echo   On first launch, go to File ^> Settings to configure:
+echo   - Customer Files Directory: Where job folders are created
+echo   - Blueprints Directory: Central drawing storage
+echo   - ^(Optional^) ITAR directories for controlled files
+echo.
+echo Modules:
+echo   - Create Quote Folder: Create quote folders for customers
+echo   - Create Job Folder: Create job folders with blueprint links
+echo   - Bulk Create: Create multiple jobs from CSV
+echo   - Search: Search across all customers and jobs
+echo   - Import Blueprints: Import blueprint files
+echo   - History: View recent job history
+echo   - Report Fixer: Transform Excel job reports to match templates
 echo.
 echo For help and documentation, see:
 echo   https://github.com/i-machine-things/JobDocs
 echo.
-echo Version: 0.2.0-alpha
+echo Version: 0.3.0
 echo Build date: %date%
 ) > JobDocs-Windows\README.txt
 
@@ -147,6 +160,27 @@ echo echo Desktop shortcut created successfully!
 echo pause
 ) > JobDocs-Windows\Create-Desktop-Shortcut.bat
 
+REM Copy to Program Files (requires admin)
+echo.
+echo [6/6] Installing to Program Files...
+set INSTALL_PATH=C:\Program Files\JobDocs
+
+REM Check if we have admin rights
+net session >nul 2>&1
+if errorlevel 1 (
+    echo       NOTE: Run as Administrator to install to "%INSTALL_PATH%"
+    echo       Skipping Program Files installation...
+) else (
+    if not exist "%INSTALL_PATH%" mkdir "%INSTALL_PATH%"
+    copy /Y "..\%DIST_PATH%\JobDocs.exe" "%INSTALL_PATH%\" >nul
+    copy /Y "JobDocs-Windows\README.txt" "%INSTALL_PATH%\" >nul
+    if errorlevel 1 (
+        echo       WARNING: Could not copy to "%INSTALL_PATH%"
+    ) else (
+        echo       Installed to: %INSTALL_PATH%\JobDocs.exe
+    )
+)
+
 REM Show build info
 echo.
 echo ======================================
@@ -162,6 +196,10 @@ echo   - Create-Desktop-Shortcut.bat
 echo.
 for %%I in (JobDocs-Windows\JobDocs.exe) do echo Executable size: %%~zI bytes
 echo.
+if exist "%INSTALL_PATH%\JobDocs.exe" (
+    echo Installed to: %INSTALL_PATH%\JobDocs.exe
+    echo.
+)
 echo Next steps:
 echo   1. Copy the JobDocs-Windows folder to your desired location
 echo   2. Run Create-Desktop-Shortcut.bat to create a desktop shortcut
