@@ -45,7 +45,8 @@ class JobDocsMainWindow(QMainWindow):
         'db_name': '',
         'db_username': '',
         'db_password': '',
-        'remote_server_path': ''  # Network path or URL for remote settings sync
+        'remote_server_path': '',  # Network path or URL for remote settings sync
+        'report_template_path': ''  # Path to Excel template for Report Fixer
     }
 
     def __init__(self):
@@ -103,7 +104,7 @@ class JobDocsMainWindow(QMainWindow):
         if 0 <= default_tab < self.tabs.count():
             self.tabs.setCurrentIndex(default_tab)
 
-        self.statusBar().showMessage("Ready")
+        self.statusBar().showMessage("Ready") # pyright: ignore[reportOptionalMemberAccess]
 
     # ==================== Settings & History ====================
 
@@ -227,7 +228,7 @@ class JobDocsMainWindow(QMainWindow):
                     import traceback
                     traceback.print_exc()
 
-            self.statusBar().showMessage(f"Loaded {len(self.modules)} module(s)")
+            self.statusBar().showMessage(f"Loaded {len(self.modules)} module(s)")  # pyright: ignore[reportOptionalMemberAccess]
 
             # Populate customer lists in all modules
             self.populate_customer_lists()
@@ -248,26 +249,26 @@ class JobDocsMainWindow(QMainWindow):
         menubar = self.menuBar()
 
         # File menu
-        file_menu = menubar.addMenu("&File")
+        file_menu = menubar.addMenu("&File")  # pyright: ignore[reportOptionalMemberAccess]
 
-        settings_action = file_menu.addAction("&Settings")
-        settings_action.triggered.connect(self.open_settings)
+        settings_action = file_menu.addAction("&Settings")  # pyright: ignore[reportOptionalMemberAccess]
+        settings_action.triggered.connect(self.open_settings)  # pyright: ignore[reportOptionalMemberAccess]
 
-        file_menu.addSeparator()
+        file_menu.addSeparator()  # pyright: ignore[reportOptionalMemberAccess]
 
-        exit_action = file_menu.addAction("E&xit")
-        exit_action.triggered.connect(self.close)
+        exit_action = file_menu.addAction("E&xit")  # pyright: ignore[reportOptionalMemberAccess]
+        exit_action.triggered.connect(self.close)  # pyright: ignore[reportOptionalMemberAccess]
 
         # Help menu
-        help_menu = menubar.addMenu("&Help")
+        help_menu = menubar.addMenu("&Help")  # pyright: ignore[reportOptionalMemberAccess]
 
-        getting_started_action = help_menu.addAction("&Getting Started")
-        getting_started_action.triggered.connect(self.show_getting_started)
+        getting_started_action = help_menu.addAction("&Getting Started")  # pyright: ignore[reportOptionalMemberAccess]
+        getting_started_action.triggered.connect(self.show_getting_started)  # pyright: ignore[reportOptionalMemberAccess]
 
-        help_menu.addSeparator()
+        help_menu.addSeparator()  # pyright: ignore[reportOptionalMemberAccess]
 
-        about_action = help_menu.addAction("&About")
-        about_action.triggered.connect(self.show_about)
+        about_action = help_menu.addAction("&About")  # pyright: ignore[reportOptionalMemberAccess]
+        about_action.triggered.connect(self.show_about)  # pyright: ignore[reportOptionalMemberAccess]
 
     def open_settings(self):
         """Open settings dialog"""
@@ -372,7 +373,7 @@ Search across all customers and jobs.</p>
     def log_message(self, message: str):
         """Log a message to console and status bar"""
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
-        self.statusBar().showMessage(message, 3000)
+        self.statusBar().showMessage(message, 3000)  # pyright: ignore[reportOptionalMemberAccess]
 
     def show_error_dialog(self, title: str, message: str):
         """Show error dialog"""
@@ -467,7 +468,7 @@ Search across all customers and jobs.</p>
 
     # ==================== Application Cleanup ====================
 
-    def closeEvent(self, event):
+    def closeEvent(self, event):  # pyright: ignore[reportIncompatibleMethodOverride]
         """Handle window close event - ensure proper cleanup"""
         self.log_message("Application closing - cleaning up resources...")
 
