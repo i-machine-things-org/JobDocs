@@ -22,7 +22,7 @@ from pathlib import Path
 # ============================================================================
 # Application metadata
 APP_NAME = 'JobDocs'
-VERSION = '0.2.0-alpha'
+VERSION = '0.3.0'
 
 # Build paths (can be overridden with command-line options)
 # To customize, use: pyinstaller --distpath <path> --workpath <path> JobDocs.spec
@@ -163,6 +163,15 @@ hiddenimports = [
     'importlib.util',
     'subprocess',
     'io',
+
+    # Shared modules
+    'shared.remote_sync',
+
+    # Report Fixer dependencies
+    'pandas',
+    'openpyxl',
+    'openpyxl.worksheet.table',
+    'openpyxl.styles',
 ]
 
 # Find main.py
@@ -184,8 +193,6 @@ a = Analysis(
         # Exclude unnecessary modules to reduce size
         'tkinter',
         'matplotlib',
-        'numpy',
-        'pandas',
         'PIL',
         'IPython',
         'jupyter',

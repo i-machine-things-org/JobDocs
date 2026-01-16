@@ -279,6 +279,16 @@
    <item>
     <layout class="QHBoxLayout" name="actionLayout">
      <item>
+      <widget class="QPushButton" name="preview_customers_btn">
+       <property name="text">
+        <string>Preview Customers</string>
+       </property>
+       <property name="enabled">
+        <bool>false</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QPushButton" name="fix_export_btn">
        <property name="text">
         <string>Fix &amp;&amp; Export Report</string>

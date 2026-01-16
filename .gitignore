@@ -20,6 +20,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+build_dist/
 *.spec
 !build_scripts/JobDocs.spec
 

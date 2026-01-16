@@ -10,7 +10,7 @@ REM set DIST_PATH=custom_dist
 REM set BUILD_PATH=custom_build
 
 REM Default paths (relative to project root):
-set DIST_PATH=output
+set DIST_PATH=build_dist
 set BUILD_PATH=build
 REM ============================================================================
 
@@ -28,12 +28,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [1/5] Checking Python version...
+echo [1/7] Checking Python version...
 py --version
 echo.
 
 REM Check and install dependencies
-echo [2/5] Checking dependencies...
+echo [2/7] Checking dependencies...
 
 py -c "import PyQt6" >nul 2>&1
 if errorlevel 1 (
@@ -48,6 +48,36 @@ if errorlevel 1 (
     echo       PyQt6 installed successfully
 ) else (
     echo       PyQt6 found
+)
+
+py -c "import pandas" >nul 2>&1
+if errorlevel 1 (
+    echo       pandas not found. Installing...
+    py -m pip install --user pandas>=2.0.0
+    if errorlevel 1 (
+        echo       ERROR: Failed to install pandas
+        echo       Please check your internet connection and try again
+        pause
+        exit /b 1
+    )
+    echo       pandas installed successfully
+) else (
+    echo       pandas found
+)
+
+py -c "import openpyxl" >nul 2>&1
+if errorlevel 1 (
+    echo       openpyxl not found. Installing...
+    py -m pip install --user openpyxl>=3.1.0
+    if errorlevel 1 (
+        echo       ERROR: Failed to install openpyxl
+        echo       Please check your internet connection and try again
+        pause
+        exit /b 1
+    )
+    echo       openpyxl installed successfully
+) else (
+    echo       openpyxl found
 )
 
 py -c "import PyInstaller" >nul 2>&1
@@ -65,35 +95,67 @@ if errorlevel 1 (
     echo       PyInstaller found
 )
 
+REM Check if JobDocs.exe is running
+echo [3/7] Checking for running instances...
+tasklist /FI "IMAGENAME eq JobDocs.exe" 2>NUL | find /I /N "JobDocs.exe">NUL
+if "%ERRORLEVEL%"=="0" (
+    echo       ERROR: JobDocs.exe is currently running!
+    echo       Please close JobDocs before building.
+    pause
+    exit /b 1
+)
+echo       No running instances found
+
 REM Clean previous builds
-echo [3/5] Cleaning previous builds...
+echo [4/7] Cleaning previous builds...
 if exist "..\%BUILD_PATH%" rmdir /s /q "..\%BUILD_PATH%"
 if exist "..\%DIST_PATH%" rmdir /s /q "..\%DIST_PATH%"
+if exist "C:\Program Files\JobDocs\JobDocs.exe" (
+    del /F "C:\Program Files\JobDocs\JobDocs.exe" >nul 2>&1
+)
 echo       Cleaned
 echo.
 
 REM Build the executable
-echo [4/5] Building executable...
+echo [5/7] Building executable...
 cd ..
 py -m PyInstaller --distpath "%DIST_PATH%" --workpath "%BUILD_PATH%" build_scripts\JobDocs.spec
+set BUILD_ERROR=%ERRORLEVEL%
 cd build_scripts
 
-if errorlevel 1 (
-    echo       Build failed!
+if not "%BUILD_ERROR%"=="0" (
+    echo.
+    echo       BUILD FAILED! Error code: %BUILD_ERROR%
+    echo       Check the output above for details.
+    pause
+    exit /b 1
+)
+
+REM Verify the exe was created (handle both absolute and relative paths)
+if exist "%DIST_PATH%\JobDocs.exe" (
+    set "EXE_PATH=%DIST_PATH%\JobDocs.exe"
+) else if exist "..\%DIST_PATH%\JobDocs.exe" (
+    set "EXE_PATH=..\%DIST_PATH%\JobDocs.exe"
+) else (
+    echo.
+    echo       BUILD FAILED! JobDocs.exe was not created.
+    echo       Checked: %DIST_PATH%\JobDocs.exe
+    echo       Checked: ..\%DIST_PATH%\JobDocs.exe
     pause
     exit /b 1
 )
 
 echo       Build successful!
+echo       Exe location: %EXE_PATH%
 echo.
 
 REM Create distribution directory
-echo [5/5] Creating distribution package...
+echo [6/7] Creating distribution package...
 if exist JobDocs-Windows rmdir /s /q JobDocs-Windows
 mkdir JobDocs-Windows
 
 REM Copy executable
-copy "..\%DIST_PATH%\JobDocs.exe" JobDocs-Windows\ >nul
+copy "%EXE_PATH%" JobDocs-Windows\ >nul
 
 REM Create README
 echo Creating README...
@@ -162,7 +224,7 @@ echo pause
 
 REM Copy to Program Files (requires admin)
 echo.
-echo [6/6] Installing to Program Files...
+echo [7/7] Installing to Program Files...
 set INSTALL_PATH=C:\Program Files\JobDocs
 
 REM Check if we have admin rights
@@ -172,7 +234,7 @@ if errorlevel 1 (
     echo       Skipping Program Files installation...
 ) else (
     if not exist "%INSTALL_PATH%" mkdir "%INSTALL_PATH%"
-    copy /Y "..\%DIST_PATH%\JobDocs.exe" "%INSTALL_PATH%\" >nul
+    copy /Y "%EXE_PATH%" "%INSTALL_PATH%\" >nul
     copy /Y "JobDocs-Windows\README.txt" "%INSTALL_PATH%\" >nul
     if errorlevel 1 (
         echo       WARNING: Could not copy to "%INSTALL_PATH%"
