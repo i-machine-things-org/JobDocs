@@ -283,6 +283,7 @@ class SearchModule(BaseModule):
         self.search_all_radio = None
         self.search_strict_radio = None
         self.search_blueprints_check = None
+        self.search_inspection_check = None
         self.mode_row_widget = None
         self.legacy_options_widget = None
         self.search_btn = None
@@ -613,9 +614,17 @@ class SearchModule(BaseModule):
         """Open the blueprints folder for the selected job's customer"""
         row = self.search_table.currentRow()
         if 0 <= row < len(self.search_results):
-            customer = self.search_results[row]['customer'].replace('[ITAR] ', '').replace('[ITAR-BP] ', '')
-            is_itar = '[ITAR]' in self.search_results[row]['customer']
+            raw_customer = self.search_results[row]['customer']
+            # Strip all known prefixes to get the bare customer name
+            for prefix in ('[ITAR] ', '[ITAR-BP] ', '[BP] ', '[IR] '):
+                raw_customer = raw_customer.replace(prefix, '')
+            customer = raw_customer.strip()
 
+            if not customer:
+                self.show_error("Not Found", "Could not determine customer for this result")
+                return
+
+            is_itar = '[ITAR]' in self.search_results[row]['customer']
             bp_dir = self.app_context.get_setting('itar_blueprints_dir' if is_itar else 'blueprints_dir', '')
             if bp_dir:
                 customer_bp = os.path.join(bp_dir, customer)
