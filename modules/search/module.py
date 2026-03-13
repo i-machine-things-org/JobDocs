@@ -278,6 +278,7 @@ class SearchModule(BaseModule):
         self.search_progress = None
         self.search_customer_check = None
         self.search_job_check = None
+        self.search_po_check = None
         self.search_desc_check = None
         self.search_drawing_check = None
         self.search_all_radio = None
@@ -319,6 +320,7 @@ class SearchModule(BaseModule):
         self.search_progress = widget.search_progress
         self.search_customer_check = widget.search_customer_check
         self.search_job_check = widget.search_job_check
+        self.search_po_check = widget.search_po_check
         self.search_desc_check = widget.search_desc_check
         self.search_drawing_check = widget.search_drawing_check
         self.search_all_radio = widget.search_all_radio
@@ -405,6 +407,7 @@ class SearchModule(BaseModule):
 
         self.search_customer_check.setEnabled(is_strict_mode)
         self.search_job_check.setEnabled(is_strict_mode)
+        self.search_po_check.setEnabled(is_strict_mode)
         self.search_desc_check.setEnabled(is_strict_mode)
         self.search_drawing_check.setEnabled(is_strict_mode)
 
@@ -520,8 +523,9 @@ class SearchModule(BaseModule):
         self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
         self.search_table.setItem(row, 1, QTableWidgetItem(result['customer']))
         self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
-        self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
-        self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
+        self.search_table.setItem(row, 3, QTableWidgetItem(result.get('po_number', '')))
+        self.search_table.setItem(row, 4, QTableWidgetItem(result['description']))
+        self.search_table.setItem(row, 5, QTableWidgetItem(', '.join(result['drawings'])))
 
     def _on_progress_update(self, status: str):
         """Slot called with progress updates"""
