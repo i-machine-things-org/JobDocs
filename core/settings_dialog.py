@@ -66,6 +66,14 @@ class SettingsDialog(QDialog):
         cf_btn.clicked.connect(lambda: self.browse_dir(self.customer_files_edit))
         dir_layout.addWidget(cf_btn, 1, 2)
 
+        # Inspection reports
+        dir_layout.addWidget(QLabel("Inspection Reports Directory:"), 2, 0)
+        self.inspection_report_edit = QLineEdit(self.settings.get('inspection_report_dir', ''))
+        dir_layout.addWidget(self.inspection_report_edit, 2, 1)
+        ir_btn = QPushButton("Browse...")
+        ir_btn.clicked.connect(lambda: self.browse_dir(self.inspection_report_edit))
+        dir_layout.addWidget(ir_btn, 2, 2)
+
         scroll_layout.addWidget(dir_group)
 
         # ITAR directories group
@@ -236,7 +244,7 @@ class SettingsDialog(QDialog):
         legacy_example = f"{{customer}}{path_sep}job documents{path_sep}{{job_folder}}"
 
         advanced_content_layout.addWidget(QLabel("Job Folder Structure:"))
-        advanced_content_layout.addWidget(QLabel("Available placeholders: {customer}, {job_folder}"))
+        advanced_content_layout.addWidget(QLabel("Available placeholders: {customer}, {job_folder}, {po_number}"))
         advanced_content_layout.addWidget(QLabel(f"Default: {path_example}"))
         advanced_content_layout.addWidget(QLabel(f"Legacy: {legacy_example}"))
 
@@ -291,6 +299,7 @@ class SettingsDialog(QDialog):
     def save(self):
         self.settings['blueprints_dir'] = self.blueprints_edit.text()
         self.settings['customer_files_dir'] = self.customer_files_edit.text()
+        self.settings['inspection_report_dir'] = self.inspection_report_edit.text()
         self.settings['itar_blueprints_dir'] = self.itar_blueprints_edit.text()
         self.settings['itar_customer_files_dir'] = self.itar_customer_files_edit.text()
 

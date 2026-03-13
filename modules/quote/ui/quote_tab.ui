@@ -290,6 +290,13 @@
           </widget>
          </item>
          <item>
+          <widget class="QPushButton" name="link_drawings_btn">
+           <property name="text">
+            <string>Link Drawings...</string>
+           </property>
+          </widget>
+         </item>
+         <item>
           <spacer name="horizontalSpacer_3">
            <property name="orientation">
             <enum>Qt::Orientation::Horizontal</enum>
