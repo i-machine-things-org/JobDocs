@@ -20,7 +20,7 @@ from PyQt6 import uic
 from datetime import datetime
 
 from core.base_module import BaseModule
-from shared.widgets import DropZone, JobSearchDialog
+from shared.widgets import DropZone, JobSearchDialog, DrawingSearchDialog
 from shared.utils import (
     is_blueprint_file, parse_job_numbers, create_file_link,
     sanitize_filename, open_folder, get_next_number
@@ -165,6 +165,7 @@ class JobModule(BaseModule):
         self.job_drop_zone.files_dropped.connect(lambda files: self.handle_job_files(files))
         widget.remove_btn.clicked.connect(self.remove_job_file)
         widget.copy_from_btn.clicked.connect(self.show_copy_from_dialog)
+        widget.link_drawings_btn.clicked.connect(self.show_link_drawings_dialog)
         widget.create_btn.clicked.connect(self.create_job)
         widget.clear_btn.clicked.connect(self.clear_job_form)
         widget.auto_gen_job_btn.clicked.connect(self.auto_generate_job_number)
@@ -383,6 +384,8 @@ class JobModule(BaseModule):
                         shutil.copy2(file_path, bp_dest)
                     except FileExistsError:
                         pass
+                    except PermissionError:
+                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
                     job_dest = job_path / file_name
                     if not job_dest.exists():
@@ -393,6 +396,8 @@ class JobModule(BaseModule):
                         shutil.copy2(file_path, job_dest)
                     except FileExistsError:
                         pass
+                    except PermissionError:
+                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
             # Link existing drawings
             if drawings:
@@ -495,8 +500,24 @@ class JobModule(BaseModule):
             if folder_path and os.path.exists(folder_path):
                 self._copy_info_from_folder(folder_path)
 
+    def show_link_drawings_dialog(self):
+        """Show dialog to search and link existing drawings/inspection reports by drawing number"""
+        dialog = DrawingSearchDialog(self.get_widget(), self.app_context)
+
+        if dialog.exec():
+            selected_files = dialog.get_selected_files()
+            if selected_files:
+                files_added = 0
+                for file_path in selected_files:
+                    if file_path not in self.job_files:
+                        self.job_files.append(file_path)
+                        self.job_files_list.addItem(os.path.basename(file_path))
+                        files_added += 1
+                if files_added > 0:
+                    self.log_message(f"Linked {files_added} drawing(s)/report(s)")
+
     def _copy_info_from_folder(self, folder_path: str):
-        """Copy job/quote info from folder to form"""
+        """Copy job/quote info from folder to form, including optional file copy"""
         folder_name = os.path.basename(folder_path)
         parts = folder_name.split('_', 2)
 
@@ -515,9 +536,32 @@ class JobModule(BaseModule):
                 customer = os.path.basename(os.path.dirname(parent))
 
             self.customer_combo.setCurrentText(customer)
-            self.job_number_edit.setText(job_number)
+            # Don't copy the job number - user should enter a new one
             self.description_edit.setText(description)
             self.drawings_edit.setText(drawings)
+
+            # Add files from source folder to the files list
+            source_path = Path(folder_path)
+            files_added = 0
+
+            # Check main folder
+            for item in source_path.iterdir():
+                if item.is_file():
+                    self.job_files.append(str(item))
+                    self.job_files_list.addItem(item.name)
+                    files_added += 1
+
+            # Check "job documents" subfolder
+            job_docs = source_path / "job documents"
+            if job_docs.exists() and job_docs.is_dir():
+                for item in job_docs.iterdir():
+                    if item.is_file():
+                        self.job_files.append(str(item))
+                        self.job_files_list.addItem(f"job documents/{item.name}")
+                        files_added += 1
+
+            if files_added > 0:
+                self.log_message(f"Added {files_added} file(s) from {folder_name}")
 
     # ==================== Add to Existing Tab: Job Tree Management ====================
 
@@ -733,6 +777,9 @@ class JobModule(BaseModule):
                         added += 1
                     except FileExistsError:
                         skipped += 1
+                    except PermissionError:
+                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                        skipped += 1
 
                 elif dest == 'job':
                     job_dest = Path(job_path) / file_name
@@ -741,6 +788,9 @@ class JobModule(BaseModule):
                         added += 1
                     except FileExistsError:
                         skipped += 1
+                    except PermissionError:
+                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                        skipped += 1
 
                 else:  # both
                     bp_dest = customer_bp / file_name
@@ -748,6 +798,8 @@ class JobModule(BaseModule):
                         shutil.copy2(file_path, bp_dest)
                     except FileExistsError:
                         pass
+                    except PermissionError:
+                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
                     job_dest = Path(job_path) / file_name
                     if not job_dest.exists():
@@ -769,20 +821,70 @@ class JobModule(BaseModule):
     # ==================== Folder Operations ====================
 
     def open_blueprints_folder(self):
-        """Open blueprints directory"""
+        """Open active customer's blueprints folder, or base directory if nothing selected"""
         bp_dir = self.app_context.get_setting('blueprints_dir', '')
-        if bp_dir and os.path.exists(bp_dir):
-            success, error = open_folder(bp_dir)
-            if not success:
-                self.show_error("Error", error)
-        else:
+        if not bp_dir or not os.path.exists(bp_dir):
             self.show_error("Warning", "Blueprints directory not configured")
+            return
+
+        folder_to_open = None
+
+        # First check if there's a selected customer in the tree
+        items = self.job_tree.selectedItems() if self.job_tree else []
+        if items:
+            item = items[0]
+            # Get customer name (parent if job selected, or item itself if customer)
+            if item.parent():
+                customer = item.parent().text(0)
+            else:
+                customer = item.text(0)
+            customer_bp = os.path.join(bp_dir, customer)
+            if os.path.exists(customer_bp):
+                folder_to_open = customer_bp
+
+        # If nothing in tree, check customer combo on Create New tab
+        if not folder_to_open and self.customer_combo:
+            customer = self.customer_combo.currentText().strip()
+            if customer:
+                customer_bp = os.path.join(bp_dir, customer)
+                if os.path.exists(customer_bp):
+                    folder_to_open = customer_bp
+
+        # Fallback to base blueprints directory
+        if not folder_to_open:
+            folder_to_open = bp_dir
+
+        success, error = open_folder(folder_to_open)
+        if not success:
+            self.show_error("Error", error)
 
     def open_customer_files_folder(self):
-        """Open customer files directory"""
-        cf_dir = self.app_context.get_setting('customer_files_dir', '')
-        if cf_dir and os.path.exists(cf_dir):
-            success, error = open_folder(cf_dir)
+        """Open active customer/job folder, or base directory if nothing selected"""
+        folder_to_open = None
+
+        # First check if there's a selected job/customer in the tree
+        items = self.job_tree.selectedItems() if self.job_tree else []
+        if items:
+            item = items[0]
+            path = item.data(0, Qt.ItemDataRole.UserRole)
+            if path and os.path.exists(path):
+                folder_to_open = path
+
+        # If nothing in tree, check customer combo on Create New tab
+        if not folder_to_open and self.customer_combo:
+            customer = self.customer_combo.currentText().strip()
+            if customer:
+                cf_dir = self.app_context.get_setting('customer_files_dir', '')
+                customer_path = os.path.join(cf_dir, customer)
+                if os.path.exists(customer_path):
+                    folder_to_open = customer_path
+
+        # Fallback to base customer files directory
+        if not folder_to_open:
+            folder_to_open = self.app_context.get_setting('customer_files_dir', '')
+
+        if folder_to_open and os.path.exists(folder_to_open):
+            success, error = open_folder(folder_to_open)
             if not success:
                 self.show_error("Error", error)
         else:

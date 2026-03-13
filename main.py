@@ -46,7 +46,8 @@ class JobDocsMainWindow(QMainWindow):
         'db_username': '',
         'db_password': '',
         'remote_server_path': '',  # Network path or URL for remote settings sync
-        'report_template_path': ''  # Path to Excel template for Report Fixer
+        'report_template_path': '',  # Path to Excel template for Report Fixer
+        'inspection_report_dir': ''  # Directory containing inspection reports
     }
 
     def __init__(self):
@@ -495,6 +496,13 @@ Search across all customers and jobs.</p>
 
 def main():
     """Main application entry point"""
+    # Set AppUserModelID so Windows can pin this to the taskbar
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('JobDocs.DEV')
+    except Exception:
+        pass
+
     app = QApplication(sys.argv)
     app.setApplicationName("JobDocs")
     app.setOrganizationName("JobDocs")

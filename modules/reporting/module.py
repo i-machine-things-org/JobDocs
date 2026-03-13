@@ -6,6 +6,7 @@ a template layout. It tracks schedule changes, adds notes for date modifications
 and exports formatted Excel files with highlighting.
 """
 
+import re
 import sys
 import json
 from pathlib import Path
@@ -915,6 +916,9 @@ class ReportingModule(BaseModule):
             # Apply transformation
             df_fixed, changed_rows = self._transform_report(self.source_df)
 
+            # Filter out sub-jobs (Job IDs ending in a letter)
+            df_fixed = self._filter_letter_suffix_jobs(df_fixed)
+
             # Check for completed jobs from previous report (also returns preserved highlights)
             df_fixed, prev_highlighted_keys = self._get_completed_jobs(df_fixed, reports_dir, customer)
 
@@ -1030,6 +1034,9 @@ class ReportingModule(BaseModule):
                 # Transform this customer's data
                 df_fixed, changed_rows = self._transform_report(customer_df)
 
+                # Filter out sub-jobs (Job IDs ending in a letter)
+                df_fixed = self._filter_letter_suffix_jobs(df_fixed)
+
                 # Check for completed jobs from previous report (also returns preserved highlights)
                 df_fixed, prev_highlighted_keys = self._get_completed_jobs(df_fixed, reports_dir, folder_name)
 
@@ -1065,6 +1072,23 @@ class ReportingModule(BaseModule):
         summary += f"\nFiles saved to customer reports folders."
 
         self.show_info("Multi-Customer Export Complete", summary)
+
+    def _filter_letter_suffix_jobs(self, df: 'pd.DataFrame') -> 'pd.DataFrame':
+        """Remove rows where Job ID ends in a letter (e.g. 12345A, 67890B).
+        These are sub-jobs that should not appear in customer reports."""
+        if 'Job ID' not in df.columns:
+            return df
+
+        before_count = len(df)
+        # Keep rows where Job ID is NaN, empty, or does NOT end with a letter
+        mask = df['Job ID'].apply(
+            lambda x: pd.isna(x) or not re.search(r'[A-Za-z]$', str(x).strip())
+        )
+        df_filtered = df[mask].reset_index(drop=True)
+        removed = before_count - len(df_filtered)
+        if removed > 0:
+            self._log(f"Filtered out {removed} sub-jobs (Job ID ending in a letter)")
+        return df_filtered
 
     def _transform_report(self, source_df: 'pd.DataFrame'):
         """Transform source data to match template layout"""

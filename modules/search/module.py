@@ -13,9 +13,11 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any
 from PyQt6.QtWidgets import (
-    QWidget, QMessageBox, QTableWidgetItem, QApplication, QMenu
+    QWidget, QMessageBox, QTableWidgetItem, QApplication, QMenu,
+    QListWidgetItem, QListWidget, QSplitter, QGroupBox, QVBoxLayout
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl
+from PyQt6.QtGui import QDesktopServices
 from PyQt6 import uic
 
 from core.base_module import BaseModule
@@ -67,6 +69,11 @@ class SearchWorker(QThread):
                 break
 
             self.progress_update.emit(f"Searching {prefix if prefix else 'standard'} directories...")
+
+            # BP and IR dirs use filename search, not job folder structure
+            if prefix in ('BP', 'ITAR-BP', 'IR'):
+                self._file_search(base_dir, prefix)
+                continue
 
             try:
                 customers = [d for d in os.listdir(base_dir)
@@ -147,7 +154,45 @@ class SearchWorker(QThread):
             if self._is_cancelled:
                 break
             self.progress_update.emit(f"Searching {prefix if prefix else 'standard'} directories...")
-            self._legacy_recursive_search(base_dir, prefix)
+            # BP and IR dirs use filename search, not folder name search
+            if prefix in ('BP', 'ITAR-BP', 'IR'):
+                self._file_search(base_dir, prefix)
+            else:
+                self._legacy_recursive_search(base_dir, prefix)
+
+    def _file_search(self, base_dir: str, prefix: str):
+        """Search for files by filename within a directory tree (for BP/IR dirs)"""
+        try:
+            for root, dirs, files in os.walk(base_dir):
+                if self._is_cancelled:
+                    break
+                for filename in files:
+                    if self._is_cancelled:
+                        break
+                    if self.search_term in filename.lower():
+                        file_path = os.path.join(root, filename)
+                        rel_path = os.path.relpath(root, base_dir)
+                        path_parts = rel_path.split(os.sep)
+                        customer = path_parts[0] if path_parts and path_parts[0] != '.' else ''
+
+                        try:
+                            mod_time = datetime.fromtimestamp(Path(file_path).stat().st_mtime)
+                        except (OSError, FileNotFoundError):
+                            mod_time = datetime.now()
+
+                        name_no_ext = os.path.splitext(filename)[0]
+                        result = {
+                            'date': mod_time,
+                            'customer': f"[{prefix}] {customer}" if customer else f"[{prefix}]",
+                            'job_number': name_no_ext,
+                            'description': rel_path if rel_path != '.' else '',
+                            'drawings': [],
+                            'path': root
+                        }
+                        self.result_found.emit(result)
+                        self.result_count += 1
+        except Exception:
+            pass
 
     def _legacy_recursive_search(self, base_dir: str, prefix: str):
         """Recursively search all folders in legacy mode"""
@@ -242,6 +287,7 @@ class SearchModule(BaseModule):
         self.legacy_options_widget = None
         self.search_btn = None
         self.cancel_btn = None
+        self.folder_contents_list = None
 
     def get_name(self) -> str:
         return "Search"
@@ -277,14 +323,42 @@ class SearchModule(BaseModule):
         self.search_all_radio = widget.search_all_radio
         self.search_strict_radio = widget.search_strict_radio
         self.search_blueprints_check = widget.search_blueprints_check
+        self.search_inspection_check = widget.search_inspection_check
         self.mode_row_widget = widget.mode_row_widget
         self.legacy_options_widget = widget.legacy_options_widget
         self.search_btn = widget.search_btn
         self.cancel_btn = widget.cancel_btn
 
+        # Keep criteria group compact, let results group expand
+        widget.layout().setStretchFactor(widget.searchCriteriaGroup, 0)
+        widget.layout().setStretchFactor(widget.searchResultsGroup, 1)
+
+        # Build folder contents panel and wrap table in a splitter programmatically
+        results_layout = widget.searchResultsGroup.layout()
+        results_layout.removeWidget(self.search_table)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(self.search_table)
+
+        folder_group = QGroupBox("Folder Contents")
+        folder_layout = QVBoxLayout()
+        folder_layout.setContentsMargins(5, 5, 5, 5)
+        self.folder_contents_list = QListWidget()
+        self.folder_contents_list.setAlternatingRowColors(True)
+        folder_layout.addWidget(self.folder_contents_list)
+        folder_group.setLayout(folder_layout)
+        splitter.addWidget(folder_group)
+
+        splitter.setSizes([400, 200])
+        results_layout.insertWidget(0, splitter)
+        results_layout.setStretchFactor(splitter, 1)
+
         # Setup table properties
         self.search_table.horizontalHeader().setStretchLastSection(True)
         self.search_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+        # Setup folder contents list
+        self.folder_contents_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
         # Hide progress bar and cancel button initially
         self.search_progress.hide()
@@ -299,6 +373,11 @@ class SearchModule(BaseModule):
         self.search_strict_radio.toggled.connect(self.update_search_field_checkboxes)
         self.search_table.customContextMenuRequested.connect(self.show_search_context_menu)
         self.search_table.doubleClicked.connect(self.open_selected_search_job)
+        self.search_table.itemSelectionChanged.connect(
+            lambda: self._on_result_selected(self.search_table.currentRow())
+        )
+        self.folder_contents_list.doubleClicked.connect(self._open_folder_file)
+        self.folder_contents_list.customContextMenuRequested.connect(self._show_file_context_menu)
 
         # Initialize UI state
         self.update_legacy_mode_ui()
@@ -328,8 +407,8 @@ class SearchModule(BaseModule):
         self.search_desc_check.setEnabled(is_strict_mode)
         self.search_drawing_check.setEnabled(is_strict_mode)
 
-        # Show/hide legacy search options
-        self.legacy_options_widget.setVisible(not is_strict_mode)
+        # legacy_options_widget has no content — keep hidden
+        self.legacy_options_widget.hide()
 
     def update_legacy_mode_ui(self):
         """Show/hide UI elements based on legacy mode setting"""
@@ -381,14 +460,20 @@ class SearchModule(BaseModule):
 
         dirs_to_search.extend(customer_dirs)
 
-        # In legacy mode, optionally search blueprints directories
-        if not strict_mode and self.search_blueprints_check.isChecked():
+        # Optionally search blueprints directories (available in all modes)
+        if self.search_blueprints_check.isChecked():
             bp_dir = self.app_context.get_setting('blueprints_dir', '')
             if bp_dir and os.path.exists(bp_dir):
                 dirs_to_search.append(('BP', bp_dir))
             itar_bp_dir = self.app_context.get_setting('itar_blueprints_dir', '')
             if itar_bp_dir and os.path.exists(itar_bp_dir):
                 dirs_to_search.append(('ITAR-BP', itar_bp_dir))
+
+        # Optionally search inspection reports directory
+        if self.search_inspection_check.isChecked():
+            ir_dir = self.app_context.get_setting('inspection_report_dir', '')
+            if ir_dir and os.path.exists(ir_dir):
+                dirs_to_search.append(('IR', ir_dir))
 
         # Determine which fields to search
         if strict_mode:
@@ -472,6 +557,7 @@ class SearchModule(BaseModule):
         self.search_edit.clear()
         self.search_table.setRowCount(0)
         self.search_results.clear()
+        self.folder_contents_list.clear()
         self.search_status_label.setText("")
         self.search_progress.hide()
         self.search_btn.setEnabled(True)
@@ -545,6 +631,61 @@ class SearchModule(BaseModule):
             path = self.search_results[row]['path']
             QApplication.clipboard().setText(path)
             self.search_status_label.setText("Path copied to clipboard")
+
+    # ==================== Folder Contents Panel ====================
+
+    def _on_result_selected(self, row: int):
+        """Populate folder contents list when a search result row is selected"""
+        self.folder_contents_list.clear()
+        if row < 0 or row >= len(self.search_results):
+            return
+
+        path = self.search_results[row]['path']
+        if not os.path.exists(path):
+            item = QListWidgetItem("(folder not found)")
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            self.folder_contents_list.addItem(item)
+            return
+
+        try:
+            entries = sorted(os.listdir(path), key=lambda n: (os.path.isdir(os.path.join(path, n)), n.lower()))
+        except OSError:
+            return
+
+        for name in entries:
+            full_path = os.path.join(path, name)
+            item = QListWidgetItem(name)
+            item.setData(Qt.ItemDataRole.UserRole, full_path)
+            if os.path.isdir(full_path):
+                item.setText(f"[{name}]")
+            self.folder_contents_list.addItem(item)
+
+    def _open_folder_file(self):
+        """Open the double-clicked file or folder from the contents list"""
+        item = self.folder_contents_list.currentItem()
+        if item is None:
+            return
+        path = item.data(Qt.ItemDataRole.UserRole)
+        if path and os.path.exists(path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _show_file_context_menu(self, pos):
+        """Context menu for the folder contents list"""
+        item = self.folder_contents_list.itemAt(pos)
+        if item is None:
+            return
+        path = item.data(Qt.ItemDataRole.UserRole)
+        if not path:
+            return
+
+        menu = QMenu(self._widget)
+        open_action = menu.addAction("Open")
+        open_action.triggered.connect(self._open_folder_file)
+
+        copy_action = menu.addAction("Copy Path")
+        copy_action.triggered.connect(lambda: QApplication.clipboard().setText(path))
+
+        menu.exec(self.folder_contents_list.viewport().mapToGlobal(pos))
 
     def cleanup(self):
         """Cleanup resources"""
