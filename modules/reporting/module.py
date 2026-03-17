@@ -48,6 +48,8 @@ class ReportingModule(BaseModule):
         self.template_path_edit = None
         self.source_path_edit = None
         self.source_info_label = None
+        self.delivery_path_edit = None
+        self.delivery_info_label = None
         self.customer_combo = None
         self.preview_table = None
         self.mapping_status_label = None
@@ -58,6 +60,7 @@ class ReportingModule(BaseModule):
 
         # State
         self.source_df = None
+        self.delivery_df = None
         self.template_columns = None
         self.last_output_path = None
         self.customer_column = None  # Detected customer column name
@@ -110,6 +113,8 @@ class ReportingModule(BaseModule):
         self.template_path_edit = widget.template_path_edit
         self.source_path_edit = widget.source_path_edit
         self.source_info_label = widget.source_info_label
+        self.delivery_path_edit = widget.delivery_path_edit
+        self.delivery_info_label = widget.delivery_info_label
         self.customer_combo = widget.customer_combo
         self.preview_table = widget.preview_table
         self.mapping_status_label = widget.mapping_status_label
@@ -126,6 +131,7 @@ class ReportingModule(BaseModule):
         # Connect signals
         widget.browse_template_btn.clicked.connect(self.browse_template)
         widget.browse_source_btn.clicked.connect(self.browse_source)
+        widget.browse_delivery_btn.clicked.connect(self.browse_delivery)
         widget.fix_export_btn.clicked.connect(self.fix_and_export)
         widget.open_output_btn.clicked.connect(self.open_output_folder)
         widget.preview_customers_btn.clicked.connect(self.preview_customers)
@@ -141,6 +147,16 @@ class ReportingModule(BaseModule):
         if saved_template and Path(saved_template).exists():
             self.template_path_edit.setText(saved_template)
             self._load_template(saved_template)
+
+        # Load saved source path
+        saved_source = self.app_context.get_setting('report_source_path', '')
+        if saved_source and Path(saved_source).exists():
+            self._load_source(saved_source)
+
+        # Load saved delivery schedule path
+        saved_delivery = self.app_context.get_setting('report_delivery_path', '')
+        if saved_delivery and Path(saved_delivery).exists():
+            self._load_delivery_schedule(saved_delivery)
 
         # Populate customer list
         self._populate_customers()
@@ -181,6 +197,8 @@ class ReportingModule(BaseModule):
             file_path = url.toLocalFile()
             if file_path.lower().endswith(('.xls', '.xlsx')):
                 self._load_source(file_path)
+                self.app_context.set_setting('report_source_path', file_path)
+                self.app_context.save_settings()
                 break
 
     # ==================== File Loading ====================
@@ -210,6 +228,8 @@ class ReportingModule(BaseModule):
         )
         if file_path:
             self._load_source(file_path)
+            self.app_context.set_setting('report_source_path', file_path)
+            self.app_context.save_settings()
 
     def _load_template(self, file_path: str):
         """Load template file and extract column names"""
@@ -236,6 +256,49 @@ class ReportingModule(BaseModule):
             self.show_error("Source Error", f"Failed to load source file:\n{str(e)}")
             self.source_df = None
             self.source_info_label.setText("Failed to load file")
+
+    def browse_delivery(self):
+        """Browse for delivery schedule Excel file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self._widget,
+            "Select Delivery Schedule File",
+            "",
+            "Excel Files (*.xls *.xlsx);;All Files (*.*)"
+        )
+        if file_path:
+            self._load_delivery_schedule(file_path)
+            self.app_context.set_setting('report_delivery_path', file_path)
+            self.app_context.save_settings()
+
+    def _load_delivery_schedule(self, file_path: str):
+        """Load delivery schedule file — column A = Job ID, column F = Promise Date"""
+        try:
+            df = pd.read_excel(file_path, header=0)
+            # Column F is index 5; rename to known names for merging
+            cols = list(df.columns)
+            job_col = cols[0]   # Column A: job number
+            promise_col = cols[5]  # Column F: promise date
+
+            self.delivery_df = df[[job_col, promise_col]].copy()
+            self.delivery_df.columns = ['_delivery_job_id', 'Promise Date']
+            # Normalize job ID to string for joining
+            self.delivery_df['_delivery_job_id'] = (
+                self.delivery_df['_delivery_job_id'].astype(str).str.strip()
+            )
+            # Convert promise date to date only
+            self.delivery_df['Promise Date'] = pd.to_datetime(
+                self.delivery_df['Promise Date'], errors='coerce'
+            ).dt.date
+
+            self.delivery_path_edit.setText(file_path)
+            self.delivery_info_label.setText(
+                f"Loaded {len(self.delivery_df)} rows — Promise Date from column F"
+            )
+            self._log(f"Delivery schedule loaded: {Path(file_path).name} ({len(self.delivery_df)} rows)")
+        except Exception as e:
+            self.show_error("Delivery Schedule Error", f"Failed to load delivery schedule:\n{str(e)}")
+            self.delivery_df = None
+            self.delivery_info_label.setText("Failed to load file")
 
     def _update_preview(self):
         """Update the column mapping preview table"""
@@ -1106,6 +1169,27 @@ class ReportingModule(BaseModule):
         self._log(f"Removed {removed_count} columns not in template")
         self._log(f"Result: {len(df_fixed)} rows x {len(df_fixed.columns)} columns")
 
+        # Merge Promise Date from delivery schedule (if loaded)
+        if self.delivery_df is not None and 'Job ID' in df_fixed.columns:
+            df_fixed['_job_id_str'] = df_fixed['Job ID'].astype(str).str.strip()
+            df_fixed = df_fixed.merge(
+                self.delivery_df,
+                left_on='_job_id_str',
+                right_on='_delivery_job_id',
+                how='left'
+            )
+            df_fixed.drop(columns=['_job_id_str', '_delivery_job_id'], inplace=True)
+            matched = df_fixed['Promise Date'].notna().sum()
+            self._log(f"Promise Date merged: {matched}/{len(df_fixed)} rows matched")
+
+            # Reposition Promise Date immediately after Scheduled End Date
+            if 'Scheduled End Date' in df_fixed.columns and 'Promise Date' in df_fixed.columns:
+                cols = list(df_fixed.columns)
+                cols.remove('Promise Date')
+                insert_at = cols.index('Scheduled End Date') + 1
+                cols.insert(insert_at, 'Promise Date')
+                df_fixed = df_fixed[cols]
+
         # Process Scheduled End Date per PO
         changed_rows = []
         if 'Customer PO Number' in df_fixed.columns and 'Scheduled End Date' in df_fixed.columns:
@@ -1216,14 +1300,18 @@ class ReportingModule(BaseModule):
         ws = wb.active
 
         yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
+        red_fill = PatternFill(start_color='FF0000', end_color='FF0000', fill_type='solid')
 
         # Find column indices we need
         sched_col = None
+        promise_col = None
         po_col = None
         line_col = None
         for col_idx, cell in enumerate(ws[1], 1):
             if cell.value == 'Scheduled End Date':
                 sched_col = col_idx
+            elif cell.value == 'Promise Date':
+                promise_col = col_idx
             elif cell.value == 'Customer PO Number':
                 po_col = col_idx
             elif cell.value == 'Line':
@@ -1266,6 +1354,25 @@ class ReportingModule(BaseModule):
 
         if highlighted_count > 0:
             self._log(f"Highlighted {highlighted_count} cells (new changes + preserved)")
+
+        # Highlight red where Scheduled End Date is after Promise Date (overrides yellow)
+        late_count = 0
+        if sched_col and promise_col:
+            for excel_row in range(2, ws.max_row + 1):
+                sched_val = ws.cell(row=excel_row, column=sched_col).value
+                promise_val = ws.cell(row=excel_row, column=promise_col).value
+                if sched_val and promise_val:
+                    try:
+                        sched_date = pd.to_datetime(sched_val).date() if not hasattr(sched_val, 'date') else sched_val
+                        promise_date = pd.to_datetime(promise_val).date() if not hasattr(promise_val, 'date') else promise_val
+                        if sched_date > promise_date:
+                            ws.cell(row=excel_row, column=sched_col).fill = red_fill
+                            ws.cell(row=excel_row, column=promise_col).fill = red_fill
+                            late_count += 1
+                    except Exception:
+                        pass
+            if late_count > 0:
+                self._log(f"Highlighted {late_count} rows red (Scheduled End Date after Promise Date)")
 
         # Auto-fit columns
         for column in ws.columns:

@@ -155,6 +155,74 @@
     </widget>
    </item>
    <item>
+    <widget class="QGroupBox" name="deliveryGroupBox">
+     <property name="title">
+      <string>Delivery Schedule (Promise Dates)</string>
+     </property>
+     <layout class="QVBoxLayout" name="deliveryLayout">
+      <property name="spacing">
+       <number>5</number>
+      </property>
+      <property name="leftMargin">
+       <number>5</number>
+      </property>
+      <property name="topMargin">
+       <number>5</number>
+      </property>
+      <property name="rightMargin">
+       <number>5</number>
+      </property>
+      <property name="bottomMargin">
+       <number>5</number>
+      </property>
+      <item>
+       <layout class="QHBoxLayout" name="deliveryFileLayout">
+        <item>
+         <widget class="QLabel" name="deliveryLabel">
+          <property name="text">
+           <string>Schedule File:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="delivery_path_edit">
+          <property name="readOnly">
+           <bool>true</bool>
+          </property>
+          <property name="placeholderText">
+           <string>Optional: select SH_DeliverySchedule.xlsx...</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="browse_delivery_btn">
+          <property name="text">
+           <string>Browse...</string>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>80</width>
+            <height>16777215</height>
+           </size>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QLabel" name="delivery_info_label">
+        <property name="text">
+         <string>No delivery schedule loaded (optional)</string>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">color: #666; padding: 2px;</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QGroupBox" name="outputGroupBox">
      <property name="title">
       <string>Output Settings</string>
