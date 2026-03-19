@@ -88,9 +88,10 @@ python main.py
      - Range: `12345-12350`
 4. Enter description
 5. Optionally add drawing numbers (comma-separated)
-6. Add files by dragging/dropping or browsing
-7. Click **Create Job**
-8. Use **Copy From...** to copy information from existing quotes or jobs
+6. Optionally add a PO number
+7. Add files by dragging/dropping or browsing
+8. Click **Create Job**
+9. Use **Copy From...** to copy information from existing quotes or jobs
 
 #### Bulk Job Creation
 1. Go to the **Bulk Create** tab
@@ -206,7 +207,7 @@ JobDocs uses a plugin-based architecture:
 
 ### Creating Custom Modules
 
-See [MODULAR_SYSTEM.md](MODULAR_SYSTEM.md) for details on creating custom modules.
+See [modules/_template/README.md](modules/_template/README.md) for details on creating custom modules.
 
 ## Development
 
@@ -217,32 +218,37 @@ JobDocs/
 ├── core/                # Core framework
 │   ├── base_module.py   # Module base class
 │   ├── app_context.py   # Shared application context
-│   └── module_loader.py # Auto module discovery
+│   ├── module_loader.py # Auto module discovery
+│   └── settings_dialog.py # Settings UI
 ├── shared/              # Shared utilities
 │   ├── utils.py         # File operations, parsing
-│   └── widgets.py       # Custom UI widgets
+│   ├── widgets.py       # Custom UI widgets
+│   └── remote_sync.py   # Remote settings synchronization
 ├── modules/             # Plugin modules
 │   ├── quote/           # Quote module
 │   ├── job/             # Job module
 │   ├── bulk/            # Bulk creation module
-│   └── ...
-├── settings_dialog.py   # Settings UI
-├── docs/                # Documentation
+│   ├── search/          # Search module
+│   ├── reporting/       # Reporting module (experimental)
+│   └── _template/       # Template for custom modules
+├── build_scripts/       # Build configuration
+├── windows/             # Windows installer files
+├── linux/               # Linux Debian package files
 ├── old/                 # Legacy code (archived)
 └── README.md            # This file
 ```
 
 ### Building
 
-See [BUILD.md](BUILD.md) for instructions on creating standalone executables.
+See [build_scripts/README.md](build_scripts/README.md) for instructions on creating standalone executables.
 
-### Testing
+For Windows installer packages, see [windows/README.md](windows/README.md).
 
-See [TESTING.md](TESTING.md) for testing instructions.
+For Linux Debian packages, see [linux/README.md](linux/README.md).
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+GNU General Public License v3 (GPL v3) - see [LICENSE](LICENSE) file for details.
 
 ## Support
 

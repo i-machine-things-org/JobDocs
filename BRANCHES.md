@@ -52,9 +52,11 @@ testing      - Active development and testing
 - Deploying to PSM production
 
 **Key Differences from `stable`**:
-- Custom job folder structure for PSM workflow
+- **Delivery Schedule** - Attach delivery schedule files and promise dates to jobs/quotes
+- **Link Drawings** - Button and dialog to link drawings directly from jobs and quotes
+- **Inspection Checkbox** - Filter search results by inspection status
+- **Purchase Order Search** - Filter search results by PO number
 - Remote settings synchronization features
-- PSM-specific UI configurations
 
 ---
 
@@ -80,6 +82,7 @@ testing      - Active development and testing
 - Active session display in login dialog (Users tab)
 - Improved admin settings dialog for team settings
 - Logout returns to login screen
+- Version management tools (`version/` directory)
 - Directory cleanup and improved documentation
 
 **Important**: This branch may have bugs or incomplete features. Always test thoroughly before using in production.
@@ -154,11 +157,11 @@ This means you can switch between branches without losing data, though some feat
 
 ---
 
-## Current Status (2026-01-02)
+## Current Status (2026-03-19)
 
 - **stable**: Stable with PO number support, ready for production
-- **PSM-stable**: PSM-specific customizations, production-ready for PSM
-- **testing**: Latest features including auto-generate, session tracking, improved docs
+- **PSM-stable**: PSM-specific customizations (delivery schedule, link drawings, inspection/PO search filters), production-ready for PSM
+- **testing**: Latest features including auto-generate, session tracking, admin module, version management tools
   - Ready for testing and validation
   - Pending merge to stable after thorough testing
 
@@ -181,5 +184,4 @@ This means you can switch between branches without losing data, though some feat
 
 For more information:
 - See [README.md](README.md) for general documentation
-- See [RELEASE_NOTES.md](RELEASE_NOTES.md) for version history
 - Check commit history: `git log --oneline --graph --all`
