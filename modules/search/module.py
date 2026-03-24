@@ -687,6 +687,8 @@ class SearchModule(BaseModule):
         if not path:
             return
 
+        is_file = os.path.isfile(path)
+
         menu = QMenu(self._widget)
         open_action = menu.addAction("Open")
         open_action.triggered.connect(self._open_folder_file)
@@ -694,7 +696,72 @@ class SearchModule(BaseModule):
         copy_action = menu.addAction("Copy Path")
         copy_action.triggered.connect(lambda: QApplication.clipboard().setText(path))
 
+        menu.addSeparator()
+
+        if is_file:
+            link_action = menu.addAction("Hard Link to Blueprints Folder")
+            link_action.triggered.connect(lambda: self._hard_link_to_blueprints(path))
+
+        copy_bp_action = menu.addAction("Copy Blueprints Path")
+        copy_bp_action.triggered.connect(lambda: self._copy_blueprints_path(path))
+
         menu.exec(self.folder_contents_list.viewport().mapToGlobal(pos))
+
+    def _get_customer_bp_info(self):
+        """Return (customer_name, blueprints_dir) for the currently selected search result."""
+        row = self.search_table.currentRow()
+        if row < 0 or row >= len(self.search_results):
+            return None, None
+
+        raw_customer = self.search_results[row]['customer']
+        for prefix in ('[ITAR] ', '[ITAR-BP] ', '[BP] ', '[IR] '):
+            raw_customer = raw_customer.replace(prefix, '')
+        customer = raw_customer.strip()
+        if not customer:
+            return None, None
+
+        is_itar = '[ITAR]' in self.search_results[row]['customer']
+        bp_dir = self.app_context.get_setting(
+            'itar_blueprints_dir' if is_itar else 'blueprints_dir', ''
+        )
+        return customer, bp_dir or None
+
+    def _hard_link_to_blueprints(self, source_path: str):
+        """Create a hard link of source_path in the customer's blueprints folder"""
+        customer, bp_dir = self._get_customer_bp_info()
+        if not customer or not bp_dir:
+            self.show_error("Error", "Blueprints directory not configured or no job selected")
+            return
+
+        filename = os.path.basename(source_path)
+        dest_dir = os.path.join(bp_dir, customer)
+        dest_path = os.path.join(dest_dir, filename)
+
+        if os.path.exists(dest_path):
+            self.show_error(
+                "File Already Exists",
+                f"'{filename}' already exists in the blueprints folder:\n{dest_path}"
+            )
+            return
+
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+            os.link(source_path, dest_path)
+            self.search_status_label.setText(f"Hard linked '{filename}' to blueprints folder")
+        except OSError as e:
+            self.show_error("Hard Link Failed", str(e))
+
+    def _copy_blueprints_path(self, file_path: str):
+        """Copy the expected blueprints folder path for this file to clipboard"""
+        customer, bp_dir = self._get_customer_bp_info()
+        if not customer or not bp_dir:
+            self.show_error("Error", "Blueprints directory not configured or no job selected")
+            return
+
+        filename = os.path.basename(file_path)
+        bp_path = os.path.join(bp_dir, customer, filename)
+        QApplication.clipboard().setText(bp_path)
+        self.search_status_label.setText("Blueprints path copied to clipboard")
 
     def cleanup(self):
         """Cleanup resources"""
