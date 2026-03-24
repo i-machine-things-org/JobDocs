@@ -28,10 +28,10 @@ testing      - Active development and testing
 - Creating official releases
 
 **Latest Features** (as of last merge):
-- PO number support for job creation
-- Network shared settings
-- User authentication
-- OOBE wizard
+- PO number support for job creation and PO # search filter
+- Link Drawings button and dialog for jobs and quotes
+- Inspection checkbox in search (searches inspection reports directory)
+- Background search with cancel option
 - Full modular architecture
 
 ---
@@ -52,11 +52,8 @@ testing      - Active development and testing
 - Deploying to PSM production
 
 **Key Differences from `stable`**:
-- **Delivery Schedule** - Attach delivery schedule files and promise dates to jobs/quotes
-- **Link Drawings** - Button and dialog to link drawings directly from jobs and quotes
-- **Inspection Checkbox** - Filter search results by inspection status
-- **Purchase Order Search** - Filter search results by PO number
-- Remote settings synchronization features
+- **Report Fixer** - Enhanced Reporting module that transforms Excel job reports against a template, with delivery schedule comparison and highlighted change export (requires pandas and openpyxl)
+- Does not include stable's PO # search filter column
 
 ---
 

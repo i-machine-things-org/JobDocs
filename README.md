@@ -74,6 +74,7 @@ python main.py
 6. Add files by dragging/dropping
 7. Click **Create Quote**
 8. Use **Copy From...** to copy information from existing quotes or jobs
+9. Use **Link Drawings** to link drawing files directly to the quote
 
 ### Creating Jobs
 
@@ -92,6 +93,7 @@ python main.py
 7. Add files by dragging/dropping or browsing
 8. Click **Create Job**
 9. Use **Copy From...** to copy information from existing quotes or jobs
+10. Use **Link Drawings** to link drawing files directly to the job
 
 #### Bulk Job Creation
 1. Go to the **Bulk Create** tab
@@ -126,6 +128,8 @@ Use the **Import Blueprints** tab to:
 
 The **Search** tab provides powerful search capabilities:
 - Search by customer name, job number, description, or drawing
+- Filter by PO number (Strict Format mode)
+- Filter by inspection status (searches inspection reports directory)
 - Two search modes:
   - **Search All Folders** (Legacy mode): Full recursive search through all folders
     - Handles inconsistent folder structures from legacy files
