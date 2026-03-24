@@ -529,10 +529,20 @@ class SearchModule(BaseModule):
 
     def _on_search_finished(self, result_count: int):
         """Slot called when search completes"""
+        # Remember selected path so we can restore it after the table is rebuilt
+        selected_row = self.search_table.currentRow()
+        selected_path = (
+            self.search_results[selected_row]['path']
+            if 0 <= selected_row < len(self.search_results)
+            else None
+        )
+
         # Sort results by date (newest first)
         self.search_results.sort(key=lambda x: x['date'], reverse=True)
 
-        # Rebuild table with sorted results
+        # Rebuild table with sorted results; block signals so clearing rows
+        # doesn't wipe the folder-contents panel via itemSelectionChanged
+        self.search_table.blockSignals(True)
         self.search_table.setRowCount(0)
         for result in self.search_results:
             row = self.search_table.rowCount()
@@ -542,6 +552,14 @@ class SearchModule(BaseModule):
             self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
             self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
             self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
+        self.search_table.blockSignals(False)
+
+        # Restore the previously selected row (fires itemSelectionChanged once)
+        if selected_path is not None:
+            for i, result in enumerate(self.search_results):
+                if result['path'] == selected_path:
+                    self.search_table.selectRow(i)
+                    break
 
         self.search_status_label.setText(f"Found {result_count} result(s)")
         self.search_progress.hide()
