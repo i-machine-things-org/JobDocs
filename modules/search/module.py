@@ -752,7 +752,7 @@ class SearchModule(BaseModule):
             self.show_error("Hard Link Failed", str(e))
 
     def _copy_blueprints_path(self, file_path: str):
-        """Copy the expected blueprints folder path for this file to clipboard"""
+        """Copy the blueprints folder path for this file to clipboard"""
         customer, bp_dir = self._get_customer_bp_info()
         if not customer or not bp_dir:
             self.show_error("Error", "Blueprints directory not configured or no job selected")
@@ -760,6 +760,14 @@ class SearchModule(BaseModule):
 
         filename = os.path.basename(file_path)
         bp_path = os.path.join(bp_dir, customer, filename)
+
+        if not os.path.exists(bp_path):
+            self.show_error(
+                "Not in Blueprints Folder",
+                f"'{filename}' does not exist in the blueprints folder:\n{bp_path}"
+            )
+            return
+
         QApplication.clipboard().setText(bp_path)
         self.search_status_label.setText("Blueprints path copied to clipboard")
 
