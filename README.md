@@ -18,10 +18,7 @@ A modular tool for managing blueprint files and customer job directories with su
 
 ### PSM-Specific Features (PSM-stable branch)
 
-- **Delivery Schedule** - Attach delivery schedule files and set promise dates on jobs and quotes
-- **Link Drawings** - Button and dialog to link drawings directly from quotes and jobs
-- **Inspection Checkbox** - Filter search results by inspection status
-- **Purchase Order Search** - Filter search results by PO number
+- **Report Fixer** (Reporting tab) - Transforms Excel job reports to match a template layout. Loads a source report and a delivery schedule file, tracks date/schedule changes, and exports a formatted Excel file with highlighted modifications. Requires `pandas` and `openpyxl`.
 
 ## Installation
 
@@ -97,11 +94,10 @@ python main.py
 4. Enter description
 5. Optionally add drawing numbers (comma-separated)
 6. Optionally add a PO number
-7. Optionally attach a delivery schedule file and set a promise date
-8. Add files by dragging/dropping or browsing
-9. Click **Create Job**
-10. Use **Copy From...** to copy information from existing quotes or jobs
-11. Use **Link Drawings** to link drawing files directly to the job
+7. Add files by dragging/dropping or browsing
+8. Click **Create Job**
+9. Use **Copy From...** to copy information from existing quotes or jobs
+10. Use **Link Drawings** to link drawing files directly to the job
 
 #### Bulk Job Creation
 1. Go to the **Bulk Create** tab
@@ -136,8 +132,7 @@ Use the **Import Blueprints** tab to:
 
 The **Search** tab provides powerful search capabilities:
 - Search by customer name, job number, description, or drawing
-- Filter by inspection status (PSM-specific)
-- Filter by PO number (PSM-specific)
+- Filter by inspection status (searches inspection reports directory)
 - Two search modes:
   - **Search All Folders** (Legacy mode): Full recursive search through all folders
     - Handles inconsistent folder structures from legacy files
