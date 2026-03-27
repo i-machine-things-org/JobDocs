@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 from typing import List, Type
 from PyQt6.QtWidgets import (
-    QWidget, QMessageBox, QTreeWidgetItem, QButtonGroup
+    QWidget, QMessageBox, QTreeWidgetItem, QButtonGroup, QCheckBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6 import uic
@@ -118,9 +118,10 @@ class JobModule(BaseModule):
         self.add_drop_zone = None
         self.add_filter_group = None
         self.dest_button_group = None
+        self.tmp_dir_check = None
 
     def get_name(self) -> str:
-        return "Create Job Folder"
+        return "Job"
 
     def get_order(self) -> int:
         return 20  # Second tab
@@ -160,6 +161,16 @@ class JobModule(BaseModule):
         self.job_drop_zone = DropZone("Drop files")
         self.job_drop_zone.setMinimumHeight(60)
         layout.insertWidget(index, self.job_drop_zone)
+
+        # Temp dir checkbox — inserted right after the drop zone
+        tmp_dir = self.app_context.get_setting('tmp_files_dir', '') if self.app_context else ''
+        self.tmp_dir_check = QCheckBox("Include files from temp folder")
+        self.tmp_dir_check.setEnabled(bool(tmp_dir))
+        self.tmp_dir_check.setToolTip(
+            f"Also include all files from: {tmp_dir}" if tmp_dir
+            else "Configure a Temp Files Directory in Settings to enable this option"
+        )
+        layout.insertWidget(index + 1, self.tmp_dir_check)
 
         # Connect Create New tab signals
         self.job_drop_zone.files_dropped.connect(lambda files: self.handle_job_files(files))
@@ -327,13 +338,25 @@ class JobModule(BaseModule):
 
         self.log_message(f"Creating job(s): {', '.join(job_numbers)}")
 
+        # Build file list, optionally including tmp dir contents
+        all_files = list(self.job_files)
+        if self.tmp_dir_check and self.tmp_dir_check.isChecked():
+            tmp_dir = self.app_context.get_setting('tmp_files_dir', '')
+            if tmp_dir and os.path.exists(tmp_dir):
+                try:
+                    for f in Path(tmp_dir).iterdir():
+                        if f.is_file() and str(f) not in all_files:
+                            all_files.append(str(f))
+                except OSError:
+                    pass
+
         # Track if this is a new customer
         existing_customers = self.app_context.get_customer_list()
         is_new_customer = customer not in existing_customers
 
         created = 0
         for job_num in job_numbers:
-            if self.create_single_job(customer, job_num, po_number, description, drawings, is_itar, self.job_files):
+            if self.create_single_job(customer, job_num, po_number, description, drawings, is_itar, all_files):
                 created += 1
 
         if created > 0:

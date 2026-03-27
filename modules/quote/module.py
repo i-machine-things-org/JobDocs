@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 from typing import List
 from PyQt6.QtWidgets import (
-    QWidget, QMessageBox, QFileDialog, QTreeWidgetItem, QButtonGroup
+    QWidget, QMessageBox, QFileDialog, QTreeWidgetItem, QButtonGroup, QCheckBox
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6 import uic
@@ -116,9 +116,10 @@ class QuoteModule(BaseModule):
         self.add_drop_zone = None
         self.add_filter_group = None
         self.dest_button_group = None
+        self.tmp_dir_check = None
 
     def get_name(self) -> str:
-        return "Create Quote folder"
+        return "Quote"
 
     def get_order(self) -> int:
         return 10  # First tab
@@ -156,6 +157,16 @@ class QuoteModule(BaseModule):
         self.quote_drop_zone = DropZone("Drop files")
         self.quote_drop_zone.setMinimumHeight(60)
         layout.insertWidget(index, self.quote_drop_zone)
+
+        # Temp dir checkbox — inserted right after the drop zone
+        tmp_dir = self.app_context.get_setting('tmp_files_dir', '') if self.app_context else ''
+        self.tmp_dir_check = QCheckBox("Include files from temp folder")
+        self.tmp_dir_check.setEnabled(bool(tmp_dir))
+        self.tmp_dir_check.setToolTip(
+            f"Also include all files from: {tmp_dir}" if tmp_dir
+            else "Configure a Temp Files Directory in Settings to enable this option"
+        )
+        layout.insertWidget(index + 1, self.tmp_dir_check)
 
         # Connect Create New tab signals
         self.quote_drop_zone.files_dropped.connect(lambda files: self.add_quote_files(files))
@@ -325,9 +336,21 @@ class QuoteModule(BaseModule):
         # Parse drawings
         drawings = [d.strip() for d in drawings_text.split(',') if d.strip()]
 
+        # Build file list, optionally including tmp dir contents
+        all_files = list(self.quote_files)
+        if self.tmp_dir_check and self.tmp_dir_check.isChecked():
+            tmp_dir = self.app_context.get_setting('tmp_files_dir', '')
+            if tmp_dir and os.path.exists(tmp_dir):
+                try:
+                    for f in Path(tmp_dir).iterdir():
+                        if f.is_file() and str(f) not in all_files:
+                            all_files.append(str(f))
+                except OSError:
+                    pass
+
         created = 0
         for quote_num in quote_numbers:
-            if self.create_single_quote(customer, quote_num, description, drawings, is_itar, self.quote_files):
+            if self.create_single_quote(customer, quote_num, description, drawings, is_itar, all_files):
                 created += 1
 
         if created > 0:

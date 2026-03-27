@@ -74,6 +74,15 @@ class SettingsDialog(QDialog):
         ir_btn.clicked.connect(lambda: self.browse_dir(self.inspection_report_edit))
         dir_layout.addWidget(ir_btn, 2, 2)
 
+        # Temp files directory
+        dir_layout.addWidget(QLabel("Temp Files Directory:"), 3, 0)
+        self.tmp_files_edit = QLineEdit(self.settings.get('tmp_files_dir', ''))
+        self.tmp_files_edit.setToolTip("Files here are optionally included when creating new Job or Quote folders")
+        dir_layout.addWidget(self.tmp_files_edit, 3, 1)
+        tmp_btn = QPushButton("Browse...")
+        tmp_btn.clicked.connect(lambda: self.browse_dir(self.tmp_files_edit))
+        dir_layout.addWidget(tmp_btn, 3, 2)
+
         scroll_layout.addWidget(dir_group)
 
         # ITAR directories group
@@ -300,6 +309,7 @@ class SettingsDialog(QDialog):
         self.settings['blueprints_dir'] = self.blueprints_edit.text()
         self.settings['customer_files_dir'] = self.customer_files_edit.text()
         self.settings['inspection_report_dir'] = self.inspection_report_edit.text()
+        self.settings['tmp_files_dir'] = self.tmp_files_edit.text()
         self.settings['itar_blueprints_dir'] = self.itar_blueprints_edit.text()
         self.settings['itar_customer_files_dir'] = self.itar_customer_files_edit.text()
 

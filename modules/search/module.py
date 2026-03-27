@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import List, Dict, Any
 from PyQt6.QtWidgets import (
     QWidget, QMessageBox, QTableWidgetItem, QApplication, QMenu,
-    QListWidgetItem, QListWidget, QSplitter, QGroupBox, QVBoxLayout
+    QListWidgetItem, QListWidget, QSplitter, QGroupBox, QVBoxLayout, QCheckBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl
 from PyQt6.QtGui import QDesktopServices
@@ -717,11 +717,8 @@ class SearchModule(BaseModule):
         menu.addSeparator()
 
         if is_file:
-            link_action = menu.addAction("Hard Link to Blueprints Folder")
-            link_action.triggered.connect(lambda: self._hard_link_to_blueprints(path))
-
-        copy_bp_action = menu.addAction("Copy Blueprints Path")
-        copy_bp_action.triggered.connect(lambda: self._copy_blueprints_path(path))
+            bp_action = menu.addAction("Blueprints Path")
+            bp_action.triggered.connect(lambda: self._blueprints_path_action(path))
 
         menu.exec(self.folder_contents_list.viewport().mapToGlobal(pos))
 
@@ -744,8 +741,8 @@ class SearchModule(BaseModule):
         )
         return customer, bp_dir or None
 
-    def _hard_link_to_blueprints(self, source_path: str):
-        """Create a hard link of source_path in the customer's blueprints folder"""
+    def _blueprints_path_action(self, source_path: str):
+        """Hard link file to blueprints folder if not already there, then copy its path."""
         customer, bp_dir = self._get_customer_bp_info()
         if not customer or not bp_dir:
             self.show_error("Error", "Blueprints directory not configured or no job selected")
@@ -753,41 +750,36 @@ class SearchModule(BaseModule):
 
         filename = os.path.basename(source_path)
         dest_dir = os.path.join(bp_dir, customer)
-        dest_path = os.path.join(dest_dir, filename)
+        bp_path = os.path.join(dest_dir, filename)
 
-        if os.path.exists(dest_path):
-            self.show_error(
-                "File Already Exists",
-                f"'{filename}' already exists in the blueprints folder:\n{dest_path}"
-            )
-            return
-
-        try:
-            os.makedirs(dest_dir, exist_ok=True)
-            os.link(source_path, dest_path)
-            self.search_status_label.setText(f"Hard linked '{filename}' to blueprints folder")
-        except OSError as e:
-            self.show_error("Hard Link Failed", str(e))
-
-    def _copy_blueprints_path(self, file_path: str):
-        """Copy the blueprints folder path for this file to clipboard"""
-        customer, bp_dir = self._get_customer_bp_info()
-        if not customer or not bp_dir:
-            self.show_error("Error", "Blueprints directory not configured or no job selected")
-            return
-
-        filename = os.path.basename(file_path)
-        bp_path = os.path.join(bp_dir, customer, filename)
-
+        did_link = False
         if not os.path.exists(bp_path):
-            self.show_error(
-                "Not in Blueprints Folder",
-                f"'{filename}' does not exist in the blueprints folder:\n{bp_path}"
-            )
-            return
+            try:
+                os.makedirs(dest_dir, exist_ok=True)
+                os.link(source_path, bp_path)
+                did_link = True
+            except OSError as e:
+                self.show_error("Hard Link Failed", str(e))
+                return
 
         QApplication.clipboard().setText(bp_path)
-        self.search_status_label.setText("Blueprints path copied to clipboard")
+
+        if did_link:
+            if not self.app_context.get_setting('suppress_bp_link_notification', False):
+                msg = QMessageBox(self._widget)
+                msg.setWindowTitle("Blueprints Path")
+                msg.setText(f"'{filename}' was linked to the blueprints folder.\nPath copied to clipboard.")
+                msg.setIcon(QMessageBox.Icon.Information)
+                dont_show = QCheckBox("Don't show this again")
+                msg.setCheckBox(dont_show)
+                msg.exec()
+                if dont_show.isChecked():
+                    self.app_context.set_setting('suppress_bp_link_notification', True)
+                    self.app_context.save_settings()
+            else:
+                self.search_status_label.setText(f"Linked '{filename}' to blueprints and copied path")
+        else:
+            self.search_status_label.setText("Blueprints path copied to clipboard")
 
     def cleanup(self):
         """Cleanup resources"""
