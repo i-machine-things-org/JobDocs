@@ -164,21 +164,21 @@ class SettingsDialog(QDialog):
         self.allow_duplicates_check.setChecked(self.settings.get('allow_duplicate_jobs', False))
         options_layout.addWidget(self.allow_duplicates_check)
 
-        # Default tab setting
+        # Default tab setting — built from the actual enabled modules
         default_tab_layout = QHBoxLayout()
         default_tab_layout.addWidget(QLabel("Default opening tab:"))
         self.default_tab_combo = QComboBox()
-        self.default_tab_combo.addItems([
-            "Quote",
-            "Job",
-            "Add to Job",
-            "Bulk Create",
-            "Search",
-            "Import Blueprints",
-            "History"
-        ])
-        current_default = self.settings.get('default_tab', 0)
-        if 0 <= current_default < self.default_tab_combo.count():
+        disabled = self.settings.get('disabled_modules', [])
+        self._tab_display_names = []   # parallel list: display name for each combo item
+        for module_name, display_name in self.available_modules:
+            if module_name not in disabled:
+                self.default_tab_combo.addItem(display_name)
+                self._tab_display_names.append(display_name)
+        current_default = self.settings.get('default_tab', '')
+        if isinstance(current_default, str) and current_default in self._tab_display_names:
+            self.default_tab_combo.setCurrentIndex(self._tab_display_names.index(current_default))
+        elif isinstance(current_default, int) and 0 <= current_default < self.default_tab_combo.count():
+            # Backward-compat: old settings stored an integer index
             self.default_tab_combo.setCurrentIndex(current_default)
         default_tab_layout.addWidget(self.default_tab_combo)
         default_tab_layout.addStretch()
@@ -329,7 +329,9 @@ class SettingsDialog(QDialog):
         self.settings['legacy_mode'] = self.legacy_mode_check.isChecked()
         self.settings['allow_duplicate_jobs'] = self.allow_duplicates_check.isChecked()
         self.settings['ui_style'] = self.style_combo.currentText()
-        self.settings['default_tab'] = self.default_tab_combo.currentIndex()
+        idx = self.default_tab_combo.currentIndex()
+        if 0 <= idx < len(self._tab_display_names):
+            self.settings['default_tab'] = self._tab_display_names[idx]
         self.settings['experimental_features'] = self.experimental_check.isChecked()
 
         # Save disabled modules

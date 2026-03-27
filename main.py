@@ -102,9 +102,14 @@ class JobDocsMainWindow(QMainWindow):
         # Apply UI style
         self.apply_ui_style()
 
-        # Set default tab
+        # Set default tab (stored as display name string; fall back to integer for old settings)
         default_tab = self.settings.get('default_tab', 0)
-        if 0 <= default_tab < self.tabs.count():
+        if isinstance(default_tab, str):
+            for i in range(self.tabs.count()):
+                if self.tabs.tabText(i) == default_tab:
+                    self.tabs.setCurrentIndex(i)
+                    break
+        elif isinstance(default_tab, int) and 0 <= default_tab < self.tabs.count():
             self.tabs.setCurrentIndex(default_tab)
 
         self.statusBar().showMessage("Ready") # pyright: ignore[reportOptionalMemberAccess]
