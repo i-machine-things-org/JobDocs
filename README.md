@@ -14,6 +14,7 @@ A modular tool for managing blueprint files and customer job directories with su
 - **File Organization** - Automatic folder structure creation and file management
 - **Import Tools** - Direct import of files to blueprint folders
 - **History Tracking** - Keep track of recent jobs and customer information
+- **Outlook / O365 Drag-and-Drop** - Drag emails directly from the new Microsoft 365 Outlook desktop app onto any drop zone; the email is saved as a named `.msg` file and all attachments are extracted automatically (requires `pywin32` on Windows)
 - **Cross-Platform** - Works on Windows, macOS, and Linux
 
 ### PSM-Specific Features (PSM-stable branch)
@@ -46,6 +47,11 @@ pip install -r requirements.txt
 Or install PyQt6 directly:
 ```bash
 pip install PyQt6
+```
+
+#### Optional (Windows — enables Outlook/O365 drag-and-drop):
+```bash
+pip install pywin32
 ```
 
 ## Usage

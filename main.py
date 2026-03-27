@@ -268,6 +268,9 @@ class JobDocsMainWindow(QMainWindow):
         getting_started_action = help_menu.addAction("&Getting Started")  # pyright: ignore[reportOptionalMemberAccess]
         getting_started_action.triggered.connect(self.show_getting_started)  # pyright: ignore[reportOptionalMemberAccess]
 
+        readme_action = help_menu.addAction("&User Guide (README)")  # pyright: ignore[reportOptionalMemberAccess]
+        readme_action.triggered.connect(self.show_readme)  # pyright: ignore[reportOptionalMemberAccess]
+
         help_menu.addSeparator()  # pyright: ignore[reportOptionalMemberAccess]
 
         about_action = help_menu.addAction("&About")  # pyright: ignore[reportOptionalMemberAccess]
@@ -365,6 +368,35 @@ Search across all customers and jobs.</p>
         msg.setTextFormat(Qt.TextFormat.RichText)
         msg.setText(content)
         msg.exec()
+
+    def show_readme(self):
+        """Show README.md in a scrollable dialog"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
+
+        readme_path = Path(__file__).parent / 'README.md'
+        try:
+            content = readme_path.read_text(encoding='utf-8')
+        except Exception:
+            QMessageBox.warning(self, "User Guide", "README.md could not be found.")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("JobDocs — User Guide")
+        dialog.resize(820, 640)
+
+        layout = QVBoxLayout(dialog)
+        text = QTextEdit()
+        text.setReadOnly(True)
+        text.setPlainText(content)
+        text.setFontFamily("Courier New")
+        text.setFontPointSize(9)
+        layout.addWidget(text)
+
+        btn = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btn.rejected.connect(dialog.close)
+        layout.addWidget(btn)
+
+        dialog.exec()
 
     # ==================== UI Helpers ====================
 
