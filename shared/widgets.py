@@ -13,6 +13,8 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from pathlib import Path
 import os
+import struct
+import tempfile
 
 
 class DropZone(QFrame):
@@ -50,8 +52,18 @@ class DropZone(QFrame):
         self.browse_btn.setMaximumHeight(22)
         layout.addWidget(self.browse_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
+    @staticmethod
+    def _outlook_descriptor_format(mime_data) -> str:
+        """Return the FileGroupDescriptor format name if present, else empty string."""
+        for fmt in mime_data.formats():
+            if 'filegroupdescriptor' in fmt.lower():
+                return fmt
+        return ''
+
     def dragEnterEvent(self, event: QDragEnterEvent):
-        if event.mimeData().hasUrls():
+        mime = event.mimeData()
+        print(f"[DropZone] dragEnter formats: {mime.formats()}", flush=True)
+        if mime.hasUrls() or self._outlook_descriptor_format(mime):
             event.acceptProposedAction()
             self.setStyleSheet("""
                 DropZone {
@@ -86,11 +98,423 @@ class DropZone(QFrame):
                 background-color: #e8e8e8;
             }
         """)
-        files = [url.toLocalFile() for url in event.mimeData().urls()]
-        print(f"[DropZone] dropEvent: {len(files)} files dropped", flush=True)
+        mime = event.mimeData()
+        print(f"[DropZone] dropEvent formats: {mime.formats()}", flush=True)
+
+        # Log all format data and URLs so we can diagnose unknown drag sources
+        for fmt in mime.formats():
+            try:
+                data = bytes(mime.data(fmt))
+                print(f"[DropZone]   {fmt}: {len(data)} bytes | {data[:80]}", flush=True)
+            except Exception as e:
+                print(f"[DropZone]   {fmt}: read error - {e}", flush=True)
+        if mime.hasUrls():
+            for url in mime.urls():
+                print(f"[DropZone]   URL: {url.toString()!r}  local={url.toLocalFile()!r}", flush=True)
+
+        # Outlook/Electron may not enumerate FileGroupDescriptorW via EnumFormatEtc but
+        # still honour GetData for it — try asking explicitly.
+        for probe in [
+            'application/x-qt-windows-mime;value="FileGroupDescriptorW"',
+            'application/x-qt-windows-mime;value="FileGroupDescriptor"',
+            'application/x-qt-windows-mime;value="FileContents"',
+        ]:
+            try:
+                data = bytes(mime.data(probe))
+                if data:
+                    print(f"[DropZone]   Probe hit: {probe}: {len(data)} bytes", flush=True)
+            except Exception:
+                pass
+
+        descriptor_fmt = self._outlook_descriptor_format(mime)
+
+        # Detect drag from Outlook Web (browser-based O365).
+        # Chrome withholds FileGroupDescriptorW from non-Shell drop targets, so Qt's
+        # MIME abstraction gets nothing.  We parse the Chromium custom MIME payload
+        # to get the Exchange item ID and retrieve the email via MAPI instead.
+        taint_data = b''
+        try:
+            taint_data = bytes(mime.data('application/x-qt-windows-mime;value="chromium/x-renderer-taint"'))
+        except Exception:
+            pass
+        is_outlook_web = bool(taint_data and b'outlook.office.com' in taint_data)
+
+        if is_outlook_web:
+            files = DropZone._handle_outlook_web_drop(mime)
+            if not files:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self, 'Email Not Retrieved',
+                    'Could not retrieve the email from Outlook Web.\n\n'
+                    'Make sure the Outlook desktop app is open and signed in with '
+                    'the same account, then try again.\n\n'
+                    'Alternatively, save the email to disk (File → Save As) and '
+                    'drop the file here.'
+                )
+        elif mime.hasUrls():
+            files = []
+            for url in mime.urls():
+                local = url.toLocalFile()
+                if local:
+                    ext = os.path.splitext(local)[1].lower()
+                    if ext == '.eml' and os.path.exists(local):
+                        files.extend(DropZone._extract_eml_attachments(local))
+                    elif ext == '.msg' and os.path.exists(local):
+                        files.extend(DropZone._extract_msg_attachments(local))
+                    else:
+                        files.append(local)
+                else:
+                    # Non-local URL (blob:, https:, etc.) — log and skip for now
+                    print(f"[DropZone]   Skipping non-local URL: {url.toString()}", flush=True)
+        elif descriptor_fmt:
+            files = DropZone._handle_outlook_drop(mime, descriptor_fmt)
+        else:
+            files = []
+
+        print(f"[DropZone] emitting {len(files)} file(s)", flush=True)
         for f in files:
             print(f"  - {f}", flush=True)
-        self.files_dropped.emit(files)
+        if files:
+            self.files_dropped.emit(files)
+
+    # ------------------------------------------------------------------
+    # Outlook Web / New Outlook desktop (WebView2) drag support
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_chromium_web_mime(data: bytes) -> dict:
+        """Parse 'Chromium Web Custom MIME Data Format' binary blob.
+
+        Format (all little-endian):
+          4 bytes  total payload size
+          4 bytes  entry count
+          for each entry:
+            4 bytes  key char-count  (UTF-16LE, no null)
+            key_len*2 bytes  key
+            2 bytes  UTF-16LE null terminator
+            4 bytes  value char-count (UTF-16LE, no null)
+            val_len*2 bytes  value  (JSON string)
+
+        Returns dict {key: parsed_json_value}.
+        """
+        import json as _json
+        result = {}
+        if len(data) < 8:
+            return result
+        count = struct.unpack_from('<I', data, 4)[0]
+        offset = 8
+        for _ in range(count):
+            if offset + 4 > len(data):
+                break
+            key_len = struct.unpack_from('<I', data, offset)[0]
+            offset += 4
+            try:
+                key = data[offset: offset + key_len * 2].decode('utf-16-le')
+            except Exception:
+                break
+            offset += key_len * 2 + 2          # skip UTF-16LE null terminator
+            if offset + 4 > len(data):
+                break
+            val_len = struct.unpack_from('<I', data, offset)[0]
+            offset += 4
+            try:
+                val_str = data[offset: offset + val_len * 2].decode('utf-16-le')
+            except Exception:
+                break
+            offset += val_len * 2
+            try:
+                result[key] = _json.loads(val_str)
+            except Exception:
+                result[key] = val_str
+        return result
+
+    @staticmethod
+    def _handle_outlook_web_drop(mime_data) -> list:
+        """Handle a drag from the new Outlook desktop app (WebView2/O365).
+
+        Reads the Chromium custom MIME payload to get the Exchange item ID,
+        then saves the email via MAPI (Outlook COM) or falls back gracefully.
+        Returns a list of local file paths (empty on failure).
+        """
+        raw = b''
+        try:
+            raw = bytes(mime_data.data(
+                'application/x-qt-windows-mime;value="Chromium Web Custom MIME Data Format"'
+            ))
+        except Exception:
+            pass
+
+        if not raw:
+            print('[DropZone] No Chromium Web MIME data', flush=True)
+            return []
+
+        web_data = DropZone._parse_chromium_web_mime(raw)
+        mail_info = web_data.get('maillistrow')
+        if not isinstance(mail_info, dict):
+            print('[DropZone] maillistrow not found in Chromium MIME data', flush=True)
+            return []
+
+        # New Outlook uses parallel arrays: subjects[], itemIds[], mailboxInfos[]
+        # Classic OWA used flat fields: subject, id
+        subjects = mail_info.get('subjects') or []
+        item_ids = (mail_info.get('itemIds') or
+                    mail_info.get('latestItemIds') or [])
+
+        # Fall back to flat field names used by some OWA versions
+        if not subjects:
+            s = mail_info.get('subject') or mail_info.get('Subject') or ''
+            subjects = [s] if s else []
+        if not item_ids:
+            i = (mail_info.get('id') or mail_info.get('itemId') or
+                 mail_info.get('ItemId') or '')
+            item_ids = [i] if i else []
+
+        print(
+            f'[DropZone] OWA drag: {len(item_ids)} email(s), '
+            f'subjects={subjects}',
+            flush=True,
+        )
+
+        if not item_ids:
+            print('[DropZone] No item IDs found in drag data', flush=True)
+            return []
+
+        tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
+        files = []
+        for idx, raw_id in enumerate(item_ids):
+            subj = subjects[idx] if idx < len(subjects) else ''
+            # Returns [msg_path, att1, att2, ...] or []
+            results = DropZone._mapi_save_email(raw_id, subj, tmp_dir, idx)
+            files.extend(results)
+
+        return files
+
+    @staticmethod
+    def _mapi_save_email(raw_id: str, subject: str, tmp_dir: str, idx: int = 0) -> list:
+        """Retrieve one email via Outlook MAPI COM, save as .msg, extract attachments.
+
+        Returns [msg_path, att1, att2, ...] on success, [] on failure.
+        """
+        import re
+
+        def _safe_filename(s: str, fallback: str) -> str:
+            name = re.sub(r'[\\/:*?"<>|]', '_', s).strip() if s else ''
+            return name or fallback
+
+        def _save_mail_item(mail_item, tag: str) -> list:
+            """Save a MAPI MailItem and its attachments; return list of paths."""
+            subj = ''
+            try:
+                subj = mail_item.Subject or ''
+            except Exception:
+                pass
+            fname = _safe_filename(subj or subject, f'email_{idx}')
+            msg_path = os.path.join(tmp_dir, f'{fname}.msg')
+            try:
+                mail_item.SaveAs(msg_path, 3)   # 3 = olMSGUnicode
+            except Exception as e:
+                print(f'[DropZone] MAPI SaveAs failed ({tag}): {e}', flush=True)
+                return []
+            if not os.path.exists(msg_path) or os.path.getsize(msg_path) == 0:
+                return []
+            print(f'[DropZone] MAPI saved ({tag}): {msg_path}', flush=True)
+
+            # Extract attachments directly from the MAPI item
+            att_paths = []
+            try:
+                for i in range(1, mail_item.Attachments.Count + 1):
+                    att = mail_item.Attachments.Item(i)
+                    att_name = _safe_filename(att.FileName, f'attachment_{i}')
+                    att_path = os.path.join(tmp_dir, att_name)
+                    att.SaveAsFile(att_path)
+                    if os.path.exists(att_path) and os.path.getsize(att_path) > 0:
+                        att_paths.append(att_path)
+                        print(f'[DropZone] MAPI attachment: {att_name}', flush=True)
+            except Exception as e:
+                print(f'[DropZone] MAPI attachment extraction error: {e}', flush=True)
+
+            return [msg_path] + att_paths
+
+        try:
+            import win32com.client as _wc
+        except ImportError:
+            print('[DropZone] pywin32 not installed — MAPI unavailable', flush=True)
+            return []
+
+        try:
+            outlook = _wc.Dispatch('Outlook.Application')
+            ns = outlook.GetNamespace('MAPI')
+
+            # --- 1. Direct entry-ID lookup (base64 → hex for GetItemFromID) ---
+            if raw_id:
+                for entry_id in DropZone._entry_id_variants(raw_id):
+                    try:
+                        item = ns.GetItemFromID(entry_id)
+                        result = _save_mail_item(item, 'direct-id')
+                        if result:
+                            return result
+                    except Exception:
+                        pass
+
+            # --- 2. Restrict search in Inbox + Sent by subject ---
+            if subject:
+                safe_subj = subject.replace("'", "''")
+                filter_str = f"[Subject] = '{safe_subj}'"
+                for folder_const in (6, 5):     # 6=Inbox, 5=SentMail
+                    try:
+                        folder = ns.GetDefaultFolder(folder_const)
+                        for mail in folder.Items.Restrict(filter_str):
+                            result = _save_mail_item(mail, f'folder-{folder_const}')
+                            if result:
+                                return result
+                            break   # first match only
+                    except Exception as e:
+                        print(f'[DropZone] MAPI folder {folder_const} error: {e}', flush=True)
+
+        except Exception as e:
+            print(f'[DropZone] MAPI error: {e}', flush=True)
+
+        return []
+
+    @staticmethod
+    def _entry_id_variants(raw_id: str) -> list:
+        """Return candidate entry-ID strings to try with GetItemFromID.
+
+        The new Outlook puts a base64-encoded MAPI PR_ENTRYID in itemIds[].
+        GetItemFromID needs a hex-encoded string of those same bytes.
+        We also try the raw string in case the format differs.
+        """
+        import base64
+        candidates = [raw_id]   # try raw first (handles EWS/Graph IDs)
+        # Try base64 → hex (standard MAPI PR_ENTRYID encoding used by new Outlook)
+        for pad in ('', '=', '=='):
+            try:
+                decoded = base64.b64decode(raw_id + pad)
+                candidates.append(decoded.hex().upper())
+                break
+            except Exception:
+                pass
+        return candidates
+
+    @staticmethod
+    def _handle_outlook_drop(mime_data, descriptor_fmt: str) -> list:
+        """Save the Outlook virtual-file bytes to a temp file, then extract attachments."""
+        try:
+            descriptor_bytes = bytes(mime_data.data(descriptor_fmt))
+            content_bytes = bytes(mime_data.data('FileContents'))
+        except Exception as e:
+            print(f"[DropZone] Could not read Outlook mime data: {e}", flush=True)
+            return []
+
+        if not descriptor_bytes or not content_bytes:
+            print(f"[DropZone] Empty descriptor ({len(descriptor_bytes)}) or content ({len(content_bytes)})", flush=True)
+            return []
+
+        # Parse FILEGROUPDESCRIPTOR(W): 4-byte count, then FILEDESCRIPTOR structs.
+        is_unicode = descriptor_fmt.upper().endswith('W')
+        filename = 'email.eml'
+        try:
+            count = struct.unpack_from('<I', descriptor_bytes, 0)[0]
+            print(f"[DropZone] descriptor count={count}, is_unicode={is_unicode}", flush=True)
+            if count > 0:
+                name_offset = 4 + 72
+                if is_unicode:
+                    name_bytes = descriptor_bytes[name_offset:name_offset + 520]
+                    parsed = name_bytes.decode('utf-16-le').split('\x00')[0]
+                else:
+                    name_bytes = descriptor_bytes[name_offset:name_offset + 260]
+                    parsed = name_bytes.decode('latin-1').split('\x00')[0]
+                if parsed:
+                    filename = parsed
+                    print(f"[DropZone] Parsed filename: {filename}", flush=True)
+        except Exception as e:
+            print(f"[DropZone] Could not parse descriptor: {e}", flush=True)
+
+        tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
+        email_path = os.path.join(tmp_dir, filename)
+        try:
+            with open(email_path, 'wb') as f:
+                f.write(content_bytes)
+            print(f"[DropZone] Saved email to: {email_path} ({len(content_bytes)} bytes)", flush=True)
+        except Exception as e:
+            print(f"[DropZone] Could not save email file: {e}", flush=True)
+            return []
+
+        ext = os.path.splitext(filename)[1].lower()
+        if ext == '.eml':
+            return DropZone._extract_eml_attachments(email_path, tmp_dir)
+        elif ext == '.msg':
+            return DropZone._extract_msg_attachments(email_path, tmp_dir)
+        else:
+            return [email_path]
+
+    @staticmethod
+    def _extract_eml_attachments(eml_path: str, extract_dir: str = None) -> list:
+        """Extract attachments from a .eml file using the standard library."""
+        import email as _email
+        import email.policy as _policy
+
+        if extract_dir is None:
+            extract_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
+
+        try:
+            with open(eml_path, 'rb') as f:
+                msg = _email.message_from_binary_file(f, policy=_policy.default)
+
+            saved = []
+            for part in msg.walk():
+                if part.get_content_disposition() != 'attachment':
+                    continue
+                name = part.get_filename()
+                if not name:
+                    continue
+                payload = part.get_payload(decode=True)
+                if not payload:
+                    continue
+                dest = os.path.join(extract_dir, name)
+                with open(dest, 'wb') as f:
+                    f.write(payload)
+                saved.append(dest)
+                print(f"[DropZone] Extracted from .eml: {name}", flush=True)
+
+            if saved:
+                return [eml_path] + saved  # email first, then attachments
+            print(f"[DropZone] No attachments in .eml", flush=True)
+            return [eml_path]
+
+        except Exception as e:
+            print(f"[DropZone] .eml extraction error: {e}", flush=True)
+            return [eml_path]
+
+    @staticmethod
+    def _extract_msg_attachments(msg_path: str, extract_dir: str = None) -> list:
+        """Extract attachments from a .msg file."""
+        if extract_dir is None:
+            extract_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
+
+        # Try extract-msg (pip install extract-msg)
+        try:
+            import extract_msg
+            with extract_msg.Message(msg_path) as msg:
+                saved = []
+                for att in msg.attachments:
+                    name = att.longFilename or att.shortFilename or 'attachment'
+                    if not att.data:
+                        continue
+                    dest = os.path.join(extract_dir, name)
+                    with open(dest, 'wb') as f:
+                        f.write(att.data)
+                    saved.append(dest)
+                    print(f"[DropZone] Extracted via extract_msg: {name}", flush=True)
+                if saved:
+                    return saved
+        except ImportError:
+            pass
+        except Exception as e:
+            print(f"[DropZone] extract_msg error: {e}", flush=True)
+
+        # Fallback: return the .msg file itself
+        return [msg_path]
 
     def browse_files(self):
         files, _ = QFileDialog.getOpenFileNames(
