@@ -39,6 +39,7 @@ class DropZone(QFrame):
         self.setAcceptDrops(True)
         self.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Sunken)
         self.setMinimumHeight(60)
+        self.setMaximumHeight(100)
         self.setStyleSheet("""
             DropZone {
                 background-color: #f5f5f5;
