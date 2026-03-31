@@ -52,8 +52,9 @@ pip install PyQt6
 
 #### Optional dependencies:
 ```bash
-pip install pywin32   # Windows — enables Outlook/O365 drag-and-drop
-pip install pymupdf   # All platforms — enables PDF preview in file lists
+pip install pywin32            # Windows — enables Outlook/O365 drag-and-drop
+pip install pymupdf            # All platforms — enables PDF preview in file lists
+pip install pandas openpyxl    # PSM-stable — enables Report Fixer feature
 ```
 
 ## Usage

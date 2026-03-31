@@ -571,8 +571,7 @@ class DropZone(QFrame):
             return [email_path]
 
     @staticmethod
-    @staticmethod
-    def _expand_zip(zip_path: str, extract_dir: str) -> list:
+    def _expand_zip(zip_path: str, extract_dir: str) -> list:    def _expand_zip(zip_path: str, extract_dir: str) -> list:
         """Extract a zip file and return paths of its contents. Returns [zip_path] on failure."""
         import zipfile
         try:
