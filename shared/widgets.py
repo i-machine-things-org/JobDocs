@@ -368,8 +368,11 @@ class DropZone(QFrame):
                         att_path = os.path.join(tmp_dir, att_name)
                         att.SaveAsFile(att_path)
                         if os.path.exists(att_path) and os.path.getsize(att_path) > 0:
-                            att_paths.append(att_path)
                             print(f'[DropZone] MAPI attachment: {att_name}', flush=True)
+                            if os.path.splitext(att_name)[1].lower() == '.zip':
+                                att_paths.extend(DropZone._expand_zip(att_path, tmp_dir))
+                            else:
+                                att_paths.append(att_path)
                         else:
                             sz = os.path.getsize(att_path) if os.path.exists(att_path) else -1
                             print(f'[DropZone] MAPI attachment empty/missing: {att_name} (size={sz})', flush=True)
@@ -568,6 +571,31 @@ class DropZone(QFrame):
             return [email_path]
 
     @staticmethod
+    @staticmethod
+    def _expand_zip(zip_path: str, extract_dir: str) -> list:
+        """Extract a zip file and return paths of its contents. Returns [zip_path] on failure."""
+        import zipfile
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                extracted = []
+                for member in zf.infolist():
+                    if member.is_dir():
+                        continue
+                    name = os.path.basename(member.filename)
+                    if not name:
+                        continue
+                    dest = os.path.join(extract_dir, name)
+                    with zf.open(member) as src, open(dest, 'wb') as dst:
+                        dst.write(src.read())
+                    extracted.append(dest)
+                    print(f"[DropZone] Extracted from zip: {name}", flush=True)
+                if extracted:
+                    return extracted
+        except Exception as e:
+            print(f"[DropZone] zip extraction error: {e}", flush=True)
+        return [zip_path]
+
+    @staticmethod
     def _extract_eml_attachments(eml_path: str, extract_dir: str = None) -> list:
         """Extract attachments from a .eml file using the standard library."""
         import email as _email
@@ -596,8 +624,11 @@ class DropZone(QFrame):
                 dest = os.path.join(extract_dir, name)
                 with open(dest, 'wb') as f:
                     f.write(payload)
-                saved.append(dest)
                 print(f"[DropZone] Extracted from .eml: {name}", flush=True)
+                if os.path.splitext(name)[1].lower() == '.zip':
+                    saved.extend(DropZone._expand_zip(dest, extract_dir))
+                else:
+                    saved.append(dest)
 
             if saved:
                 return [eml_path] + saved  # email first, then attachments
@@ -629,8 +660,11 @@ class DropZone(QFrame):
                     dest = os.path.join(extract_dir, name)
                     with open(dest, 'wb') as f:
                         f.write(att.data)
-                    saved.append(dest)
                     print(f"[DropZone] Extracted via extract_msg: {name}", flush=True)
+                    if os.path.splitext(name)[1].lower() == '.zip':
+                        saved.extend(DropZone._expand_zip(dest, extract_dir))
+                    else:
+                        saved.append(dest)
                 if saved:
                     return saved
         except ImportError:
