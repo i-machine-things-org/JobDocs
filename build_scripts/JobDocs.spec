@@ -151,21 +151,11 @@ hiddenimports = [
     'modules.reporting',
     'modules.reporting.module',
 
-    # Standard library imports used in the application
-    'pathlib',
-    'datetime',
-    'json',
-    'csv',
-    'platform',
-    'shutil',
-    're',
-    'importlib',
-    'importlib.util',
-    'subprocess',
-    'io',
-
     # Shared modules
     'shared.remote_sync',
+
+    # PDF preview (imported inside function body — PyInstaller won't auto-detect)
+    'fitz',
 
     # Report Fixer dependencies
     'pandas',

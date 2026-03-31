@@ -38,7 +38,7 @@ echo [2/7] Checking dependencies...
 py -c "import PyQt6" >nul 2>&1
 if errorlevel 1 (
     echo       PyQt6 not found. Installing...
-    py -m pip install --user PyQt6>=6.5.0
+    py -m pip install --user "PyQt6>=6.5.0"
     if errorlevel 1 (
         echo       ERROR: Failed to install PyQt6
         echo       Please check your internet connection and try again
@@ -53,7 +53,7 @@ if errorlevel 1 (
 py -c "import pandas" >nul 2>&1
 if errorlevel 1 (
     echo       pandas not found. Installing...
-    py -m pip install --user pandas>=2.0.0
+    py -m pip install --user "pandas>=2.0.0"
     if errorlevel 1 (
         echo       ERROR: Failed to install pandas
         echo       Please check your internet connection and try again
@@ -68,7 +68,7 @@ if errorlevel 1 (
 py -c "import openpyxl" >nul 2>&1
 if errorlevel 1 (
     echo       openpyxl not found. Installing...
-    py -m pip install --user openpyxl>=3.1.0
+    py -m pip install --user "openpyxl>=3.1.0"
     if errorlevel 1 (
         echo       ERROR: Failed to install openpyxl
         echo       Please check your internet connection and try again
@@ -83,7 +83,7 @@ if errorlevel 1 (
 py -c "import PyInstaller" >nul 2>&1
 if errorlevel 1 (
     echo       PyInstaller not found. Installing...
-    py -m pip install --user pyinstaller>=6.0.0
+    py -m pip install --user "pyinstaller>=6.0.0"
     if errorlevel 1 (
         echo       ERROR: Failed to install PyInstaller
         echo       Please check your internet connection and try again
@@ -98,7 +98,7 @@ if errorlevel 1 (
 REM Check if JobDocs.exe is running
 echo [3/7] Checking for running instances...
 tasklist /FI "IMAGENAME eq JobDocs.exe" 2>NUL | find /I /N "JobDocs.exe">NUL
-if "%ERRORLEVEL%"=="0" (
+if not errorlevel 1 (
     echo       ERROR: JobDocs.exe is currently running!
     echo       Please close JobDocs before building.
     pause

@@ -33,7 +33,7 @@ echo.
 REM Step 2: Generate installer script with version
 echo [Step 2/3] Generating installer script...
 echo.
-python generate_installer.py %VERSION%
+py generate_installer.py %VERSION%
 if errorlevel 1 (
     echo ERROR: Failed to generate installer script
     pause
