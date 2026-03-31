@@ -168,7 +168,7 @@ class JobModule(BaseModule):
         layout.insertWidget(index, self.job_drop_zone)
 
         # File list + preview panel (Create New tab)
-        self.job_preview = attach_file_preview(self.job_files_list, self.job_files, layout)
+        self.job_preview = attach_file_preview(self.job_files_list, layout)
         self.job_files_list.currentRowChanged.connect(self._on_job_file_selected)
 
         # Connect Create New tab signals
@@ -220,7 +220,7 @@ class JobModule(BaseModule):
         add_layout.insertWidget(add_index, self.add_drop_zone)
 
         # File list + preview panel (Add to Existing tab)
-        self.add_preview = attach_file_preview(self.add_files_list, self.add_files, add_layout)
+        self.add_preview = attach_file_preview(self.add_files_list, add_layout)
         self.add_files_list.currentRowChanged.connect(self._on_add_file_selected)
 
         # Set splitter sizes for Add tab

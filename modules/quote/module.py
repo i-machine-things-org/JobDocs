@@ -163,7 +163,7 @@ class QuoteModule(BaseModule):
         layout.insertWidget(index, self.quote_drop_zone)
 
         # File list + preview panel (Create New tab)
-        self.quote_preview = attach_file_preview(self.quote_files_list, self.quote_files, layout)
+        self.quote_preview = attach_file_preview(self.quote_files_list, layout)
         self.quote_files_list.currentRowChanged.connect(self._on_quote_file_selected)
 
         # Connect Create New tab signals
@@ -215,7 +215,7 @@ class QuoteModule(BaseModule):
         add_layout.insertWidget(add_index, self.add_drop_zone)
 
         # File list + preview panel (Add to Existing tab)
-        self.add_preview = attach_file_preview(self.add_files_list, self.add_files, add_layout)
+        self.add_preview = attach_file_preview(self.add_files_list, add_layout)
         self.add_files_list.currentRowChanged.connect(self._on_add_file_selected)
 
         # Set splitter sizes for Add tab

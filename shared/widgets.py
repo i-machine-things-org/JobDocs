@@ -1255,7 +1255,6 @@ class FilePreviewWidget(QWidget):
 
 def attach_file_preview(
     files_list,
-    file_paths: list,
     parent_layout,
     splitter_sizes=(320, 180),
     min_preview_width=130,
