@@ -74,15 +74,6 @@ class SettingsDialog(QDialog):
         ir_btn.clicked.connect(lambda: self.browse_dir(self.inspection_report_edit))
         dir_layout.addWidget(ir_btn, 2, 2)
 
-        # Temp files directory
-        dir_layout.addWidget(QLabel("Temp Files Directory:"), 3, 0)
-        self.tmp_files_edit = QLineEdit(self.settings.get('tmp_files_dir', ''))
-        self.tmp_files_edit.setToolTip("Files here are optionally included when creating new Job or Quote folders")
-        dir_layout.addWidget(self.tmp_files_edit, 3, 1)
-        tmp_btn = QPushButton("Browse...")
-        tmp_btn.clicked.connect(lambda: self.browse_dir(self.tmp_files_edit))
-        dir_layout.addWidget(tmp_btn, 3, 2)
-
         scroll_layout.addWidget(dir_group)
 
         # ITAR directories group
@@ -163,6 +154,11 @@ class SettingsDialog(QDialog):
         self.allow_duplicates_check = QCheckBox("Allow duplicate job numbers (not recommended)")
         self.allow_duplicates_check.setChecked(self.settings.get('allow_duplicate_jobs', False))
         options_layout.addWidget(self.allow_duplicates_check)
+
+        self.skip_images_check = QCheckBox("Skip image attachments (.jpg, .png, etc.) when extracting emails")
+        self.skip_images_check.setChecked(self.settings.get('skip_image_attachments', True))
+        self.skip_images_check.setToolTip("Skips inline signature images when extracting email attachments.")
+        options_layout.addWidget(self.skip_images_check)
 
         # Default tab setting — built from the actual enabled modules
         default_tab_layout = QHBoxLayout()
@@ -309,7 +305,6 @@ class SettingsDialog(QDialog):
         self.settings['blueprints_dir'] = self.blueprints_edit.text()
         self.settings['customer_files_dir'] = self.customer_files_edit.text()
         self.settings['inspection_report_dir'] = self.inspection_report_edit.text()
-        self.settings['tmp_files_dir'] = self.tmp_files_edit.text()
         self.settings['itar_blueprints_dir'] = self.itar_blueprints_edit.text()
         self.settings['itar_customer_files_dir'] = self.itar_customer_files_edit.text()
 
@@ -328,6 +323,7 @@ class SettingsDialog(QDialog):
         self.settings['quote_folder_path'] = self.quote_folder_edit.text().strip()
         self.settings['legacy_mode'] = self.legacy_mode_check.isChecked()
         self.settings['allow_duplicate_jobs'] = self.allow_duplicates_check.isChecked()
+        self.settings['skip_image_attachments'] = self.skip_images_check.isChecked()
         self.settings['ui_style'] = self.style_combo.currentText()
         idx = self.default_tab_combo.currentIndex()
         if 0 <= idx < len(self._tab_display_names):

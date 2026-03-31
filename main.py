@@ -48,8 +48,8 @@ class JobDocsMainWindow(QMainWindow):
         'remote_server_path': '',  # Network path or URL for remote settings sync
         'report_template_path': '',  # Path to Excel template for Report Fixer
         'inspection_report_dir': '',  # Directory containing inspection reports
-        'tmp_files_dir': '',  # Temp directory scanned when creating new job/quote folders
-        'suppress_bp_link_notification': False  # Suppress "linked to blueprints" confirmation dialog
+        'suppress_bp_link_notification': False,  # Suppress "linked to blueprints" confirmation dialog
+        'skip_image_attachments': True
     }
 
     def __init__(self):
@@ -101,6 +101,10 @@ class JobDocsMainWindow(QMainWindow):
 
         # Apply UI style
         self.apply_ui_style()
+
+        # Apply email attachment settings
+        from shared.widgets import DropZone
+        DropZone.set_skip_image_attachments(self.settings.get('skip_image_attachments', True))
 
         # Set default tab (stored as display name string; fall back to integer for old settings)
         default_tab = self.settings.get('default_tab', 0)
@@ -314,6 +318,8 @@ class JobDocsMainWindow(QMainWindow):
 
             self.save_settings()
             self.populate_customer_lists()
+            from shared.widgets import DropZone
+            DropZone.set_skip_image_attachments(self.settings.get('skip_image_attachments', True))
             QMessageBox.information(self, "Settings", "Settings saved. Please restart for all changes to take effect.")
 
     def show_getting_started(self):

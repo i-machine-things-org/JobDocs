@@ -15,12 +15,13 @@ from typing import List, Type
 from PyQt6.QtWidgets import (
     QWidget, QMessageBox, QTreeWidgetItem, QButtonGroup, QCheckBox
 )
+
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6 import uic
 from datetime import datetime
 
 from core.base_module import BaseModule
-from shared.widgets import DropZone, JobSearchDialog, DrawingSearchDialog
+from shared.widgets import DropZone, JobSearchDialog, DrawingSearchDialog, FilePreviewWidget, attach_file_preview
 from shared.utils import (
     is_blueprint_file, parse_job_numbers, create_file_link,
     sanitize_filename, open_folder, get_next_number
@@ -118,7 +119,11 @@ class JobModule(BaseModule):
         self.add_drop_zone = None
         self.add_filter_group = None
         self.dest_button_group = None
-        self.tmp_dir_check = None
+
+
+        # Preview panels
+        self.job_preview: FilePreviewWidget | None = None
+        self.add_preview: FilePreviewWidget | None = None
 
     def get_name(self) -> str:
         return "Job"
@@ -162,15 +167,9 @@ class JobModule(BaseModule):
         self.job_drop_zone.setMinimumHeight(60)
         layout.insertWidget(index, self.job_drop_zone)
 
-        # Temp dir checkbox — inserted right after the drop zone
-        tmp_dir = self.app_context.get_setting('tmp_files_dir', '') if self.app_context else ''
-        self.tmp_dir_check = QCheckBox("Include files from temp folder")
-        self.tmp_dir_check.setEnabled(bool(tmp_dir))
-        self.tmp_dir_check.setToolTip(
-            f"Also include all files from: {tmp_dir}" if tmp_dir
-            else "Configure a Temp Files Directory in Settings to enable this option"
-        )
-        layout.insertWidget(index + 1, self.tmp_dir_check)
+        # File list + preview panel (Create New tab)
+        self.job_preview = attach_file_preview(self.job_files_list, self.job_files, layout)
+        self.job_files_list.currentRowChanged.connect(self._on_job_file_selected)
 
         # Connect Create New tab signals
         self.job_drop_zone.files_dropped.connect(lambda files: self.handle_job_files(files))
@@ -219,6 +218,10 @@ class JobModule(BaseModule):
         self.add_drop_zone = DropZone("Drop files")
         self.add_drop_zone.setMinimumHeight(60)
         add_layout.insertWidget(add_index, self.add_drop_zone)
+
+        # File list + preview panel (Add to Existing tab)
+        self.add_preview = attach_file_preview(self.add_files_list, self.add_files, add_layout)
+        self.add_files_list.currentRowChanged.connect(self._on_add_file_selected)
 
         # Set splitter sizes for Add tab
         widget.addSplitter.setSizes([450, 450])
@@ -277,6 +280,16 @@ class JobModule(BaseModule):
         self.refresh_job_tree()
 
     # ==================== Create New Tab: File Management ====================
+
+    def _on_job_file_selected(self, row: int):
+        if self.job_preview is None:
+            return
+        self.job_preview.preview_file(self.job_files[row] if 0 <= row < len(self.job_files) else None)
+
+    def _on_add_file_selected(self, row: int):
+        if self.add_preview is None:
+            return
+        self.add_preview.preview_file(self.add_files[row] if 0 <= row < len(self.add_files) else None)
 
     def handle_job_files(self, files: List[str]):
         """Add files to the job files list (Create New tab)"""
@@ -338,17 +351,7 @@ class JobModule(BaseModule):
 
         self.log_message(f"Creating job(s): {', '.join(job_numbers)}")
 
-        # Build file list, optionally including tmp dir contents
         all_files = list(self.job_files)
-        if self.tmp_dir_check and self.tmp_dir_check.isChecked():
-            tmp_dir = self.app_context.get_setting('tmp_files_dir', '')
-            if tmp_dir and os.path.exists(tmp_dir):
-                try:
-                    for f in Path(tmp_dir).iterdir():
-                        if f.is_file() and str(f) not in all_files:
-                            all_files.append(str(f))
-                except OSError:
-                    pass
 
         # Track if this is a new customer
         existing_customers = self.app_context.get_customer_list()
@@ -505,6 +508,8 @@ class JobModule(BaseModule):
         self.itar_check.setChecked(False)
         self.job_files.clear()
         self.job_files_list.clear()
+        if self.job_preview:
+            self.job_preview.clear()
 
     def auto_generate_job_number(self):
         """Auto-generate the next job number"""
@@ -735,6 +740,8 @@ class JobModule(BaseModule):
         """Clear all files from add files list"""
         self.add_files.clear()
         self.add_files_list.clear()
+        if self.add_preview:
+            self.add_preview.clear()
 
     # ==================== Add to Existing Tab: Add Files to Job ====================
 

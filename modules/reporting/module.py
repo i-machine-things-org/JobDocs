@@ -1172,6 +1172,9 @@ class ReportingModule(BaseModule):
         # Merge Promise Date from delivery schedule (if loaded)
         if self.delivery_df is not None and 'Job ID' in df_fixed.columns:
             df_fixed['_job_id_str'] = df_fixed['Job ID'].astype(str).str.strip()
+            # Drop the empty placeholder added from template to avoid duplicate column conflict
+            if 'Promise Date' in df_fixed.columns:
+                df_fixed = df_fixed.drop(columns=['Promise Date'])
             df_fixed = df_fixed.merge(
                 self.delivery_df,
                 left_on='_job_id_str',

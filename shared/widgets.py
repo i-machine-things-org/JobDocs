@@ -7,10 +7,11 @@ Common UI widgets used across multiple modules.
 from PyQt6.QtWidgets import (
     QFrame, QDialog, QVBoxLayout, QScrollArea, QLabel, QDialogButtonBox,
     QPushButton, QFileDialog, QLineEdit, QListWidget, QHBoxLayout,
-    QTreeWidget, QTreeWidgetItem, QCheckBox, QHeaderView
+    QTreeWidget, QTreeWidgetItem, QCheckBox, QHeaderView,
+    QWidget, QSplitter, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap
 from pathlib import Path
 import os
 import struct
@@ -20,6 +21,18 @@ import tempfile
 class DropZone(QFrame):
     """A widget that accepts file drops"""
     files_dropped = pyqtSignal(list)
+
+    # Extensions filtered out during email attachment extraction when skip is enabled.
+    _SKIP_EXTS: frozenset = frozenset()
+    _IMAGE_EXTS: frozenset = frozenset({
+        '.jpg', '.jpeg', '.png', '.gif', '.bmp',
+        '.tiff', '.tif', '.webp', '.ico', '.svg',
+    })
+
+    @classmethod
+    def set_skip_image_attachments(cls, enabled: bool) -> None:
+        """Enable or disable automatic skipping of image attachments from emails."""
+        cls._SKIP_EXTS = cls._IMAGE_EXTS if enabled else frozenset()
 
     def __init__(self, label: str = "Drop files here", parent=None):
         super().__init__(parent)
@@ -60,10 +73,15 @@ class DropZone(QFrame):
                 return fmt
         return ''
 
+    @staticmethod
+    def _is_classic_outlook(mime_data) -> bool:
+        """Return True if this drag is from the classic Outlook desktop app."""
+        return 'application/x-qt-windows-mime;value="RenPrivateMessages"' in mime_data.formats()
+
     def dragEnterEvent(self, event: QDragEnterEvent):
         mime = event.mimeData()
         print(f"[DropZone] dragEnter formats: {mime.formats()}", flush=True)
-        if mime.hasUrls() or self._outlook_descriptor_format(mime):
+        if mime.hasUrls() or self._outlook_descriptor_format(mime) or self._is_classic_outlook(mime):
             event.acceptProposedAction()
             self.setStyleSheet("""
                 DropZone {
@@ -139,6 +157,8 @@ class DropZone(QFrame):
             pass
         is_outlook_web = bool(taint_data and b'outlook.office.com' in taint_data)
 
+        is_classic_outlook = DropZone._is_classic_outlook(mime) and not is_outlook_web
+
         if is_outlook_web:
             files = DropZone._handle_outlook_web_drop(mime)
             if not files:
@@ -148,6 +168,17 @@ class DropZone(QFrame):
                     'Could not retrieve the email from Outlook Web.\n\n'
                     'Make sure the Outlook desktop app is open and signed in with '
                     'the same account, then try again.\n\n'
+                    'Alternatively, save the email to disk (File → Save As) and '
+                    'drop the file here.'
+                )
+        elif is_classic_outlook:
+            files = DropZone._handle_classic_outlook_drop(mime)
+            if not files:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self, 'Email Not Retrieved',
+                    'Could not retrieve the email from Outlook.\n\n'
+                    'Make sure Outlook is open and signed in, then try again.\n\n'
                     'Alternatively, save the email to disk (File → Save As) and '
                     'drop the file here.'
                 )
@@ -322,14 +353,27 @@ class DropZone(QFrame):
             # Extract attachments directly from the MAPI item
             att_paths = []
             try:
-                for i in range(1, mail_item.Attachments.Count + 1):
-                    att = mail_item.Attachments.Item(i)
-                    att_name = _safe_filename(att.FileName, f'attachment_{i}')
-                    att_path = os.path.join(tmp_dir, att_name)
-                    att.SaveAsFile(att_path)
-                    if os.path.exists(att_path) and os.path.getsize(att_path) > 0:
-                        att_paths.append(att_path)
-                        print(f'[DropZone] MAPI attachment: {att_name}', flush=True)
+                count = mail_item.Attachments.Count
+                print(f'[DropZone] MAPI: {count} attachment(s)', flush=True)
+                for i in range(1, count + 1):
+                    try:
+                        att = mail_item.Attachments.Item(i)
+                        att_name = _safe_filename(
+                            att.FileName or att.DisplayName, f'attachment_{i}'
+                        )
+                        if os.path.splitext(att_name)[1].lower() in DropZone._SKIP_EXTS:
+                            print(f'[DropZone] Skipping image attachment: {att_name}', flush=True)
+                            continue
+                        att_path = os.path.join(tmp_dir, att_name)
+                        att.SaveAsFile(att_path)
+                        if os.path.exists(att_path) and os.path.getsize(att_path) > 0:
+                            att_paths.append(att_path)
+                            print(f'[DropZone] MAPI attachment: {att_name}', flush=True)
+                        else:
+                            sz = os.path.getsize(att_path) if os.path.exists(att_path) else -1
+                            print(f'[DropZone] MAPI attachment empty/missing: {att_name} (size={sz})', flush=True)
+                    except Exception as att_err:
+                        print(f'[DropZone] MAPI attachment[{i}] error: {att_err}', flush=True)
             except Exception as e:
                 print(f'[DropZone] MAPI attachment extraction error: {e}', flush=True)
 
@@ -359,15 +403,25 @@ class DropZone(QFrame):
             # --- 2. Restrict search in Inbox + Sent by subject ---
             if subject:
                 safe_subj = subject.replace("'", "''")
-                filter_str = f"[Subject] = '{safe_subj}'"
+                # Also try without a leading "Re: " prefix in case OWA adds one
+                base_subj = re.sub(r'^(re:\s*)+', '', safe_subj, flags=re.IGNORECASE).strip()
+                subjects_to_try = [safe_subj] if safe_subj == base_subj else [safe_subj, base_subj]
                 for folder_const in (6, 5):     # 6=Inbox, 5=SentMail
                     try:
                         folder = ns.GetDefaultFolder(folder_const)
-                        for mail in folder.Items.Restrict(filter_str):
-                            result = _save_mail_item(mail, f'folder-{folder_const}')
-                            if result:
-                                return result
-                            break   # first match only
+                        items = folder.Items
+                        items.Sort('[ReceivedTime]', True)   # newest first
+                        best_result = None
+                        for subj_variant in subjects_to_try:
+                            filter_str = f"[Subject] = '{subj_variant}'"
+                            for mail in items.Restrict(filter_str):
+                                result = _save_mail_item(mail, f'folder-{folder_const}')
+                                if len(result) > 1:     # has real attachments
+                                    return result
+                                if result and best_result is None:
+                                    best_result = result  # .msg only — keep as fallback
+                        if best_result:
+                            return best_result
                     except Exception as e:
                         print(f'[DropZone] MAPI folder {folder_const} error: {e}', flush=True)
 
@@ -395,6 +449,70 @@ class DropZone(QFrame):
             except Exception:
                 pass
         return candidates
+
+    @staticmethod
+    def _handle_classic_outlook_drop(mime_data) -> list:
+        """Handle drag from the classic Outlook desktop app.
+
+        Classic Outlook provides RenPrivateMessages (binary MAPI entry IDs) and a
+        Csv format containing the same entry ID as a UTF-16LE hex string.  FileContents
+        is typically 0 bytes when dropped on non-Shell targets, so we retrieve the email
+        via MAPI COM using the entry ID directly.
+        """
+        # Entry ID is stored in the Csv format as a UTF-16LE hex string —
+        # exactly the format GetItemFromID expects, no conversion needed.
+        raw_id = ''
+        try:
+            csv_bytes = bytes(mime_data.data('application/x-qt-windows-mime;value="Csv"'))
+            if csv_bytes:
+                raw_id = csv_bytes.decode('utf-16-le').rstrip('\x00').strip()
+                print(f"[DropZone] Classic Outlook entry ID: {raw_id[:40]}...", flush=True)
+        except Exception as e:
+            print(f"[DropZone] Could not read Csv entry ID: {e}", flush=True)
+
+        # Subject from text/plain tab-delimited: header row then data row
+        # "From\tSubject\tReceived\tSize\tCategories\t\nSender\tSubject..."
+        subject = ''
+        try:
+            plain_bytes = bytes(mime_data.data('text/plain'))
+            plain = plain_bytes.decode('utf-8', errors='replace')
+            lines = [l for l in plain.splitlines() if l.strip()]
+            for line in lines:
+                cols = line.split('\t')
+                if cols[0].strip().lower() not in ('from', ''):
+                    if len(cols) >= 2:
+                        subject = cols[1].strip()
+                        break
+            print(f"[DropZone] Classic Outlook subject: {subject!r}", flush=True)
+        except Exception as e:
+            print(f"[DropZone] Could not parse subject from text/plain: {e}", flush=True)
+
+        # Fallback: read subject from FileGroupDescriptorW filename (strip .msg)
+        if not subject:
+            descriptor_fmt = DropZone._outlook_descriptor_format(mime_data)
+            if descriptor_fmt:
+                try:
+                    descriptor_bytes = bytes(mime_data.data(descriptor_fmt))
+                    is_unicode = descriptor_fmt.upper().endswith('W')
+                    name_offset = 4 + 72
+                    if is_unicode:
+                        name_bytes = descriptor_bytes[name_offset:name_offset + 520]
+                        parsed = name_bytes.decode('utf-16-le').split('\x00')[0]
+                    else:
+                        name_bytes = descriptor_bytes[name_offset:name_offset + 260]
+                        parsed = name_bytes.decode('latin-1').split('\x00')[0]
+                    if parsed:
+                        subject = os.path.splitext(parsed)[0]
+                        print(f"[DropZone] Classic Outlook subject (from descriptor): {subject!r}", flush=True)
+                except Exception as e:
+                    print(f"[DropZone] Could not parse descriptor for subject: {e}", flush=True)
+
+        if not raw_id and not subject:
+            print('[DropZone] Classic Outlook: no entry ID or subject — cannot retrieve email', flush=True)
+            return []
+
+        tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
+        return DropZone._mapi_save_email(raw_id, subject, tmp_dir, 0)
 
     @staticmethod
     def _handle_outlook_drop(mime_data, descriptor_fmt: str) -> list:
@@ -468,6 +586,9 @@ class DropZone(QFrame):
                 name = part.get_filename()
                 if not name:
                     continue
+                if os.path.splitext(name)[1].lower() in DropZone._SKIP_EXTS:
+                    print(f"[DropZone] Skipping image attachment: {name}", flush=True)
+                    continue
                 payload = part.get_payload(decode=True)
                 if not payload:
                     continue
@@ -500,6 +621,9 @@ class DropZone(QFrame):
                 for att in msg.attachments:
                     name = att.longFilename or att.shortFilename or 'attachment'
                     if not att.data:
+                        continue
+                    if os.path.splitext(name)[1].lower() in DropZone._SKIP_EXTS:
+                        print(f"[DropZone] Skipping image attachment: {name}", flush=True)
                         continue
                     dest = os.path.join(extract_dir, name)
                     with open(dest, 'wb') as f:
@@ -986,3 +1110,171 @@ class DrawingSearchDialog(QDialog):
                 if file_path:
                     selected.append(file_path)
         return selected
+
+
+class FilePreviewWidget(QWidget):
+    """Preview panel shown beside a drop-zone file list.
+
+    Renders image thumbnails, PDF first pages (via pymupdf if installed),
+    and shows type + size info for CAD, mesh, email, and all other files.
+    """
+
+    _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp', '.ico'}
+    _CAD_EXTS   = {'.step', '.stp', '.iges', '.igs', '.x_t', '.x_b', '.prt', '.asm'}
+    _MESH_EXTS  = {'.stl', '.obj', '.ply', '.3mf'}
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pixmap: QPixmap | None = None
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setMinimumSize(80, 80)
+        self.image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.image_label.setStyleSheet("background: #1e1e1e; border-radius: 3px;")
+        layout.addWidget(self.image_label, stretch=1)
+
+        self.info_label = QLabel("No file selected")
+        self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.info_label.setWordWrap(True)
+        self.info_label.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(self.info_label)
+
+    # ------------------------------------------------------------------
+    def preview_file(self, file_path: str | None):
+        if not file_path or not os.path.exists(file_path):
+            self.clear()
+            return
+
+        path = Path(file_path)
+        ext = path.suffix.lower()
+        try:
+            size_str = self._fmt_size(path.stat().st_size)
+        except OSError:
+            size_str = ""
+
+        if ext in self._IMAGE_EXTS:
+            pix = QPixmap(file_path)
+            if not pix.isNull():
+                self._set_pixmap(pix, path.name, size_str)
+                return
+
+        if ext == '.pdf':
+            if self._try_pdf_preview(file_path):
+                self.info_label.setText(f"{path.name}\n{size_str}")
+                return
+            self._set_text("PDF", f"{path.name}\n{size_str}\n(install pymupdf\nfor page preview)")
+            return
+
+        if ext in self._CAD_EXTS:
+            self._set_text("STEP / IGES", f"{path.name}\n{size_str}")
+            return
+
+        if ext in self._MESH_EXTS:
+            self._set_text("3D Mesh", f"{path.name}\n{size_str}")
+            return
+
+        if ext == '.msg':
+            self._set_text("Email (.msg)", f"{path.name}\n{size_str}")
+            return
+
+        type_label = (ext.upper().lstrip('.') + " file") if ext else "File"
+        self._set_text(type_label, f"{path.name}\n{size_str}")
+
+    def _try_pdf_preview(self, file_path: str) -> bool:
+        try:
+            import fitz  # pymupdf
+            doc = fitz.open(file_path)
+            try:
+                if doc.page_count == 0:
+                    return False
+                page = doc[0]
+                pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+                data = pix.tobytes('png')
+            finally:
+                doc.close()
+            qpix = QPixmap()
+            if qpix.loadFromData(data) and not qpix.isNull():
+                self._set_pixmap(qpix, "", "")
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _set_pixmap(self, pix: QPixmap, name: str, size_str: str):
+        self._pixmap = pix
+        self._scale_pixmap()
+        detail = "\n".join(filter(None, [name, size_str]))
+        self.info_label.setText(detail)
+
+    def _set_text(self, type_label: str, detail: str):
+        self._pixmap = None
+        self.image_label.setPixmap(QPixmap())
+        self.image_label.setText(type_label)
+        self.info_label.setText(detail)
+
+    def _scale_pixmap(self):
+        if not self._pixmap or self._pixmap.isNull():
+            return
+        size = self.image_label.size()
+        if size.width() < 10 or size.height() < 10:
+            size = QSize(200, 200)
+        scaled = self._pixmap.scaled(
+            size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.image_label.setPixmap(scaled)
+        self.image_label.setText("")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._pixmap:
+            self._scale_pixmap()
+
+    def clear(self):
+        self._pixmap = None
+        self.image_label.setPixmap(QPixmap())
+        self.image_label.setText("")
+        self.info_label.setText("No file selected")
+
+    @staticmethod
+    def _fmt_size(size: int) -> str:
+        for unit in ('B', 'KB', 'MB', 'GB'):
+            if size < 1024 or unit == 'GB':
+                return f"{size:.1f} {unit}"
+            size = size / 1024.0
+        return f"{size:.1f} GB"
+
+
+def attach_file_preview(
+    files_list,
+    file_paths: list,
+    parent_layout,
+    splitter_sizes=(320, 180),
+    min_preview_width=130,
+) -> FilePreviewWidget:
+    """Remove files_list from parent_layout, wrap it with a FilePreviewWidget
+    in a QSplitter, reinsert at the same index, and return the preview widget.
+    The caller must connect currentRowChanged → preview_file.
+    """
+    list_index = parent_layout.indexOf(files_list)
+    parent_layout.removeWidget(files_list)
+    files_list.setMaximumHeight(16777215)   # lift any UI-file height cap
+
+    splitter = QSplitter(Qt.Orientation.Horizontal)
+    splitter.addWidget(files_list)
+
+    preview = FilePreviewWidget()
+    preview.setMinimumWidth(min_preview_width)
+    splitter.addWidget(preview)
+    splitter.setSizes(list(splitter_sizes))
+
+    parent_layout.insertWidget(list_index, splitter)
+    return preview
