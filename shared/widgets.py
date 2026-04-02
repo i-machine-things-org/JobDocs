@@ -122,11 +122,11 @@ class DropZone(QFrame):
         mime = event.mimeData()
         print(f"[DropZone] dropEvent formats: {mime.formats()}", flush=True)
 
-        # Log all format data and URLs so we can diagnose unknown drag sources
+        # Log format names and sizes only — avoid printing raw bytes that may contain email content
         for fmt in mime.formats():
             try:
                 data = bytes(mime.data(fmt))
-                print(f"[DropZone]   {fmt}: {len(data)} bytes | {data[:80]}", flush=True)
+                print(f"[DropZone]   {fmt}: {len(data)} bytes", flush=True)
             except Exception as e:
                 print(f"[DropZone]   {fmt}: read error - {e}", flush=True)
         if mime.hasUrls():
@@ -251,6 +251,8 @@ class DropZone(QFrame):
                 break
             val_len = struct.unpack_from('<I', data, offset)[0]
             offset += 4
+            if offset + val_len * 2 > len(data):
+                break
             try:
                 val_str = data[offset: offset + val_len * 2].decode('utf-16-le')
             except Exception:
@@ -682,7 +684,7 @@ class DropZone(QFrame):
                     else:
                         saved.append(dest)
                 if saved:
-                    return saved
+                    return [msg_path] + saved
         except ImportError:
             pass
         except Exception as e:

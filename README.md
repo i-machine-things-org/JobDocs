@@ -244,9 +244,12 @@ JobDocs/
 ├── modules/             # Plugin modules
 │   ├── quote/           # Quote module
 │   ├── job/             # Job module
+│   ├── add_to_job/      # Add to job module
 │   ├── bulk/            # Bulk creation module
 │   ├── search/          # Search module
-│   ├── reporting/       # Reporting module (experimental)
+│   ├── import_bp/       # Import blueprints module
+│   ├── history/         # History module
+│   ├── reporting/       # Reporting module
 │   └── _template/       # Template for custom modules
 ├── build_scripts/       # Build configuration
 ├── windows/             # Windows installer files

@@ -29,8 +29,9 @@ echo [Step 1/3] Building JobDocs executable...
 echo.
 cd ..
 call build_scripts\build_windows.bat
+set BUILD_ERR=%errorlevel%
 cd windows
-if errorlevel 1 (
+if %BUILD_ERR% neq 0 (
     echo ERROR: Failed to build executable
     pause
     exit /b 1
@@ -43,7 +44,7 @@ echo.
 REM Step 2: Generate installer script with version
 echo [Step 2/3] Generating installer script...
 echo.
-py generate_installer.py %VERSION%
+py generate_installer.py "%VERSION%"
 if errorlevel 1 (
     echo ERROR: Failed to generate installer script
     pause

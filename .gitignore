@@ -59,7 +59,6 @@ icon.png
 linux/debian/
 linux/*.deb
 windows/Output/
-windows/installer.iss
 JobDocs-Setup-*.exe
 
 # PyInstaller
