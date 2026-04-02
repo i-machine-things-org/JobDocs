@@ -9,7 +9,17 @@ echo.
 
 REM Read version from VERSION file
 cd ..
+if not exist VERSION (
+    echo ERROR: VERSION file not found
+    pause
+    exit /b 1
+)
 set /p VERSION=<VERSION
+if "%VERSION%"=="" (
+    echo ERROR: VERSION file is empty
+    pause
+    exit /b 1
+)
 cd windows
 echo Version: %VERSION%
 echo.
@@ -68,7 +78,7 @@ if not exist %INNO_PATH% (
     echo   - Manually compile installer.iss with Inno Setup GUI
     echo.
     pause
-    exit /b 0
+    exit /b 1
 )
 
 REM Build installer

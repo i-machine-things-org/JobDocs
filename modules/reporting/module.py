@@ -10,7 +10,7 @@ import re
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from PyQt6.QtWidgets import (
     QWidget, QTableWidgetItem, QFileDialog, QHeaderView, QAbstractItemView,
@@ -276,6 +276,14 @@ class ReportingModule(BaseModule):
             df = pd.read_excel(file_path, header=0)
             # Column F is index 5; rename to known names for merging
             cols = list(df.columns)
+            if len(cols) < 6:
+                self.show_error(
+                    "Delivery Schedule Error",
+                    f"File must have at least 6 columns (A–F). Found {len(cols)}."
+                )
+                self.delivery_df = None
+                self.delivery_info_label.setText("Failed to load file")
+                return
             job_col = cols[0]   # Column A: job number
             promise_col = cols[5]  # Column F: promise date
 
@@ -1227,6 +1235,12 @@ class ReportingModule(BaseModule):
             try:
                 with open(history_file, 'r', encoding='utf-8') as f:
                     history = json.load(f)
+                # Prune entries not updated in the last 180 days
+                cutoff = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d %H:%M:%S')
+                history = {
+                    k: v for k, v in history.items()
+                    if v.get('last_updated', '') >= cutoff
+                }
             except Exception:
                 history = {}
 
@@ -1388,7 +1402,7 @@ class ReportingModule(BaseModule):
                         cell_length = len(str(cell.value))
                         if cell_length > max_length:
                             max_length = cell_length
-                except:
+                except Exception:
                     pass
 
             adjusted_width = min(max_length + 2, 50)

@@ -387,8 +387,8 @@ Search across all customers and jobs.</p>
         readme_path = Path(__file__).parent / 'README.md'
         try:
             content = readme_path.read_text(encoding='utf-8')
-        except Exception:
-            QMessageBox.warning(self, "User Guide", "README.md could not be found.")
+        except Exception as e:
+            QMessageBox.warning(self, "User Guide", f"README.md could not be opened:\n{e}")
             return
 
         dialog = QDialog(self)

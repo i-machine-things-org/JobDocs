@@ -13,7 +13,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap
 from pathlib import Path
+import atexit
 import os
+import shutil
 import struct
 import tempfile
 
@@ -312,6 +314,7 @@ class DropZone(QFrame):
             return []
 
         tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
+        atexit.register(shutil.rmtree, tmp_dir, True)
         files = []
         for idx, raw_id in enumerate(item_ids):
             subj = subjects[idx] if idx < len(subjects) else ''
@@ -366,6 +369,12 @@ class DropZone(QFrame):
                             print(f'[DropZone] Skipping image attachment: {att_name}', flush=True)
                             continue
                         att_path = os.path.join(tmp_dir, att_name)
+                        if os.path.exists(att_path):
+                            base, ext = os.path.splitext(att_name)
+                            counter = 1
+                            while os.path.exists(att_path):
+                                att_path = os.path.join(tmp_dir, f"{base}_{counter}{ext}")
+                                counter += 1
                         att.SaveAsFile(att_path)
                         if os.path.exists(att_path) and os.path.getsize(att_path) > 0:
                             print(f'[DropZone] MAPI attachment: {att_name}', flush=True)
@@ -516,6 +525,7 @@ class DropZone(QFrame):
             return []
 
         tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
+        atexit.register(shutil.rmtree, tmp_dir, True)
         return DropZone._mapi_save_email(raw_id, subject, tmp_dir, 0)
 
     @staticmethod
@@ -553,6 +563,7 @@ class DropZone(QFrame):
             print(f"[DropZone] Could not parse descriptor: {e}", flush=True)
 
         tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
+        atexit.register(shutil.rmtree, tmp_dir, True)
         email_path = os.path.join(tmp_dir, filename)
         try:
             with open(email_path, 'wb') as f:
@@ -571,7 +582,7 @@ class DropZone(QFrame):
             return [email_path]
 
     @staticmethod
-    def _expand_zip(zip_path: str, extract_dir: str) -> list:    def _expand_zip(zip_path: str, extract_dir: str) -> list:
+    def _expand_zip(zip_path: str, extract_dir: str) -> list:
         """Extract a zip file and return paths of its contents. Returns [zip_path] on failure."""
         import zipfile
         try:
@@ -584,10 +595,16 @@ class DropZone(QFrame):
                     if not name:
                         continue
                     dest = os.path.join(extract_dir, name)
+                    if os.path.exists(dest):
+                        base, ext = os.path.splitext(name)
+                        counter = 1
+                        while os.path.exists(dest):
+                            dest = os.path.join(extract_dir, f"{base}_{counter}{ext}")
+                            counter += 1
                     with zf.open(member) as src, open(dest, 'wb') as dst:
                         dst.write(src.read())
                     extracted.append(dest)
-                    print(f"[DropZone] Extracted from zip: {name}", flush=True)
+                    print(f"[DropZone] Extracted from zip: {os.path.basename(dest)}", flush=True)
                 if extracted:
                     return extracted
         except Exception as e:
