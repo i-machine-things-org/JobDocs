@@ -71,6 +71,8 @@ WelcomeLabel2=This will install JobDocs on your computer.%n%nJobDocs helps you m
 FinishedLabel=JobDocs has been installed successfully!%n%nYou can now find JobDocs in the Start Menu and on your Desktop (if selected).%n%nClick Finish to complete the installation.
 
 [Registry]
+; Clean up any HKCU key left by older installs (before registry scope was changed to HKLM)
+Root: HKCU; Subkey: "Software\\JobDocs"; Flags: deletekey uninsneverundelete
 Root: HKLM; Subkey: "Software\\JobDocs"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey
 '''
 

@@ -25,14 +25,14 @@ If Windows shows a security warning:
 
 LINUX INSTALLATION (DEBIAN/UBUNTU)
 -----------------------------------
-1. Download: jobdocs_VERSION_all.deb
+1. Download: jobdocs_<VERSION>_all.deb  (replace <VERSION> with the release number)
    from https://github.com/i-machine-things/JobDocs/releases
 2. Double-click the file (Software Center opens)
 3. Click "Install"
 4. Done! Find JobDocs in your applications menu
 
 Or from command line:
-  sudo apt install ./jobdocs_VERSION_all.deb
+  sudo apt install ./jobdocs_<VERSION>_all.deb
 
 
 FIRST TIME SETUP

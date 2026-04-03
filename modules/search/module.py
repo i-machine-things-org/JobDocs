@@ -134,7 +134,7 @@ class SearchWorker(QThread):
                     if match:
                         try:
                             mod_time = datetime.fromtimestamp(Path(job_docs_path).stat().st_mtime)
-                        except (OSError, FileNotFoundError):
+                        except OSError:
                             mod_time = datetime.now()
 
                         result = {
@@ -177,7 +177,7 @@ class SearchWorker(QThread):
 
                         try:
                             mod_time = datetime.fromtimestamp(Path(file_path).stat().st_mtime)
-                        except (OSError, FileNotFoundError):
+                        except OSError:
                             mod_time = datetime.now()
 
                         name_no_ext = os.path.splitext(filename)[0]
@@ -244,7 +244,7 @@ class SearchWorker(QThread):
 
                     try:
                         mod_time = datetime.fromtimestamp(Path(root).stat().st_mtime)
-                    except (OSError, FileNotFoundError):
+                    except OSError:
                         mod_time = datetime.now()
 
                     result = {
@@ -755,7 +755,7 @@ class SearchModule(BaseModule):
         if os.path.exists(bp_path):
             try:
                 same = os.path.samefile(source_path, bp_path)
-            except (OSError, FileNotFoundError):
+            except OSError:
                 same = False
             if not same:
                 self.show_error(

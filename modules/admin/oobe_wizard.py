@@ -22,8 +22,7 @@ class OOBEWizard(QDialog):
     2. Directory configuration
     3. Link type selection
     4. Network sharing setup (optional)
-    5. User authentication setup (optional)
-    6. Completion
+    5. Completion
     """
 
     def __init__(self, app_context, parent=None):
@@ -68,7 +67,6 @@ class OOBEWizard(QDialog):
             self._create_directories_page(),
             self._create_link_type_page(),
             self._create_network_sharing_page(),
-            self._create_user_auth_page(),
             self._create_completion_page()
         ]
 
@@ -495,136 +493,6 @@ class OOBEWizard(QDialog):
 
         return widget
 
-    def _create_user_auth_page(self) -> QWidget:
-        """Create user authentication setup page"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(15)
-
-        intro = QLabel(
-            "<b>User Accounts (Optional)</b><br>"
-            "<span style='color: #666;'>Track who is using JobDocs</span>"
-        )
-        intro.setWordWrap(True)
-        intro.setTextFormat(Qt.TextFormat.RichText)
-        layout.addWidget(intro)
-
-        explanation = QLabel(
-            "User accounts let you control who can use JobDocs and keep track of who's doing what. "
-            "This is useful for teams who want to monitor usage."
-        )
-        explanation.setWordWrap(True)
-        explanation.setStyleSheet("color: #444; background-color: #f0f8ff; padding: 10px; border-radius: 5px;")
-        layout.addWidget(explanation)
-
-        # Check if user_auth module is available
-        user_auth_available = self._check_user_auth_available()
-
-        if not user_auth_available:
-            warning_box = QGroupBox("⚠️ Feature Not Available")
-            warning_layout = QVBoxLayout(warning_box)
-            warning_box.setStyleSheet("QGroupBox { border: 2px solid #ffc107; border-radius: 8px; padding: 10px; }")
-
-            warning = QLabel(
-                "The user accounts feature is not currently available on your system.\n\n"
-                "This is an advanced feature that needs to be enabled manually."
-            )
-            warning.setWordWrap(True)
-            warning_layout.addWidget(warning)
-
-            tech_note = QLabel(
-                "<b>For technical users:</b><br>"
-                "To enable this feature, rename the folder 'modules/_user_auth' to 'modules/user_auth' "
-                "and restart JobDocs."
-            )
-            tech_note.setTextFormat(Qt.TextFormat.RichText)
-            tech_note.setWordWrap(True)
-            tech_note.setStyleSheet("color: #666; font-size: 11px; margin-top: 10px; padding: 8px; background-color: #f5f5f5;")
-            warning_layout.addWidget(tech_note)
-
-            layout.addWidget(warning_box)
-
-            self.enable_user_auth_check = QCheckBox("Enable user accounts (not available)")
-            self.enable_user_auth_check.setEnabled(False)
-            self.enable_user_auth_check.setChecked(False)
-            self.enable_user_auth_check.setStyleSheet("color: #999;")
-            layout.addWidget(self.enable_user_auth_check)
-        else:
-            self.enable_user_auth_check = QCheckBox("✓ Enable user accounts")
-            self.enable_user_auth_check.setStyleSheet("font-weight: bold; font-size: 13px;")
-            self.enable_user_auth_check.setChecked(self.settings.get('user_auth_enabled', False))
-            layout.addWidget(self.enable_user_auth_check)
-
-            # Network users file section
-            network_users_box = QGroupBox("Shared User Accounts (For Teams)")
-            network_users_layout = QVBoxLayout(network_users_box)
-
-            network_users_desc = QLabel(
-                "For multi-machine setups, you can share user accounts across the team. "
-                "This allows admins to create accounts on one machine that work on all machines."
-            )
-            network_users_desc.setWordWrap(True)
-            network_users_desc.setStyleSheet("color: #444; margin-bottom: 8px;")
-            network_users_layout.addWidget(network_users_desc)
-
-            # Auto-search button
-            search_layout = QHBoxLayout()
-            search_btn = QPushButton("🔍 Auto-Search for Shared Users File")
-            search_btn.setStyleSheet("padding: 8px; background-color: #0078d4; color: white; font-weight: bold;")
-            search_btn.clicked.connect(self._auto_search_users_file)
-            search_layout.addWidget(search_btn)
-            search_layout.addStretch()
-            network_users_layout.addLayout(search_layout)
-
-            # Manual path input
-            users_path_label = QLabel("Or manually specify path:")
-            users_path_label.setStyleSheet("margin-top: 10px; color: #666;")
-            network_users_layout.addWidget(users_path_label)
-
-            users_path_layout = QHBoxLayout()
-            self.network_users_edit = QLineEdit(self.settings.get('network_users_path', ''))
-            self.network_users_edit.setPlaceholderText(r"Example: \\server\shared\jobdocs-users.json")
-            self.network_users_edit.setStyleSheet("padding: 8px;")
-            users_path_layout.addWidget(self.network_users_edit)
-
-            users_browse_btn = QPushButton("Browse...")
-            users_browse_btn.setStyleSheet("padding: 8px; min-width: 80px;")
-            users_browse_btn.clicked.connect(lambda: self._browse_file(
-                self.network_users_edit,
-                "jobdocs-users.json"
-            ))
-            users_path_layout.addWidget(users_browse_btn)
-            network_users_layout.addLayout(users_path_layout)
-
-            layout.addWidget(network_users_box)
-
-            benefits_box = QGroupBox("What You Get")
-            benefits_layout = QVBoxLayout(benefits_box)
-
-            info = QLabel(
-                "✓ Users must log in with a username and password\n"
-                "✓ Track who is using the system\n"
-                "✓ Manage user accounts from the Admin tab\n"
-                "✓ Optional: audit user actions"
-            )
-            info.setWordWrap(True)
-            info.setStyleSheet("color: #444; line-height: 1.6;")
-            benefits_layout.addWidget(info)
-
-            layout.addWidget(benefits_box)
-
-        # Help note
-        help_note = QLabel(
-            "💡 You can skip this for now and enable it later if needed"
-        )
-        help_note.setStyleSheet("color: #0078d4; font-size: 11px; font-style: italic; margin-top: 10px;")
-        help_note.setWordWrap(True)
-        layout.addWidget(help_note)
-
-        layout.addStretch()
-
-        return widget
-
     def _create_completion_page(self) -> QWidget:
         """Create completion page"""
         widget = QWidget()
@@ -706,7 +574,6 @@ class OOBEWizard(QDialog):
             "Directory Configuration",
             "Link Type Selection",
             "Network Sharing",
-            "User Authentication",
             "Setup Complete"
         ]
         self.title_label.setText(f"Step {self.current_page + 1} of {len(self.pages)}: {titles[self.current_page]}")
@@ -797,14 +664,6 @@ class OOBEWizard(QDialog):
                 self.settings['network_settings_path'] = self.network_settings_edit.text().strip()
                 self.settings['network_history_path'] = self.network_history_edit.text().strip()
 
-        elif self.current_page == 4:  # User auth page
-            self.settings['user_auth_enabled'] = self.enable_user_auth_check.isChecked()
-
-            # Save network users path if configured
-            if hasattr(self, 'network_users_edit'):
-                network_users_path = self.network_users_edit.text().strip()
-                self.settings['network_users_path'] = network_users_path
-
         return True
 
     def finish(self):
@@ -812,13 +671,9 @@ class OOBEWizard(QDialog):
         if not self._validate_page():
             return
 
-        # Save all settings
-        self.app_context.settings.update(self.settings)
-        self.app_context.save_settings()
-
-        # Mark OOBE as completed
+        # Mark OOBE as completed and save all settings in one call
         self.settings['oobe_completed'] = True
-        self.app_context.settings['oobe_completed'] = True
+        self.app_context.settings.update(self.settings)
         self.app_context.save_settings()
 
         self.accept()
@@ -834,7 +689,7 @@ class OOBEWizard(QDialog):
     def _auto_setup_directories(self):
         """Auto-setup standard directory structure from root folder"""
         from pathlib import Path
-        from PyQt6.QtWidgets import QMessageBox, QInputDialog
+        from PyQt6.QtWidgets import QMessageBox
         import platform
         import json
 
@@ -864,7 +719,6 @@ class OOBEWizard(QDialog):
 
         network_settings_path = network_folder / "shared_settings.json"
         network_history_path = network_folder / "shared_history.json"
-        network_users_path = network_folder / "shared_users.json"
 
         # Show confirmation
         msg = QMessageBox(self)
@@ -876,40 +730,13 @@ class OOBEWizard(QDialog):
             f"👥 Customer Files: {customer_files_path}\n"
             f"🔧 Network Settings (hidden): {network_folder}\n\n"
             f"This will also:\n"
-            f"  ✓ Enable team sharing\n"
-            f"  ✓ Enable user accounts\n"
-            f"  ✓ Create initial admin user\n\n"
+            f"  ✓ Enable team sharing\n\n"
             f"Continue?"
         )
         msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         msg.setDefaultButton(QMessageBox.StandardButton.Yes)
 
         if msg.exec() != QMessageBox.StandardButton.Yes:
-            return
-
-        # Prompt for admin username and password
-        username, ok = QInputDialog.getText(
-            self,
-            "Create Admin Account",
-            "Enter admin username:",
-            text="admin"
-        )
-
-        if not ok or not username.strip():
-            QMessageBox.warning(self, "Cancelled", "Auto-setup cancelled. Admin account is required.")
-            return
-
-        username = username.strip().lower()
-
-        password, ok = QInputDialog.getText(
-            self,
-            "Create Admin Account",
-            f"Enter password for '{username}':",
-            QLineEdit.EchoMode.Password
-        )
-
-        if not ok or not password:
-            QMessageBox.warning(self, "Cancelled", "Auto-setup cancelled. Password is required.")
             return
 
         # Create directories
@@ -925,43 +752,6 @@ class OOBEWizard(QDialog):
                     subprocess.run(['attrib', '+H', str(network_folder)], check=False)
                 except OSError:
                     pass  # Not critical if this fails
-
-            # Create initial admin user in network users file
-            try:
-                from modules.user_auth.user_auth import UserAuth
-            except ImportError:
-                from PyQt6.QtWidgets import QMessageBox
-                QMessageBox.warning(self, "Setup Warning",
-                                    "User authentication module is not available. "
-                                    "Admin user was not created.")
-                return
-            import hashlib
-            import secrets
-
-            # Hash password using the same scheme as UserAuth.create_user:
-            # PBKDF2-HMAC-SHA256, 100000 iterations, 32-byte hex salt
-            salt = secrets.token_hex(32)
-            password_hash = hashlib.pbkdf2_hmac(
-                'sha256',
-                password.encode('utf-8'),
-                bytes.fromhex(salt),
-                100000
-            ).hex()
-
-            # Create users.json with admin user
-            users_data = {
-                username: {
-                    "password_hash": password_hash,
-                    "salt": salt,
-                    "full_name": "",
-                    "is_admin": True,
-                    "created": None,
-                    "last_login": None
-                }
-            }
-
-            with open(network_users_path, 'w') as f:
-                json.dump(users_data, f, indent=2)
 
             # Create empty network settings and history files
             with open(network_settings_path, 'w') as f:
@@ -979,16 +769,9 @@ class OOBEWizard(QDialog):
                 self.network_settings_edit.setText(str(network_settings_path))
             if hasattr(self, 'network_history_edit'):
                 self.network_history_edit.setText(str(network_history_path))
-            if hasattr(self, 'network_users_edit'):
-                self.network_users_edit.setText(str(network_users_path))
-
             # Enable network sharing checkbox
             if hasattr(self, 'enable_network_check'):
                 self.enable_network_check.setChecked(True)
-
-            # Enable user auth checkbox
-            if hasattr(self, 'enable_user_auth_check'):
-                self.enable_user_auth_check.setChecked(True)
 
             # Apply all recommended settings directly to self.settings
             # Directory paths
@@ -1012,10 +795,6 @@ class OOBEWizard(QDialog):
             self.settings['network_settings_path'] = str(network_settings_path)
             self.settings['network_history_path'] = str(network_history_path)
 
-            # User authentication (enabled for team use)
-            self.settings['user_auth_enabled'] = True
-            self.settings['network_users_path'] = str(network_users_path)
-
             # Mark OOBE as completed
             self.settings['oobe_completed'] = True
 
@@ -1030,10 +809,8 @@ class OOBEWizard(QDialog):
                 f"✓ JobDocs has been configured for team use!\n\n"
                 f"📐 Blueprints: {blueprints_path}\n"
                 f"👥 Customer Files: {customer_files_path}\n"
-                f"🔧 Network Settings: {network_folder}\n"
-                f"👤 Admin User: {username}\n\n"
-                f"Configuration saved. JobDocs will now restart.\n"
-                f"Log in with your admin credentials to get started."
+                f"🔧 Network Settings: {network_folder}\n\n"
+                f"Configuration saved successfully."
             )
 
             # Accept the wizard (close and mark as completed)
@@ -1083,116 +860,3 @@ class OOBEWizard(QDialog):
         """Enable/disable network path fields"""
         self.network_group.setEnabled(enabled)
 
-    def _check_user_auth_available(self) -> bool:
-        """Check if user_auth module is available"""
-        try:
-            from modules.user_auth.user_auth import UserAuth
-            return True
-        except ImportError:
-            return False
-
-    def _auto_search_users_file(self):
-        """Automatically search for network users file in common locations"""
-        import os
-
-        search_locations = []
-
-        # Prefer live UI values so unsaved changes on the network page are respected
-        network_settings_path = (
-            self.network_settings_edit.text().strip()
-            if hasattr(self, 'network_settings_edit')
-            else self.settings.get('network_settings_path', '')
-        )
-        network_history_path = (
-            self.network_history_edit.text().strip()
-            if hasattr(self, 'network_history_edit')
-            else self.settings.get('network_history_path', '')
-        )
-
-        if network_settings_path:
-            # Search in same directory as network settings
-            settings_dir = Path(network_settings_path).parent
-            search_locations.append(settings_dir / 'jobdocs-users.json')
-            search_locations.append(settings_dir / 'users.json')
-            search_locations.append(settings_dir / '.jobdocs-users.json')
-
-        if network_history_path:
-            # Search in same directory as network history
-            history_dir = Path(network_history_path).parent
-            search_locations.append(history_dir / 'jobdocs-users.json')
-            search_locations.append(history_dir / 'users.json')
-            search_locations.append(history_dir / '.jobdocs-users.json')
-
-        # Search in customer files directory (team might put it there)
-        cf_dir = self.settings.get('customer_files_dir', '')
-        if cf_dir:
-            cf_path = Path(cf_dir).parent
-            search_locations.append(cf_path / 'jobdocs-users.json')
-            search_locations.append(cf_path / '.jobdocs-users.json')
-
-        # Search common network share patterns on Windows
-        if os.name == 'nt':
-            # Check for mapped drives
-            for drive in 'GHIJKLMNOPQRSTUVWXYZ':
-                drive_path = Path(f'{drive}:/')
-                if drive_path.exists():
-                    search_locations.append(drive_path / 'jobdocs' / 'jobdocs-users.json')
-                    search_locations.append(drive_path / 'shared' / 'jobdocs-users.json')
-
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_locations = []
-        for loc in search_locations:
-            if str(loc) not in seen:
-                seen.add(str(loc))
-                unique_locations.append(loc)
-
-        # Search for existing files
-        found_files = []
-        for location in unique_locations:
-            if location.exists():
-                found_files.append(location)
-
-        if not found_files:
-            QMessageBox.information(
-                self,
-                "No Users File Found",
-                "Could not find a shared users file in common locations.\n\n"
-                "Searched in:\n" + "\n".join(f"  • {loc}" for loc in unique_locations[:5]) +
-                ("\n  • ..." if len(unique_locations) > 5 else "") + "\n\n"
-                "You can:\n"
-                "  • Create users on this machine (they'll be local only)\n"
-                "  • Manually specify the network users file path below\n"
-                "  • Have your admin set up the users file on the network"
-            )
-            return
-
-        # Found one or more files
-        if len(found_files) == 1:
-            # Only one file found - use it
-            self.network_users_edit.setText(str(found_files[0]))
-            QMessageBox.information(
-                self,
-                "Found Shared Users File!",
-                f"Found and selected:\n{found_files[0]}\n\n"
-                "You can now use user accounts managed by your admin."
-            )
-        else:
-            # Multiple files found - let user choose
-            from PyQt6.QtWidgets import QInputDialog
-            file_names = [str(f) for f in found_files]
-            choice, ok = QInputDialog.getItem(
-                self,
-                "Multiple Users Files Found",
-                "Select the correct users file:",
-                file_names,
-                0,
-                False
-            )
-            if ok and choice:
-                self.network_users_edit.setText(choice)
-                QMessageBox.information(
-                    self,
-                    "Users File Selected",
-                    f"Selected:\n{choice}"
-                )

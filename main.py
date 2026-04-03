@@ -426,6 +426,8 @@ Search across all customers and jobs.</p>
             # Wizard already updated app_context.settings and saved — sync main window
             self.settings = self.app_context.settings
             self.apply_ui_style()
+            from shared.widgets import DropZone
+            DropZone.set_skip_image_attachments(self.settings.get('skip_image_attachments', True))
 
     # ==================== UI Helpers ====================
 

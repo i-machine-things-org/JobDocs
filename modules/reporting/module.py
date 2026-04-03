@@ -292,7 +292,7 @@ class ReportingModule(BaseModule):
             self.delivery_df.columns = ['_delivery_job_id', 'Promise Date']
             # Normalize job ID to string for joining
             self.delivery_df['_delivery_job_id'] = (
-                self.delivery_df['_delivery_job_id'].astype(str).str.strip()
+                self.delivery_df['_delivery_job_id'].fillna('').astype(str).str.strip()
             )
             # Convert promise date to date only
             self.delivery_df['Promise Date'] = pd.to_datetime(

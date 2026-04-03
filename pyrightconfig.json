@@ -1,0 +1,6 @@
+{
+  // PyQt6 loads widget attributes dynamically via uic.loadUi(), which Pylance
+  // cannot statically resolve. These suppressions silence the resulting false positives.
+  "reportPrivateImportUsage": "none",
+  "reportAttributeAccessIssue": "none"
+}

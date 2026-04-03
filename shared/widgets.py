@@ -355,8 +355,9 @@ class DropZone(QFrame):
                 return fallback
             # Truncate to 200 chars (preserving extension) to stay under OS limits
             base, ext = os.path.splitext(name)
-            if len(base) > 200 - len(ext):
-                name = base[:200 - len(ext)] + ext
+            max_base = max(0, 200 - len(ext))
+            if len(base) > max_base:
+                name = base[:max_base] + ext
             return name
 
         def _save_mail_item(mail_item, tag: str) -> list:
@@ -556,6 +557,7 @@ class DropZone(QFrame):
         """Save the Outlook virtual-file bytes to a temp file, then extract attachments."""
         try:
             descriptor_bytes = bytes(mime_data.data(descriptor_fmt))
+            # CFSTR_FILECONTENTS has no W variant per Windows OLE spec — always 'FileContents'
             content_bytes = bytes(mime_data.data('FileContents'))
         except Exception as e:
             print(f"[DropZone] Could not read Outlook mime data: {e}", flush=True)
@@ -604,18 +606,27 @@ class DropZone(QFrame):
         else:
             return [email_path]
 
-    @staticmethod
-    def _expand_zip(zip_path: str, extract_dir: str) -> list:
+    @classmethod
+    def _expand_zip(cls, zip_path: str, extract_dir: str) -> list:
         """Extract a zip file and return paths of its contents. Returns [zip_path] on failure."""
         import zipfile
+        _MAX_FILES = 100
+        _MAX_UNCOMPRESSED = 100 * 1024 * 1024  # 100 MB
         try:
             with zipfile.ZipFile(zip_path, 'r') as zf:
+                members = [m for m in zf.infolist() if not m.is_dir() and os.path.basename(m.filename)]
+                if len(members) > _MAX_FILES:
+                    print(f"[DropZone] zip has {len(members)} files; skipping (limit {_MAX_FILES})", flush=True)
+                    return [zip_path]
+                total_size = sum(m.file_size for m in members)
+                if total_size > _MAX_UNCOMPRESSED:
+                    print(f"[DropZone] zip uncompressed size {total_size} bytes exceeds limit; skipping", flush=True)
+                    return [zip_path]
                 extracted = []
-                for member in zf.infolist():
-                    if member.is_dir():
-                        continue
+                for member in members:
                     name = os.path.basename(member.filename)
-                    if not name:
+                    if cls._SKIP_EXTS and os.path.splitext(name)[1].lower() in cls._SKIP_EXTS:
+                        print(f"[DropZone] zip: skipping image {name}", flush=True)
                         continue
                     dest = os.path.join(extract_dir, name)
                     if os.path.exists(dest):
