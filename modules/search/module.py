@@ -753,7 +753,11 @@ class SearchModule(BaseModule):
 
         did_link = False
         if os.path.exists(bp_path):
-            if not os.path.samefile(source_path, bp_path):
+            try:
+                same = os.path.samefile(source_path, bp_path)
+            except (OSError, FileNotFoundError):
+                same = False
+            if not same:
                 self.show_error(
                     "Blueprints Conflict",
                     f"A different file named '{filename}' is already linked in the blueprints folder.\n\n"

@@ -282,6 +282,9 @@ class JobDocsMainWindow(QMainWindow):
         readme_action = help_menu.addAction("&User Guide (README)")  # pyright: ignore[reportOptionalMemberAccess]
         readme_action.triggered.connect(self.show_readme)  # pyright: ignore[reportOptionalMemberAccess]
 
+        setup_wizard_action = help_menu.addAction("&Run Setup Wizard...")  # pyright: ignore[reportOptionalMemberAccess]
+        setup_wizard_action.triggered.connect(self.run_setup_wizard)  # pyright: ignore[reportOptionalMemberAccess]
+
         help_menu.addSeparator()  # pyright: ignore[reportOptionalMemberAccess]
 
         about_action = help_menu.addAction("&About")  # pyright: ignore[reportOptionalMemberAccess]
@@ -410,6 +413,19 @@ Search across all customers and jobs.</p>
         layout.addWidget(btn)
 
         dialog.exec()
+
+    def run_setup_wizard(self):
+        """Launch the first-time setup wizard manually from Help menu"""
+        try:
+            from modules.admin.oobe_wizard import OOBEWizard
+        except ImportError:
+            QMessageBox.warning(self, "Setup Wizard", "Setup wizard is not available.")
+            return
+        wizard = OOBEWizard(self.app_context, self)
+        if wizard.exec():
+            # Wizard already updated app_context.settings and saved — sync main window
+            self.settings = self.app_context.settings
+            self.apply_ui_style()
 
     # ==================== UI Helpers ====================
 

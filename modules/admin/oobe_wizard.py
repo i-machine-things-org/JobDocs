@@ -29,7 +29,8 @@ class OOBEWizard(QDialog):
     def __init__(self, app_context, parent=None):
         super().__init__(parent)
         self.app_context = app_context
-        self.settings = app_context.settings.copy()
+        import copy
+        self.settings = copy.deepcopy(app_context.settings)
 
         self.setWindowTitle("JobDocs First-Time Setup")
         self.setModal(True)
@@ -922,20 +923,23 @@ class OOBEWizard(QDialog):
                 import subprocess
                 try:
                     subprocess.run(['attrib', '+H', str(network_folder)], check=False)
-                except:
+                except OSError:
                     pass  # Not critical if this fails
 
             # Create initial admin user in network users file
             try:
                 from modules.user_auth.user_auth import UserAuth
             except ImportError:
-                self._show_error("User authentication module is not available. "
-                                 "Admin user was not created.")
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Setup Warning",
+                                    "User authentication module is not available. "
+                                    "Admin user was not created.")
                 return
             import hashlib
             import secrets
 
-            # Generate salt and hash password
+            # Hash password using the same scheme as UserAuth.create_user:
+            # PBKDF2-HMAC-SHA256, 100000 iterations, 32-byte hex salt
             salt = secrets.token_hex(32)
             password_hash = hashlib.pbkdf2_hmac(
                 'sha256',
@@ -1093,9 +1097,17 @@ class OOBEWizard(QDialog):
 
         search_locations = []
 
-        # If network settings are configured, search near those files
-        network_settings_path = self.settings.get('network_settings_path', '')
-        network_history_path = self.settings.get('network_history_path', '')
+        # Prefer live UI values so unsaved changes on the network page are respected
+        network_settings_path = (
+            self.network_settings_edit.text().strip()
+            if hasattr(self, 'network_settings_edit')
+            else self.settings.get('network_settings_path', '')
+        )
+        network_history_path = (
+            self.network_history_edit.text().strip()
+            if hasattr(self, 'network_history_edit')
+            else self.settings.get('network_history_path', '')
+        )
 
         if network_settings_path:
             # Search in same directory as network settings

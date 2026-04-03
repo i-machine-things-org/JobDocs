@@ -32,7 +32,7 @@ LINUX INSTALLATION (DEBIAN/UBUNTU)
 4. Done! Find JobDocs in your applications menu
 
 Or from command line:
-  sudo apt install ./jobdocs_all.deb
+  sudo apt install ./jobdocs_VERSION_all.deb
 
 
 FIRST TIME SETUP
