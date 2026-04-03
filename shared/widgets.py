@@ -349,7 +349,13 @@ class DropZone(QFrame):
 
         def _safe_filename(s: str, fallback: str) -> str:
             name = re.sub(r'[\\/:*?"<>|]', '_', s).strip() if s else ''
-            return name or fallback
+            if not name:
+                return fallback
+            # Truncate to 200 chars (preserving extension) to stay under OS limits
+            base, ext = os.path.splitext(name)
+            if len(base) > 200 - len(ext):
+                name = base[:200 - len(ext)] + ext
+            return name
 
         def _save_mail_item(mail_item, tag: str) -> list:
             """Save a MAPI MailItem and its attachments; return list of paths."""
@@ -634,6 +640,7 @@ class DropZone(QFrame):
 
         if extract_dir is None:
             extract_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
+            _dropzone_tmp_dirs.append(extract_dir)
 
         try:
             with open(eml_path, 'rb') as f:
@@ -680,6 +687,7 @@ class DropZone(QFrame):
         """Extract attachments from a .msg file."""
         if extract_dir is None:
             extract_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
+            _dropzone_tmp_dirs.append(extract_dir)
 
         # Try extract-msg (pip install extract-msg)
         try:

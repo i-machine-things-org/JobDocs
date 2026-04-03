@@ -780,13 +780,13 @@ class SearchModule(BaseModule):
                 msg.setWindowTitle("Blueprints Path")
                 msg.setText(f"'{filename}' was linked to the blueprints folder.\nPath copied to clipboard.")
                 msg.setIcon(QMessageBox.Icon.Information)
+                msg.setStandardButtons(QMessageBox.StandardButton.Ok)
                 dont_show = QCheckBox("Don't show this again")
                 msg.setCheckBox(dont_show)
-                msg.exec()
-                if dont_show.isChecked():
+                result = msg.exec()
+                if result == QMessageBox.StandardButton.Ok and dont_show.isChecked():
                     self.app_context.set_setting('suppress_bp_link_notification', True)
-                    self.app_context.save_settings()
-            else:
+                    self.app_context.save_settings()            else:
                 self.search_status_label.setText(f"Linked '{filename}' to blueprints and copied path")
         else:
             self.search_status_label.setText("Blueprints path copied to clipboard")
