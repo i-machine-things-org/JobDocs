@@ -1317,6 +1317,8 @@ def attach_file_preview(
     The caller must connect currentRowChanged → preview_file.
     """
     list_index = parent_layout.indexOf(files_list)
+    if list_index == -1:
+        raise ValueError("files_list widget is not a direct child of parent_layout")
     parent_layout.removeWidget(files_list)
     files_list.setMaximumHeight(16777215)   # lift any UI-file height cap
 

@@ -177,9 +177,6 @@ class SettingsDialog(QDialog):
             current_default = self.settings.get('default_tab', '')
             if isinstance(current_default, str) and current_default in self._tab_display_names:
                 self.default_tab_combo.setCurrentIndex(self._tab_display_names.index(current_default))
-            elif isinstance(current_default, int) and 0 <= current_default < self.default_tab_combo.count():
-                # Backward-compat: old settings stored an integer index
-                self.default_tab_combo.setCurrentIndex(current_default)
         default_tab_layout.addWidget(self.default_tab_combo)
         default_tab_layout.addStretch()
         options_layout.addLayout(default_tab_layout)

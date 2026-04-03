@@ -12,7 +12,7 @@
 
   ; Name and file
   Name "JobDocs"
-  OutFile "JobDocs-Setup-0.2.0-alpha.exe"
+  OutFile "JobDocs-Setup.exe"
   Unicode True
 
   ; Default installation folder
@@ -88,7 +88,7 @@ Section "JobDocs" SecMain
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\JobDocs" \
                    "Publisher" "JobDocs Developers"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\JobDocs" \
-                   "DisplayVersion" "0.2.0-alpha"
+                   "DisplayVersion" "dev"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\JobDocs" \
                    "URLInfoAbout" "https://github.com/i-machine-things/JobDocs"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\JobDocs" \

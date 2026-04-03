@@ -68,6 +68,7 @@ class ReportingModule(BaseModule):
         self.customer_mapping = {}  # Cached customer mapping from preview
         self.unmatched_customers = []  # Cached unmatched customers from preview
         self.preview_mode = 'columns'  # 'columns' or 'customers'
+        self._aliases_cache = None  # Cached customer aliases (invalidated on save)
 
     def get_name(self) -> str:
         return "Report Fixer"
@@ -594,14 +595,18 @@ class ReportingModule(BaseModule):
 
     def _load_customer_aliases(self) -> dict:
         """Load manual customer name mappings from config file"""
+        if self._aliases_cache is not None:
+            return self._aliases_cache
         alias_file = get_config_dir() / 'customer_aliases.json'
         if alias_file.exists():
             try:
                 with open(alias_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception:
-                pass
-        return {}
+                    self._aliases_cache = json.load(f)
+                    return self._aliases_cache
+            except Exception as e:
+                self._log(f"Warning: could not load customer aliases: {e}")
+        self._aliases_cache = {}
+        return self._aliases_cache
 
     def _save_customer_alias(self, source_name: str, folder_name: str):
         """Save a customer alias mapping"""
@@ -611,6 +616,7 @@ class ReportingModule(BaseModule):
         try:
             with open(alias_file, 'w', encoding='utf-8') as f:
                 json.dump(aliases, f, indent=2)
+            self._aliases_cache = None  # Invalidate cache after write
             self._log(f"Saved alias: '{source_name}' -> '{folder_name}'")
         except Exception as e:
             self._log(f"Warning: Could not save alias: {e}")
@@ -759,6 +765,7 @@ class ReportingModule(BaseModule):
 
         # Read highlighting from previous report
         previous_highlighted_keys = set()
+        wb_prev = None
         try:
             wb_prev = load_workbook(last_report)
             ws_prev = wb_prev.active
@@ -809,13 +816,15 @@ class ReportingModule(BaseModule):
                                 line_str = line_str[:-2]
                             previous_highlighted_keys.add(f"{po_str}|{line_str}")
 
-            wb_prev.close()
             if previous_highlighted_keys:
                 self._log(f"Found {len(previous_highlighted_keys)} highlighted cells in previous report")
             else:
                 self._log("No highlighted cells found in previous report")
         except Exception as e:
             self._log(f"Could not read highlighting from previous report: {e}")
+        finally:
+            if wb_prev is not None:
+                wb_prev.close()
 
         # Determine key columns for job identification
         use_composite_key = False
@@ -985,10 +994,13 @@ class ReportingModule(BaseModule):
 
         try:
             # Apply transformation
-            df_fixed, changed_rows = self._transform_report(self.source_df)
+            df_fixed = self._transform_report(self.source_df)
 
             # Filter out sub-jobs (Job IDs ending in a letter)
             df_fixed = self._filter_letter_suffix_jobs(df_fixed)
+
+            # Track schedule changes after filtering so row indices are correct
+            changed_rows = self._track_schedule_changes(df_fixed)
 
             # Check for completed jobs from previous report (also returns preserved highlights)
             df_fixed, prev_highlighted_keys = self._get_completed_jobs(df_fixed, reports_dir, customer)
@@ -1103,10 +1115,13 @@ class ReportingModule(BaseModule):
 
             try:
                 # Transform this customer's data
-                df_fixed, changed_rows = self._transform_report(customer_df)
+                df_fixed = self._transform_report(customer_df)
 
                 # Filter out sub-jobs (Job IDs ending in a letter)
                 df_fixed = self._filter_letter_suffix_jobs(df_fixed)
+
+                # Track schedule changes after filtering so row indices are correct
+                changed_rows = self._track_schedule_changes(df_fixed)
 
                 # Check for completed jobs from previous report (also returns preserved highlights)
                 df_fixed, prev_highlighted_keys = self._get_completed_jobs(df_fixed, reports_dir, folder_name)
@@ -1221,10 +1236,7 @@ class ReportingModule(BaseModule):
             unique_pos = df_fixed['Customer PO Number'].nunique()
             self._log(f"Updated dates for {unique_pos} unique POs")
 
-            # Track schedule changes
-            changed_rows = self._track_schedule_changes(df_fixed)
-
-        return df_fixed, changed_rows
+        return df_fixed
 
     def _track_schedule_changes(self, df_fixed):
         """Track schedule changes and add notes"""
@@ -1252,12 +1264,13 @@ class ReportingModule(BaseModule):
         changes_found = 0
 
         for idx, row in df_fixed.iterrows():
-            po = str(row.get('Customer PO Number', ''))
+            po_raw = row.get('Customer PO Number', '')
             line = str(row.get('Line', ''))
             current_date = row.get('Scheduled End Date')
 
-            if not po or pd.isna(current_date):
+            if pd.isna(po_raw) or str(po_raw).strip() == '' or pd.isna(current_date):
                 continue
+            po = str(po_raw)
 
             key = f"{po}|{line}"
             current_date_str = str(current_date) if current_date else ''
@@ -1315,6 +1328,9 @@ class ReportingModule(BaseModule):
         # Load and format
         wb = load_workbook(output_file)
         ws = wb.active
+        if ws is None:
+            self._log("Warning: workbook has no active sheet, skipping formatting")
+            return
 
         yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
         red_fill = PatternFill(start_color='FF0000', end_color='FF0000', fill_type='solid')
@@ -1416,7 +1432,9 @@ class ReportingModule(BaseModule):
         max_col = ws.max_column
         table_ref = f"A1:{ws.cell(max_row, max_col).coordinate}"
 
-        table = Table(displayName="DataTable", ref=table_ref)
+        # Use sheet title in table name to avoid collisions if the file is re-opened
+        safe_title = re.sub(r'[^A-Za-z0-9_]', '_', str(ws.title) if ws.title else 'Sheet')
+        table = Table(displayName=f"Table_{safe_title}", ref=table_ref)
         style = TableStyleInfo(
             name="TableStyleMedium2",
             showFirstColumn=False,

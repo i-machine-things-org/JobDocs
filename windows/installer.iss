@@ -6,7 +6,7 @@
 [Setup]
 ; Application information
 AppName=JobDocs
-AppVersion=0.2.0-alpha
+AppVersion=dev
 AppPublisher=JobDocs Developers
 AppPublisherURL=https://github.com/i-machine-things/JobDocs
 AppSupportURL=https://github.com/i-machine-things/JobDocs/issues
@@ -16,7 +16,7 @@ DefaultGroupName=JobDocs
 AllowNoIcons=yes
 LicenseFile=..\LICENSE
 OutputDir=..\
-OutputBaseFilename=JobDocs-Setup-0.2.0-alpha
+OutputBaseFilename=JobDocs-Setup
 SetupIconFile=icon.ico
 Compression=lzma2
 SolidCompression=yes
@@ -26,12 +26,11 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 ; Version information (must be numeric X.X.X.X format)
-VersionInfoVersion=0.2.0.0
 VersionInfoCompany=JobDocs Developers
 VersionInfoDescription=JobDocs Installer
 VersionInfoCopyright=Copyright (C) 2024 JobDocs Developers
 VersionInfoProductName=JobDocs
-VersionInfoProductVersion=0.2.0.0
+VersionInfoVersion=0.0.0.0
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -58,4 +57,4 @@ WelcomeLabel2=This will install JobDocs on your computer.%n%nJobDocs helps you m
 FinishedLabel=JobDocs has been installed successfully!%n%nYou can now find JobDocs in the Start Menu and on your Desktop (if selected).%n%nClick Finish to complete the installation.
 
 [Registry]
-Root: HKCU; Subkey: "Software\JobDocs"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "Software\JobDocs"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey

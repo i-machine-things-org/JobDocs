@@ -1,10 +1,10 @@
 # JobDocs Debian Package
 
-A `.deb` package has been created for JobDocs v0.2.0-alpha.
+A `.deb` package has been created for JobDocs.
 
 ## Package Details
 
-- **File**: `jobdocs_0.2.0-alpha_all.deb`
+- **File**: `jobdocs_VERSION_all.deb` (e.g. `jobdocs_1.0.0_all.deb`)
 - **Size**: 58 KB
 - **Architecture**: all (platform-independent)
 - **Dependencies**: python3 (>= 3.8), python3-pyqt6
@@ -14,14 +14,14 @@ A `.deb` package has been created for JobDocs v0.2.0-alpha.
 To install the package:
 
 ```bash
-sudo dpkg -i jobdocs_0.2.0-alpha_all.deb
+sudo dpkg -i jobdocs_VERSION_all.deb
 sudo apt-get install -f  # Install any missing dependencies
 ```
 
 Or using apt (automatically handles dependencies):
 
 ```bash
-sudo apt install ./jobdocs_0.2.0-alpha_all.deb
+sudo apt install ./jobdocs_VERSION_all.deb
 ```
 
 ## Usage
