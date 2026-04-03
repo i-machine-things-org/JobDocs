@@ -305,6 +305,9 @@ class QuoteModule(BaseModule):
             self.quote_files_list.takeItem(row)
             self.quote_files_list.blockSignals(False)
             del self.quote_files[row]
+            # Update preview for the new selection (or clear if list is now empty)
+            new_row = self.quote_files_list.currentRow()
+            self._on_quote_file_selected(new_row)
 
     def _on_quote_file_selected(self, row: int):
         if self.quote_preview is None:

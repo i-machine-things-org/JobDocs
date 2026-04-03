@@ -294,6 +294,8 @@ class ReportingModule(BaseModule):
             self.delivery_df['_delivery_job_id'] = (
                 self.delivery_df['_delivery_job_id'].fillna('').astype(str).str.strip()
             )
+            # Drop duplicate job IDs — keep first occurrence to avoid row fan-out on merge
+            self.delivery_df = self.delivery_df.drop_duplicates(subset=['_delivery_job_id'], keep='first')
             # Convert promise date to date only
             self.delivery_df['Promise Date'] = pd.to_datetime(
                 self.delivery_df['Promise Date'], errors='coerce'

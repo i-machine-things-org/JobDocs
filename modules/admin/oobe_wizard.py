@@ -655,14 +655,26 @@ class OOBEWizard(QDialog):
                 self.settings['link_type'] = 'hard'
             elif selected == 1:
                 self.settings['link_type'] = 'symbolic'
-            else:
+            elif selected == 2:
                 self.settings['link_type'] = 'copy'
+            # else: no button selected — keep existing/default link_type unchanged
 
         elif self.current_page == 3:  # Network sharing page
             self.settings['network_shared_enabled'] = self.enable_network_check.isChecked()
             if self.enable_network_check.isChecked():
-                self.settings['network_settings_path'] = self.network_settings_edit.text().strip()
-                self.settings['network_history_path'] = self.network_history_edit.text().strip()
+                net_settings = self.network_settings_edit.text().strip()
+                net_history = self.network_history_edit.text().strip()
+                if not net_settings or not net_history:
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.warning(
+                        self,
+                        "Missing Network Paths",
+                        "Please specify both the shared settings path and shared history path, "
+                        "or disable team sharing."
+                    )
+                    return False
+                self.settings['network_settings_path'] = net_settings
+                self.settings['network_history_path'] = net_history
 
         return True
 
@@ -754,10 +766,10 @@ class OOBEWizard(QDialog):
                     pass  # Not critical if this fails
 
             # Create empty network settings and history files
-            with open(network_settings_path, 'w') as f:
+            with open(network_settings_path, 'w', encoding='utf-8') as f:
                 json.dump({}, f, indent=2)
 
-            with open(network_history_path, 'w') as f:
+            with open(network_history_path, 'w', encoding='utf-8') as f:
                 json.dump({"recent_jobs": [], "customers": []}, f, indent=2)
 
             # Update the directory UI fields

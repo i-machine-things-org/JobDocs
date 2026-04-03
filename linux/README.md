@@ -5,7 +5,7 @@ This directory contains everything needed to build a Debian/Ubuntu package for J
 ## Files
 
 - **debian/** - Debian package source directory
-- **jobdocs_all.deb** - Built Debian package (ready to distribute)
+- **jobdocs_\<VERSION\>_all.deb** - Built Debian package (ready to distribute)
 - **PACKAGE_INFO.md** - Installation and usage documentation
 - **README.md** - This file
 
@@ -16,13 +16,13 @@ This directory contains everything needed to build a Debian/Ubuntu package for J
 The `.deb` package is already built and ready to install:
 
 ```bash
-sudo apt install ./jobdocs_all.deb
+sudo apt install ./jobdocs_<VERSION>_all.deb
 ```
 
 Or:
 
 ```bash
-sudo dpkg -i jobdocs_all.deb
+sudo dpkg -i jobdocs_<VERSION>_all.deb
 sudo apt-get install -f  # Install any missing dependencies
 ```
 
@@ -32,13 +32,14 @@ To rebuild the package from source:
 
 ```bash
 cd ..
-dpkg-deb --build linux/debian jobdocs_all.deb
-mv jobdocs_all.deb linux/
+dpkg-deb --build linux/debian jobdocs_<VERSION>_all.deb
+mv jobdocs_<VERSION>_all.deb linux/
 ```
 
 ## Package Details
 
 - **Package name:** jobdocs
+- **Version:** see [PACKAGE_INFO.md](PACKAGE_INFO.md) or the `debian/DEBIAN/control` file
 - **Architecture:** all (platform-independent)
 - **Dependencies:** python3 (>= 3.8), python3-pyqt6
 - **Size:** ~58 KB (dependencies downloaded separately)
@@ -112,7 +113,7 @@ debian/
 
 ## Distribution
 
-Upload `jobdocs_all.deb` to:
+Upload `jobdocs_<VERSION>_all.deb` to:
 - GitHub Releases
 - Personal APT repository
 - Direct download

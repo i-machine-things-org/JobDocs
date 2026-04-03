@@ -8,6 +8,12 @@
   !include "LogicLib.nsh"
 
 ;--------------------------------
+; Version — override at build time with: makensis /DVERSION=1.2.3 installer.nsi
+!ifndef VERSION
+  !define VERSION "0.0.0"
+!endif
+
+;--------------------------------
 ; General
 
   ; Name and file
@@ -90,7 +96,7 @@ Section "JobDocs" SecMain
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\JobDocs" \
                    "Publisher" "JobDocs Developers"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\JobDocs" \
-                   "DisplayVersion" "dev"
+                   "DisplayVersion" "${VERSION}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\JobDocs" \
                    "URLInfoAbout" "https://github.com/i-machine-things/JobDocs"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\JobDocs" \

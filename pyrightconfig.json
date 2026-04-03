@@ -1,6 +1,9 @@
 {
-  // PyQt6 loads widget attributes dynamically via uic.loadUi(), which Pylance
-  // cannot statically resolve. These suppressions silence the resulting false positives.
+  // PyQt6 loads widget attributes dynamically via uic.loadUi(), which Pylance cannot
+  // statically resolve. This produces hundreds of false-positive attribute-access and
+  // private-import errors across the entire codebase. Inline `# type: ignore` on every
+  // dynamically-loaded attribute access would be far noisier than these two global rules.
+  // Re-evaluate if a typed PyQt6 UI stub generator is adopted in future.
   "reportPrivateImportUsage": "none",
   "reportAttributeAccessIssue": "none"
 }
