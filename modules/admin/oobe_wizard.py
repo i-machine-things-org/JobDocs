@@ -133,7 +133,6 @@ class OOBEWizard(QDialog):
             "<li><b>Folder Locations</b> - Where to store blueprints and customer files</li>"
             "<li><b>File Linking</b> - How to save disk space when organizing files</li>"
             "<li><b>Team Sharing</b> - Share settings across your team (optional)</li>"
-            "<li><b>User Accounts</b> - Track who's using JobDocs (optional)</li>"
             "</ol>"
         )
         steps.setWordWrap(True)

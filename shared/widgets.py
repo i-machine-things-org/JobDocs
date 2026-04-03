@@ -439,7 +439,12 @@ class DropZone(QFrame):
 
             # --- 2. Restrict search in Inbox + Sent by subject ---
             if subject:
-                safe_subj = subject.replace("'", "''")
+                # Escape for MAPI SQL equality filter: only single-quotes need doubling.
+                # % and _ are wildcards for LIKE but are literal in = queries.
+                def _mapi_escape(s: str) -> str:
+                    return s.replace("'", "''")
+
+                safe_subj = _mapi_escape(subject)
                 # Also try without a leading "Re: " prefix in case OWA adds one
                 base_subj = re.sub(r'^(re:\s*)+', '', safe_subj, flags=re.IGNORECASE).strip()
                 subjects_to_try = [safe_subj] if safe_subj == base_subj else [safe_subj, base_subj]

@@ -1,9 +1,11 @@
 {
-  // PyQt6 loads widget attributes dynamically via uic.loadUi(), which Pylance cannot
-  // statically resolve. This produces hundreds of false-positive attribute-access and
-  // private-import errors across the entire codebase. Inline `# type: ignore` on every
-  // dynamically-loaded attribute access would be far noisier than these two global rules.
-  // Re-evaluate if a typed PyQt6 UI stub generator is adopted in future.
+  // WHY THESE ARE GLOBAL (not per-line type: ignore):
+  // PyQt6 dynamically injects widget attributes at runtime via uic.loadUi().
+  // Pyright cannot see these attributes statically, producing false-positive
+  // reportAttributeAccessIssue and reportPrivateImportUsage errors on every
+  // widget access throughout the codebase (~300+ sites). Per-line suppression
+  // would require a # type: ignore comment on every single widget access.
+  // Revisit if a typed stub generator for Qt .ui files is adopted in future.
   "reportPrivateImportUsage": "none",
   "reportAttributeAccessIssue": "none"
 }

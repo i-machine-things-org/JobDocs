@@ -11,8 +11,9 @@ Think of it as a filing system for your manufacturing or engineering business.
 
 WINDOWS INSTALLATION - EASY METHOD
 -----------------------------------
-1. Download: JobDocs-Setup.exe  (filename does not include a version number)
+1. Download: JobDocs-Setup.exe
    from https://github.com/i-machine-things/JobDocs/releases
+   Note: the Windows installer filename is always JobDocs-Setup.exe (no version number)
 2. Double-click the file
 3. Click "Next" a few times
 4. Done! Look for the JobDocs icon on your desktop
