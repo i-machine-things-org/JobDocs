@@ -1217,7 +1217,6 @@ class ReportingModule(BaseModule):
                 df_fixed = df_fixed[cols]
 
         # Process Scheduled End Date per PO
-        changed_rows = []
         if 'Customer PO Number' in df_fixed.columns and 'Scheduled End Date' in df_fixed.columns:
             self._log("Processing Scheduled End Date per PO...")
 

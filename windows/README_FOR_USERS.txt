@@ -1,5 +1,5 @@
 ================================================================================
-                              JOBDOCS v0.2.0-alpha
+                                    JOBDOCS
          Blueprint and Job Management System - Installation Guide
 ================================================================================
 
@@ -11,7 +11,7 @@ Think of it as a filing system for your manufacturing or engineering business.
 
 WINDOWS INSTALLATION - EASY METHOD
 -----------------------------------
-1. Download: JobDocs-Setup-0.2.0-alpha.exe
+1. Download: JobDocs-Setup.exe
 2. Double-click the file
 3. Click "Next" a few times
 4. Done! Look for the JobDocs icon on your desktop
@@ -24,13 +24,13 @@ If Windows shows a security warning:
 
 LINUX INSTALLATION (DEBIAN/UBUNTU)
 -----------------------------------
-1. Download: jobdocs_0.2.0-alpha_all.deb
+1. Download: jobdocs_all.deb
 2. Double-click the file (Software Center opens)
 3. Click "Install"
 4. Done! Find JobDocs in your applications menu
 
 Or from command line:
-  sudo apt install ./jobdocs_0.2.0-alpha_all.deb
+  sudo apt install ./jobdocs_all.deb
 
 
 FIRST TIME SETUP
@@ -46,6 +46,9 @@ Just click "Browse" and choose your folders.
 
 PORTABLE VERSION (NO INSTALLATION)
 -----------------------------------
+Download the latest release from:
+  https://github.com/i-machine-things/JobDocs/releases
+
 Windows: Download jobdocs.exe and run it directly
 Linux: Download jobdocs and run it directly
 

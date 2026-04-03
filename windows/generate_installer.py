@@ -20,7 +20,7 @@ def generate_iss_content():
 [Setup]
 ; Application information
 AppName=JobDocs
-AppVersion=dev
+AppVersion=0.0.0
 AppPublisher=JobDocs Developers
 AppPublisherURL=https://github.com/i-machine-things/JobDocs
 AppSupportURL=https://github.com/i-machine-things/JobDocs/issues

@@ -7,25 +7,8 @@ echo JobDocs Windows Installer Build Script
 echo ==========================================
 echo.
 
-REM Read version from VERSION file
-cd ..
-if not exist VERSION (
-    echo ERROR: VERSION file not found
-    pause
-    exit /b 1
-)
-set /p VERSION=<VERSION
-if "%VERSION%"=="" (
-    echo ERROR: VERSION file is empty
-    pause
-    exit /b 1
-)
-cd windows
-echo Version: %VERSION%
-echo.
-
 REM Step 1: Build the executable using the existing script
-echo [Step 1/3] Building JobDocs executable...
+echo [Step 1/2] Building JobDocs executable...
 echo.
 cd ..
 call build_scripts\build_windows.bat
@@ -41,22 +24,8 @@ echo.
 echo ==========================================
 echo.
 
-REM Step 2: Generate installer script with version
-echo [Step 2/3] Generating installer script...
-echo.
-py generate_installer.py "%VERSION%"
-if errorlevel 1 (
-    echo ERROR: Failed to generate installer script
-    pause
-    exit /b 1
-)
-
-echo.
-echo ==========================================
-echo.
-
-REM Step 3: Create installer with Inno Setup
-echo [Step 3/3] Creating installer...
+REM Step 2: Create installer with Inno Setup
+echo [Step 2/2] Creating installer...
 echo.
 
 REM Check if Inno Setup is installed
@@ -98,7 +67,7 @@ echo Build Complete!
 echo ==========================================
 echo.
 echo Output files:
-echo   - Installer: JobDocs-Setup-%VERSION%.exe
+echo   - Installer: JobDocs-Setup.exe
 echo   - Executable: dist\jobdocs.exe
 echo   - Package: JobDocs-Windows\
 echo.
@@ -108,9 +77,5 @@ echo   - Start Menu shortcuts
 echo   - Desktop shortcut (optional)
 echo   - Uninstaller
 echo   - Windows registry integration
-echo.
-echo Next steps:
-echo   - Test the installer: JobDocs-Setup-%VERSION%.exe
-echo   - Upload to GitHub Releases
 echo.
 pause

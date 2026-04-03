@@ -4,11 +4,11 @@
 PyQt6>=6.5.0
 
 # Excel report processing (Report Fixer module)
-pandas>=2.0.0
+pandas>=2.0.0,<3.0.0
 openpyxl>=3.1.0
 
 # PDF preview in file list (Quote module)
-pymupdf>=1.23.0
+pymupdf>=1.24.0
 
 # For building executables (optional)
 # pyinstaller>=6.0.0

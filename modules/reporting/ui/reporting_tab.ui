@@ -427,7 +427,7 @@
          </size>
         </property>
         <property name="styleSheet">
-         <string notr="true">background-color: #1e1e1e; color: #d4d4d4; font-family: monospace;</string>
+         <string notr="true">font-family: monospace;</string>
         </property>
        </widget>
       </item>

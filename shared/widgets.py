@@ -20,6 +20,19 @@ import struct
 import tempfile
 
 
+# Single atexit handler for all DropZone temp directories — avoids accumulating
+# one handler per drag-and-drop operation.
+_dropzone_tmp_dirs: list = []
+
+
+def _cleanup_dropzone_tmp_dirs() -> None:
+    for d in _dropzone_tmp_dirs:
+        shutil.rmtree(d, True)
+
+
+atexit.register(_cleanup_dropzone_tmp_dirs)
+
+
 class DropZone(QFrame):
     """A widget that accepts file drops"""
     files_dropped = pyqtSignal(list)
@@ -316,7 +329,7 @@ class DropZone(QFrame):
             return []
 
         tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
-        atexit.register(shutil.rmtree, tmp_dir, True)
+        _dropzone_tmp_dirs.append(tmp_dir)
         files = []
         for idx, raw_id in enumerate(item_ids):
             subj = subjects[idx] if idx < len(subjects) else ''
@@ -527,7 +540,7 @@ class DropZone(QFrame):
             return []
 
         tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
-        atexit.register(shutil.rmtree, tmp_dir, True)
+        _dropzone_tmp_dirs.append(tmp_dir)
         return DropZone._mapi_save_email(raw_id, subject, tmp_dir, 0)
 
     @staticmethod
@@ -565,7 +578,7 @@ class DropZone(QFrame):
             print(f"[DropZone] Could not parse descriptor: {e}", flush=True)
 
         tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
-        atexit.register(shutil.rmtree, tmp_dir, True)
+        _dropzone_tmp_dirs.append(tmp_dir)
         email_path = os.path.join(tmp_dir, filename)
         try:
             with open(email_path, 'wb') as f:
@@ -639,7 +652,12 @@ class DropZone(QFrame):
                 payload = part.get_payload(decode=True)
                 if not payload:
                     continue
+                base, ext = os.path.splitext(name)
                 dest = os.path.join(extract_dir, name)
+                counter = 1
+                while os.path.exists(dest):
+                    dest = os.path.join(extract_dir, f"{base}_{counter}{ext}")
+                    counter += 1
                 with open(dest, 'wb') as f:
                     f.write(payload)
                 print(f"[DropZone] Extracted from .eml: {name}", flush=True)
@@ -675,7 +693,12 @@ class DropZone(QFrame):
                     if os.path.splitext(name)[1].lower() in DropZone._SKIP_EXTS:
                         print(f"[DropZone] Skipping image attachment: {name}", flush=True)
                         continue
+                    base, ext = os.path.splitext(name)
                     dest = os.path.join(extract_dir, name)
+                    counter = 1
+                    while os.path.exists(dest):
+                        dest = os.path.join(extract_dir, f"{base}_{counter}{ext}")
+                        counter += 1
                     with open(dest, 'wb') as f:
                         f.write(att.data)
                     print(f"[DropZone] Extracted via extract_msg: {name}", flush=True)

@@ -195,7 +195,6 @@ echo.
 echo For help and documentation, see:
 echo   https://github.com/i-machine-things/JobDocs
 echo.
-echo Version: 0.3.0
 echo Build date: %date%
 ) > JobDocs-Windows\README.txt
 
