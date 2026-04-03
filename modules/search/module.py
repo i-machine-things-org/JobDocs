@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget, QMessageBox, QTableWidgetItem, QApplication, QMenu,
     QListWidgetItem, QListWidget, QSplitter, QGroupBox, QVBoxLayout, QCheckBox
 )
+from shared.widgets import FilePreviewWidget
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6 import uic
@@ -289,6 +290,7 @@ class SearchModule(BaseModule):
         self.search_btn = None
         self.cancel_btn = None
         self.folder_contents_list = None
+        self.file_preview: FilePreviewWidget | None = None
 
     def get_name(self) -> str:
         return "Search"
@@ -346,11 +348,20 @@ class SearchModule(BaseModule):
         folder_layout.setContentsMargins(5, 5, 5, 5)
         self.folder_contents_list = QListWidget()
         self.folder_contents_list.setAlternatingRowColors(True)
-        folder_layout.addWidget(self.folder_contents_list)
+
+        self.file_preview = FilePreviewWidget()
+        self.file_preview.setMinimumHeight(80)
+
+        contents_splitter = QSplitter(Qt.Orientation.Vertical)
+        contents_splitter.addWidget(self.folder_contents_list)
+        contents_splitter.addWidget(self.file_preview)
+        contents_splitter.setSizes([200, 180])
+
+        folder_layout.addWidget(contents_splitter)
         folder_group.setLayout(folder_layout)
         splitter.addWidget(folder_group)
 
-        splitter.setSizes([400, 200])
+        splitter.setSizes([400, 280])
         results_layout.insertWidget(0, splitter)
         results_layout.setStretchFactor(splitter, 1)
 
@@ -379,6 +390,7 @@ class SearchModule(BaseModule):
         )
         self.folder_contents_list.doubleClicked.connect(self._open_folder_file)
         self.folder_contents_list.customContextMenuRequested.connect(self._show_file_context_menu)
+        self.folder_contents_list.currentItemChanged.connect(self._on_folder_file_selected)
 
         # Initialize UI state
         self.update_legacy_mode_ui()
@@ -577,6 +589,8 @@ class SearchModule(BaseModule):
         self.search_table.setRowCount(0)
         self.search_results.clear()
         self.folder_contents_list.clear()
+        if self.file_preview is not None:
+            self.file_preview.clear()
         self.search_status_label.setText("")
         self.search_progress.hide()
         self.search_btn.setEnabled(True)
@@ -661,9 +675,24 @@ class SearchModule(BaseModule):
 
     # ==================== Folder Contents Panel ====================
 
+    def _on_folder_file_selected(self, current, previous):
+        """Preview the file selected in the folder contents list"""
+        if self.file_preview is None:
+            return
+        if current is None:
+            self.file_preview.clear()
+            return
+        path = current.data(Qt.ItemDataRole.UserRole)
+        if path and os.path.isfile(path):
+            self.file_preview.preview_file(path)
+        else:
+            self.file_preview.clear()
+
     def _on_result_selected(self, row: int):
         """Populate folder contents list when a search result row is selected"""
         self.folder_contents_list.clear()
+        if self.file_preview is not None:
+            self.file_preview.clear()
         if row < 0 or row >= len(self.search_results):
             return
 
