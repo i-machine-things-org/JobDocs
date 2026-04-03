@@ -11,7 +11,7 @@ A `.deb` package has been created for JobDocs.
 
 ## Installation
 
-To install the package:
+To install the package, replace `VERSION` with the actual version number (e.g. `1.0.0`):
 
 ```bash
 sudo dpkg -i jobdocs_VERSION_all.deb

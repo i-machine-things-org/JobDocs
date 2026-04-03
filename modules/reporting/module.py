@@ -867,8 +867,8 @@ class ReportingModule(BaseModule):
                 key = make_key(row)
                 if key and key not in ('nan|nan', 'nan', ''):
                     current_job_map[key] = idx
-            except Exception:
-                pass
+            except Exception as e:
+                self._log(f"Warning: could not build key for current row {idx}: {e}")
 
         current_jobs = set(current_job_map.keys())
         self._log(f"Current report has {len(current_jobs)} unique jobs")
@@ -894,8 +894,8 @@ class ReportingModule(BaseModule):
                         previous_completed.add(key)
                     else:
                         previous_active.add(key)
-            except Exception:
-                pass
+            except Exception as e:
+                self._log(f"Warning: could not build key for previous row {idx}: {e}")
 
         self._log(f"Previous report: {len(previous_active)} active, {len(previous_completed)} completed")
 
@@ -1396,8 +1396,8 @@ class ReportingModule(BaseModule):
                 promise_val = ws.cell(row=excel_row, column=promise_col).value
                 if sched_val and promise_val:
                     try:
-                        sched_date = pd.to_datetime(sched_val).date() if not hasattr(sched_val, 'date') else sched_val
-                        promise_date = pd.to_datetime(promise_val).date() if not hasattr(promise_val, 'date') else promise_val
+                        sched_date = pd.to_datetime(sched_val).date()
+                        promise_date = pd.to_datetime(promise_val).date()
                         if sched_date > promise_date:
                             ws.cell(row=excel_row, column=sched_col).fill = red_fill
                             ws.cell(row=excel_row, column=promise_col).fill = red_fill

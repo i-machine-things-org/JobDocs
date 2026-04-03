@@ -28,7 +28,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; Version information (must be numeric X.X.X.X format)
 VersionInfoCompany=JobDocs Developers
 VersionInfoDescription=JobDocs Installer
-VersionInfoCopyright=Copyright (C) 2024 JobDocs Developers
+VersionInfoCopyright=Copyright (C) 2026 JobDocs Developers
 VersionInfoProductName=JobDocs
 VersionInfoVersion=0.0.0.0
 

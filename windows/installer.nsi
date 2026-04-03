@@ -65,6 +65,8 @@
 
 Section "JobDocs" SecMain
 
+  SectionIn RO  ; Mark as required — cannot be deselected
+
   SetOutPath "$INSTDIR"
 
   ; Add files

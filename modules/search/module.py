@@ -759,7 +759,17 @@ class SearchModule(BaseModule):
                 os.link(source_path, bp_path)
                 did_link = True
             except OSError as e:
-                self.show_error("Hard Link Failed", str(e))
+                import errno as _errno
+                if e.errno == _errno.EXDEV:
+                    self.show_error(
+                        "Hard Link Failed",
+                        f"Cannot create a hard link across different drives or filesystems.\n\n"
+                        f"Source: {source_path}\n"
+                        f"Destination: {bp_path}\n\n"
+                        f"Ensure both paths are on the same drive."
+                    )
+                else:
+                    self.show_error("Hard Link Failed", str(e))
                 return
 
         QApplication.clipboard().setText(bp_path)
