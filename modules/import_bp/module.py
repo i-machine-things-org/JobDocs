@@ -15,7 +15,7 @@ from PyQt6.QtCore import QTimer
 from PyQt6 import uic
 
 from core.base_module import BaseModule
-from shared.widgets import DropZone
+from shared.widgets import DropZone, attach_file_preview
 
 
 class ImportModule(BaseModule):
@@ -31,6 +31,7 @@ class ImportModule(BaseModule):
         self.import_files_list = None
         self.import_log = None
         self.import_drop_zone = None
+        self.import_preview = None
 
     def get_name(self) -> str:
         return "Import Blueprints"
@@ -75,6 +76,12 @@ class ImportModule(BaseModule):
         widget.clear_btn.clicked.connect(self.clear_import_list)
         widget.import_btn.clicked.connect(self.check_and_import)
 
+        # Attach file preview panel next to the file list
+        self.import_preview = attach_file_preview(
+            self.import_files_list, widget.filesGroup.layout()
+        )
+        self.import_files_list.currentRowChanged.connect(self._on_import_file_selected)
+
         # Customer list will be populated by main window after all modules load
 
         return widget
@@ -100,10 +107,20 @@ class ImportModule(BaseModule):
                 self.import_files.append(f)
                 self.import_files_list.addItem(os.path.basename(f))
 
+    def _on_import_file_selected(self, row: int):
+        if self.import_preview is None:
+            return
+        if 0 <= row < len(self.import_files):
+            self.import_preview.preview_file(self.import_files[row])
+        else:
+            self.import_preview.preview_file(None)
+
     def clear_import_list(self):
         """Clear import file list"""
         self.import_files.clear()
         self.import_files_list.clear()
+        if self.import_preview:
+            self.import_preview.clear()
 
     # ==================== Customer List ====================
 
