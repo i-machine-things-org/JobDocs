@@ -54,7 +54,6 @@ build/
 *.msi
 *.app
 *.deb
-version_resource.txt
 icon.png
 linux/debian/
 linux/*.deb

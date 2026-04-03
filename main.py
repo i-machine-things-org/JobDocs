@@ -47,7 +47,9 @@ class JobDocsMainWindow(QMainWindow):
         'db_password': '',
         'remote_server_path': '',  # Network path or URL for remote settings sync
         'report_template_path': '',  # Path to Excel template for Report Fixer
-        'inspection_report_dir': ''  # Directory containing inspection reports
+        'inspection_report_dir': '',  # Directory containing inspection reports
+        'suppress_bp_link_notification': False,  # Suppress "linked to blueprints" confirmation dialog
+        'skip_image_attachments': True
     }
 
     def __init__(self):
@@ -100,9 +102,20 @@ class JobDocsMainWindow(QMainWindow):
         # Apply UI style
         self.apply_ui_style()
 
-        # Set default tab
+        # Apply email attachment settings
+        from shared.widgets import DropZone
+        DropZone.set_skip_image_attachments(self.settings.get('skip_image_attachments', True))
+
+        # Set default tab (stored as display name string; fall back to integer for old settings)
         default_tab = self.settings.get('default_tab', 0)
-        if 0 <= default_tab < self.tabs.count():
+        if isinstance(default_tab, str):
+            for i in range(self.tabs.count()):
+                if self.tabs.tabText(i) == default_tab:
+                    self.tabs.setCurrentIndex(i)
+                    break
+            else:
+                print(f"[JobDocs] Warning: saved default tab '{default_tab}' not found; using first tab", flush=True)
+        elif isinstance(default_tab, int) and 0 <= default_tab < self.tabs.count():
             self.tabs.setCurrentIndex(default_tab)
 
         self.statusBar().showMessage("Ready") # pyright: ignore[reportOptionalMemberAccess]
@@ -267,6 +280,12 @@ class JobDocsMainWindow(QMainWindow):
         getting_started_action = help_menu.addAction("&Getting Started")  # pyright: ignore[reportOptionalMemberAccess]
         getting_started_action.triggered.connect(self.show_getting_started)  # pyright: ignore[reportOptionalMemberAccess]
 
+        readme_action = help_menu.addAction("&User Guide (README)")  # pyright: ignore[reportOptionalMemberAccess]
+        readme_action.triggered.connect(self.show_readme)  # pyright: ignore[reportOptionalMemberAccess]
+
+        setup_wizard_action = help_menu.addAction("&Run Setup Wizard...")  # pyright: ignore[reportOptionalMemberAccess]
+        setup_wizard_action.triggered.connect(self.run_setup_wizard)  # pyright: ignore[reportOptionalMemberAccess]
+
         help_menu.addSeparator()  # pyright: ignore[reportOptionalMemberAccess]
 
         about_action = help_menu.addAction("&About")  # pyright: ignore[reportOptionalMemberAccess]
@@ -305,6 +324,8 @@ class JobDocsMainWindow(QMainWindow):
 
             self.save_settings()
             self.populate_customer_lists()
+            from shared.widgets import DropZone
+            DropZone.set_skip_image_attachments(self.settings.get('skip_image_attachments', True))
             QMessageBox.information(self, "Settings", "Settings saved. Please restart for all changes to take effect.")
 
     def show_getting_started(self):
@@ -364,6 +385,50 @@ Search across all customers and jobs.</p>
         msg.setTextFormat(Qt.TextFormat.RichText)
         msg.setText(content)
         msg.exec()
+
+    def show_readme(self):
+        """Show README.md in a scrollable dialog"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
+
+        readme_path = Path(__file__).parent / 'README.md'
+        try:
+            content = readme_path.read_text(encoding='utf-8')
+        except Exception as e:
+            QMessageBox.warning(self, "User Guide", f"README.md could not be opened:\n{e}")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("JobDocs — User Guide")
+        dialog.resize(820, 640)
+
+        layout = QVBoxLayout(dialog)
+        text = QTextEdit()
+        text.setReadOnly(True)
+        text.setPlainText(content)
+        text.setFontFamily("Courier New")
+        text.setFontPointSize(9)
+        layout.addWidget(text)
+
+        btn = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btn.rejected.connect(dialog.close)
+        layout.addWidget(btn)
+
+        dialog.exec()
+
+    def run_setup_wizard(self):
+        """Launch the first-time setup wizard manually from Help menu"""
+        try:
+            from modules.admin.oobe_wizard import OOBEWizard
+        except ImportError:
+            QMessageBox.warning(self, "Setup Wizard", "Setup wizard is not available.")
+            return
+        wizard = OOBEWizard(self.app_context, self)
+        if wizard.exec():
+            # Wizard already updated app_context.settings and saved — sync main window
+            self.settings = self.app_context.settings
+            self.apply_ui_style()
+            from shared.widgets import DropZone
+            DropZone.set_skip_image_attachments(self.settings.get('skip_image_attachments', True))
 
     # ==================== UI Helpers ====================
 

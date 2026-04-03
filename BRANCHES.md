@@ -53,7 +53,7 @@ testing      - Active development and testing
 
 **Key Differences from `stable`**:
 - **Report Fixer** - Enhanced Reporting module that transforms Excel job reports against a template, with delivery schedule comparison and highlighted change export (requires pandas and openpyxl)
-- Does not include stable's PO # search filter column
+- PSM-stable does **not** include the PO # search filter column (present in `stable`); this is intentional — PSM jobs are looked up by job number, not PO, so the column adds noise without value in that workflow
 
 ---
 
@@ -163,6 +163,7 @@ This means you can switch between branches without losing data, though some feat
   - Pending merge to stable after thorough testing
 
 ---
+
 
 ## Choosing the Right Branch
 

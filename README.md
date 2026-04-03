@@ -14,7 +14,13 @@ A modular tool for managing blueprint files and customer job directories with su
 - **File Organization** - Automatic folder structure creation and file management
 - **Import Tools** - Direct import of files to blueprint folders
 - **History Tracking** - Keep track of recent jobs and customer information
+- **Outlook / O365 Drag-and-Drop** - Drag emails directly from the new Microsoft 365 Outlook desktop app onto any drop zone; the email is saved as a named `.msg` file and all attachments are extracted automatically (requires `pywin32` on Windows). Image attachments (jpg, png, etc.) are skipped by default and can be toggled in Settings. Zip attachments are automatically extracted — the files inside are added directly to the file list.
+- **PDF Preview** - Drop zone file list shows a live preview of PDF files (requires `pymupdf`)
 - **Cross-Platform** - Works on Windows, macOS, and Linux
+
+### PSM-Specific Features (PSM-stable branch)
+
+- **Report Fixer** (Reporting tab) - Transforms Excel job reports to match a template layout. Loads a source report and a delivery schedule file, tracks date/schedule changes, and exports a formatted Excel file with highlighted modifications. Requires `pandas` and `openpyxl`.
 
 ## Installation
 
@@ -44,6 +50,13 @@ Or install PyQt6 directly:
 pip install PyQt6
 ```
 
+#### Optional dependencies:
+```bash
+pip install pywin32            # Windows — enables Outlook/O365 drag-and-drop
+pip install pymupdf            # All platforms — enables PDF preview in file lists
+pip install pandas openpyxl    # PSM-stable — enables Report Fixer feature
+```
+
 ## Usage
 
 Run the application:
@@ -61,6 +74,7 @@ python main.py
    - **ITAR Directories**: Optional separate directories for ITAR-controlled projects
 3. Choose your link type (Hard Link recommended to save disk space)
 4. Set blueprint file extensions (default: .pdf, .dwg, .dxf)
+5. Toggle **Skip image attachments** to filter out images (jpg, png, etc.) when dragging emails from Outlook (enabled by default)
 
 ### Creating Quotes
 
@@ -207,7 +221,7 @@ JobDocs uses a plugin-based architecture:
 5. **Search** - Advanced job search
 6. **Import Blueprints** - Import blueprints to customer folders
 7. **History** - View recent job history
-8. **Reporting** (Experimental) - Generate and export reports
+8. **Report Fixer** - Transform Excel job reports to match a template layout
 
 ### Creating Custom Modules
 
@@ -231,8 +245,11 @@ JobDocs/
 ├── modules/             # Plugin modules
 │   ├── quote/           # Quote module
 │   ├── job/             # Job module
+│   ├── add_to_job/      # Add to job module
 │   ├── bulk/            # Bulk creation module
 │   ├── search/          # Search module
+│   ├── import_bp/       # Import blueprints module
+│   ├── history/         # History module
 │   ├── reporting/       # Reporting module (experimental)
 │   └── _template/       # Template for custom modules
 ├── build_scripts/       # Build configuration

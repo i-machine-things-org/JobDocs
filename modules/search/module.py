@@ -14,8 +14,9 @@ from datetime import datetime
 from typing import List, Dict, Any
 from PyQt6.QtWidgets import (
     QWidget, QMessageBox, QTableWidgetItem, QApplication, QMenu,
-    QListWidgetItem, QListWidget, QSplitter, QGroupBox, QVBoxLayout
+    QListWidgetItem, QListWidget, QSplitter, QGroupBox, QVBoxLayout, QCheckBox
 )
+from shared.widgets import FilePreviewWidget
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6 import uic
@@ -134,7 +135,7 @@ class SearchWorker(QThread):
                     if match:
                         try:
                             mod_time = datetime.fromtimestamp(Path(job_docs_path).stat().st_mtime)
-                        except (OSError, FileNotFoundError):
+                        except OSError:
                             mod_time = datetime.now()
 
                         result = {
@@ -177,7 +178,7 @@ class SearchWorker(QThread):
 
                         try:
                             mod_time = datetime.fromtimestamp(Path(file_path).stat().st_mtime)
-                        except (OSError, FileNotFoundError):
+                        except OSError:
                             mod_time = datetime.now()
 
                         name_no_ext = os.path.splitext(filename)[0]
@@ -244,7 +245,7 @@ class SearchWorker(QThread):
 
                     try:
                         mod_time = datetime.fromtimestamp(Path(root).stat().st_mtime)
-                    except (OSError, FileNotFoundError):
+                    except OSError:
                         mod_time = datetime.now()
 
                     result = {
@@ -278,7 +279,6 @@ class SearchModule(BaseModule):
         self.search_progress = None
         self.search_customer_check = None
         self.search_job_check = None
-        self.search_po_check = None
         self.search_desc_check = None
         self.search_drawing_check = None
         self.search_all_radio = None
@@ -290,6 +290,7 @@ class SearchModule(BaseModule):
         self.search_btn = None
         self.cancel_btn = None
         self.folder_contents_list = None
+        self.file_preview: FilePreviewWidget | None = None
 
     def get_name(self) -> str:
         return "Search"
@@ -320,7 +321,6 @@ class SearchModule(BaseModule):
         self.search_progress = widget.search_progress
         self.search_customer_check = widget.search_customer_check
         self.search_job_check = widget.search_job_check
-        self.search_po_check = widget.search_po_check
         self.search_desc_check = widget.search_desc_check
         self.search_drawing_check = widget.search_drawing_check
         self.search_all_radio = widget.search_all_radio
@@ -348,11 +348,20 @@ class SearchModule(BaseModule):
         folder_layout.setContentsMargins(5, 5, 5, 5)
         self.folder_contents_list = QListWidget()
         self.folder_contents_list.setAlternatingRowColors(True)
-        folder_layout.addWidget(self.folder_contents_list)
+
+        self.file_preview = FilePreviewWidget()
+        self.file_preview.setMinimumHeight(80)
+
+        contents_splitter = QSplitter(Qt.Orientation.Vertical)
+        contents_splitter.addWidget(self.folder_contents_list)
+        contents_splitter.addWidget(self.file_preview)
+        contents_splitter.setSizes([200, 180])
+
+        folder_layout.addWidget(contents_splitter)
         folder_group.setLayout(folder_layout)
         splitter.addWidget(folder_group)
 
-        splitter.setSizes([400, 200])
+        splitter.setSizes([400, 280])
         results_layout.insertWidget(0, splitter)
         results_layout.setStretchFactor(splitter, 1)
 
@@ -381,6 +390,7 @@ class SearchModule(BaseModule):
         )
         self.folder_contents_list.doubleClicked.connect(self._open_folder_file)
         self.folder_contents_list.customContextMenuRequested.connect(self._show_file_context_menu)
+        self.folder_contents_list.currentItemChanged.connect(self._on_folder_file_selected)
 
         # Initialize UI state
         self.update_legacy_mode_ui()
@@ -407,7 +417,6 @@ class SearchModule(BaseModule):
 
         self.search_customer_check.setEnabled(is_strict_mode)
         self.search_job_check.setEnabled(is_strict_mode)
-        self.search_po_check.setEnabled(is_strict_mode)
         self.search_desc_check.setEnabled(is_strict_mode)
         self.search_drawing_check.setEnabled(is_strict_mode)
 
@@ -523,9 +532,8 @@ class SearchModule(BaseModule):
         self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
         self.search_table.setItem(row, 1, QTableWidgetItem(result['customer']))
         self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
-        self.search_table.setItem(row, 3, QTableWidgetItem(result.get('po_number', '')))
-        self.search_table.setItem(row, 4, QTableWidgetItem(result['description']))
-        self.search_table.setItem(row, 5, QTableWidgetItem(', '.join(result['drawings'])))
+        self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
+        self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
 
     def _on_progress_update(self, status: str):
         """Slot called with progress updates"""
@@ -533,10 +541,20 @@ class SearchModule(BaseModule):
 
     def _on_search_finished(self, result_count: int):
         """Slot called when search completes"""
+        # Remember selected path so we can restore it after the table is rebuilt
+        selected_row = self.search_table.currentRow()
+        selected_path = (
+            self.search_results[selected_row]['path']
+            if 0 <= selected_row < len(self.search_results)
+            else None
+        )
+
         # Sort results by date (newest first)
         self.search_results.sort(key=lambda x: x['date'], reverse=True)
 
-        # Rebuild table with sorted results
+        # Rebuild table with sorted results; block signals so clearing rows
+        # doesn't wipe the folder-contents panel via itemSelectionChanged
+        self.search_table.blockSignals(True)
         self.search_table.setRowCount(0)
         for result in self.search_results:
             row = self.search_table.rowCount()
@@ -546,6 +564,14 @@ class SearchModule(BaseModule):
             self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
             self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
             self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
+        self.search_table.blockSignals(False)
+
+        # Restore the previously selected row (fires itemSelectionChanged once)
+        if selected_path is not None:
+            for i, result in enumerate(self.search_results):
+                if result['path'] == selected_path:
+                    self.search_table.selectRow(i)
+                    break
 
         self.search_status_label.setText(f"Found {result_count} result(s)")
         self.search_progress.hide()
@@ -563,6 +589,8 @@ class SearchModule(BaseModule):
         self.search_table.setRowCount(0)
         self.search_results.clear()
         self.folder_contents_list.clear()
+        if self.file_preview is not None:
+            self.file_preview.clear()
         self.search_status_label.setText("")
         self.search_progress.hide()
         self.search_btn.setEnabled(True)
@@ -647,9 +675,24 @@ class SearchModule(BaseModule):
 
     # ==================== Folder Contents Panel ====================
 
+    def _on_folder_file_selected(self, current, previous):
+        """Preview the file selected in the folder contents list"""
+        if self.file_preview is None:
+            return
+        if current is None:
+            self.file_preview.clear()
+            return
+        path = current.data(Qt.ItemDataRole.UserRole)
+        if path and os.path.isfile(path):
+            self.file_preview.preview_file(path)
+        else:
+            self.file_preview.clear()
+
     def _on_result_selected(self, row: int):
         """Populate folder contents list when a search result row is selected"""
         self.folder_contents_list.clear()
+        if self.file_preview is not None:
+            self.file_preview.clear()
         if row < 0 or row >= len(self.search_results):
             return
 
@@ -700,14 +743,10 @@ class SearchModule(BaseModule):
         copy_action = menu.addAction("Copy Path")
         copy_action.triggered.connect(lambda: QApplication.clipboard().setText(path))
 
-        menu.addSeparator()
-
         if is_file:
-            link_action = menu.addAction("Hard Link to Blueprints Folder")
-            link_action.triggered.connect(lambda: self._hard_link_to_blueprints(path))
-
-        copy_bp_action = menu.addAction("Copy Blueprints Path")
-        copy_bp_action.triggered.connect(lambda: self._copy_blueprints_path(path))
+            menu.addSeparator()
+            bp_action = menu.addAction("Blueprints Path")
+            bp_action.triggered.connect(lambda: self._blueprints_path_action(path))
 
         menu.exec(self.folder_contents_list.viewport().mapToGlobal(pos))
 
@@ -730,8 +769,8 @@ class SearchModule(BaseModule):
         )
         return customer, bp_dir or None
 
-    def _hard_link_to_blueprints(self, source_path: str):
-        """Create a hard link of source_path in the customer's blueprints folder"""
+    def _blueprints_path_action(self, source_path: str):
+        """Hard link file to blueprints folder if not already there, then copy its path."""
         customer, bp_dir = self._get_customer_bp_info()
         if not customer or not bp_dir:
             self.show_error("Error", "Blueprints directory not configured or no job selected")
@@ -739,41 +778,61 @@ class SearchModule(BaseModule):
 
         filename = os.path.basename(source_path)
         dest_dir = os.path.join(bp_dir, customer)
-        dest_path = os.path.join(dest_dir, filename)
+        bp_path = os.path.join(dest_dir, filename)
 
-        if os.path.exists(dest_path):
-            self.show_error(
-                "File Already Exists",
-                f"'{filename}' already exists in the blueprints folder:\n{dest_path}"
-            )
-            return
-
-        try:
-            os.makedirs(dest_dir, exist_ok=True)
-            os.link(source_path, dest_path)
-            self.search_status_label.setText(f"Hard linked '{filename}' to blueprints folder")
-        except OSError as e:
-            self.show_error("Hard Link Failed", str(e))
-
-    def _copy_blueprints_path(self, file_path: str):
-        """Copy the blueprints folder path for this file to clipboard"""
-        customer, bp_dir = self._get_customer_bp_info()
-        if not customer or not bp_dir:
-            self.show_error("Error", "Blueprints directory not configured or no job selected")
-            return
-
-        filename = os.path.basename(file_path)
-        bp_path = os.path.join(bp_dir, customer, filename)
-
-        if not os.path.exists(bp_path):
-            self.show_error(
-                "Not in Blueprints Folder",
-                f"'{filename}' does not exist in the blueprints folder:\n{bp_path}"
-            )
-            return
+        did_link = False
+        if os.path.exists(bp_path):
+            try:
+                same = os.path.samefile(source_path, bp_path)
+            except OSError:
+                same = False
+            if not same:
+                self.show_error(
+                    "Blueprints Conflict",
+                    f"A different file named '{filename}' is already linked in the blueprints folder.\n\n"
+                    f"Existing: {bp_path}\n"
+                    f"Source:   {source_path}\n\n"
+                    f"Rename one of the files to avoid the conflict."
+                )
+                return
+        else:
+            try:
+                os.makedirs(dest_dir, exist_ok=True)
+                os.link(source_path, bp_path)
+                did_link = True
+            except OSError as e:
+                import errno as _errno
+                if e.errno == _errno.EXDEV:
+                    self.show_error(
+                        "Hard Link Failed",
+                        f"Cannot create a hard link across different drives or filesystems.\n\n"
+                        f"Source: {source_path}\n"
+                        f"Destination: {bp_path}\n\n"
+                        f"Ensure both paths are on the same drive."
+                    )
+                else:
+                    self.show_error("Hard Link Failed", str(e))
+                return
 
         QApplication.clipboard().setText(bp_path)
-        self.search_status_label.setText("Blueprints path copied to clipboard")
+
+        if did_link:
+            if not self.app_context.get_setting('suppress_bp_link_notification', False):
+                msg = QMessageBox(self._widget)
+                msg.setWindowTitle("Blueprints Path")
+                msg.setText(f"'{filename}' was linked to the blueprints folder.\nPath copied to clipboard.")
+                msg.setIcon(QMessageBox.Icon.Information)
+                msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+                dont_show = QCheckBox("Don't show this again")
+                msg.setCheckBox(dont_show)
+                result = msg.exec()
+                if result == QMessageBox.StandardButton.Ok and dont_show.isChecked():
+                    self.app_context.set_setting('suppress_bp_link_notification', True)
+                    self.app_context.save_settings()
+            else:                
+                self.search_status_label.setText(f"Linked '{filename}' to blueprints and copied path")
+        else:
+            self.search_status_label.setText("Blueprints path copied to clipboard")
 
     def cleanup(self):
         """Cleanup resources"""

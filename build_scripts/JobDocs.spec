@@ -22,7 +22,6 @@ from pathlib import Path
 # ============================================================================
 # Application metadata
 APP_NAME = 'JobDocs'
-VERSION = '0.3.0'
 
 # Build paths (can be overridden with command-line options)
 # To customize, use: pyinstaller --distpath <path> --workpath <path> JobDocs.spec
@@ -88,13 +87,6 @@ if sample_dir.exists():
 # Collect all data files
 datas = ui_files + icon_files + sample_files
 
-# Add VERSION file
-version_file = spec_root / 'VERSION'
-if not version_file.exists():
-    version_file = spec_root.parent / 'VERSION'
-if version_file.exists():
-    datas.append((str(version_file), '.'))
-
 # Add README and LICENSE
 readme_file = spec_root / 'README.md'
 if not readme_file.exists():
@@ -151,21 +143,11 @@ hiddenimports = [
     'modules.reporting',
     'modules.reporting.module',
 
-    # Standard library imports used in the application
-    'pathlib',
-    'datetime',
-    'json',
-    'csv',
-    'platform',
-    'shutil',
-    're',
-    'importlib',
-    'importlib.util',
-    'subprocess',
-    'io',
-
     # Shared modules
     'shared.remote_sync',
+
+    # PDF preview (imported inside function body — PyInstaller won't auto-detect)
+    'fitz',
 
     # Report Fixer dependencies
     'pandas',

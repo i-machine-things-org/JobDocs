@@ -13,14 +13,14 @@ import shutil
 from pathlib import Path
 from typing import List
 from PyQt6.QtWidgets import (
-    QWidget, QMessageBox, QFileDialog, QTreeWidgetItem, QButtonGroup
+    QWidget, QMessageBox, QFileDialog, QTreeWidgetItem, QButtonGroup, QCheckBox
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6 import uic
 from datetime import datetime
 
 from core.base_module import BaseModule
-from shared.widgets import DropZone, JobSearchDialog, DrawingSearchDialog
+from shared.widgets import DropZone, JobSearchDialog, DrawingSearchDialog, FilePreviewWidget, attach_file_preview
 from shared.utils import (
     is_blueprint_file, parse_job_numbers, create_file_link, sanitize_filename,
     open_folder, get_next_number
@@ -91,6 +91,10 @@ class QuoteModule(BaseModule):
         self._widget = None
         self._worker = None  # Background thread worker
 
+        # Preview panels
+        self.quote_preview: FilePreviewWidget | None = None
+        self.add_preview: FilePreviewWidget | None = None
+
         # Create New tab widget references
         self.quote_customer_combo = None
         self.quote_number_edit = None
@@ -117,8 +121,9 @@ class QuoteModule(BaseModule):
         self.add_filter_group = None
         self.dest_button_group = None
 
+
     def get_name(self) -> str:
-        return "Create Quote folder"
+        return "Quote"
 
     def get_order(self) -> int:
         return 10  # First tab
@@ -156,6 +161,10 @@ class QuoteModule(BaseModule):
         self.quote_drop_zone = DropZone("Drop files")
         self.quote_drop_zone.setMinimumHeight(60)
         layout.insertWidget(index, self.quote_drop_zone)
+
+        # File list + preview panel (Create New tab)
+        self.quote_preview = attach_file_preview(self.quote_files_list, layout)
+        self.quote_files_list.currentRowChanged.connect(self._on_quote_file_selected)
 
         # Connect Create New tab signals
         self.quote_drop_zone.files_dropped.connect(lambda files: self.add_quote_files(files))
@@ -204,6 +213,10 @@ class QuoteModule(BaseModule):
         self.add_drop_zone = DropZone("Drop files")
         self.add_drop_zone.setMinimumHeight(60)
         add_layout.insertWidget(add_index, self.add_drop_zone)
+
+        # File list + preview panel (Add to Existing tab)
+        self.add_preview = attach_file_preview(self.add_files_list, add_layout)
+        self.add_files_list.currentRowChanged.connect(self._on_add_file_selected)
 
         # Set splitter sizes for Add tab
         widget.addSplitter.setSizes([450, 450])
@@ -288,13 +301,30 @@ class QuoteModule(BaseModule):
         """Remove selected file from quote files list (Create New tab)"""
         row = self.quote_files_list.currentRow()
         if row >= 0:
+            self.quote_files_list.blockSignals(True)
             self.quote_files_list.takeItem(row)
+            self.quote_files_list.blockSignals(False)
             del self.quote_files[row]
+            # Update preview for the new selection (or clear if list is now empty)
+            new_row = self.quote_files_list.currentRow()
+            self._on_quote_file_selected(new_row)
+
+    def _on_quote_file_selected(self, row: int):
+        if self.quote_preview is None:
+            return
+        self.quote_preview.preview_file(self.quote_files[row] if 0 <= row < len(self.quote_files) else None)
+
+    def _on_add_file_selected(self, row: int):
+        if self.add_preview is None:
+            return
+        self.add_preview.preview_file(self.add_files[row] if 0 <= row < len(self.add_files) else None)
 
     def clear_quote_files(self):
         """Clear all files from quote files list"""
         self.quote_files.clear()
         self.quote_files_list.clear()
+        if self.quote_preview:
+            self.quote_preview.clear()
 
     # ==================== Create New Tab: Quote Creation ====================
 
@@ -325,9 +355,11 @@ class QuoteModule(BaseModule):
         # Parse drawings
         drawings = [d.strip() for d in drawings_text.split(',') if d.strip()]
 
+        all_files = list(self.quote_files)
+
         created = 0
         for quote_num in quote_numbers:
-            if self.create_single_quote(customer, quote_num, description, drawings, is_itar, self.quote_files):
+            if self.create_single_quote(customer, quote_num, description, drawings, is_itar, all_files):
                 created += 1
 
         if created > 0:
@@ -441,6 +473,8 @@ class QuoteModule(BaseModule):
         self.quote_itar_check.setChecked(False)
         self.quote_files.clear()
         self.quote_files_list.clear()
+        if self.quote_preview:
+            self.quote_preview.clear()
 
     def auto_generate_quote_number(self):
         """Auto-generate the next quote number"""
@@ -663,6 +697,8 @@ class QuoteModule(BaseModule):
         """Clear all files from add files list"""
         self.add_files.clear()
         self.add_files_list.clear()
+        if self.add_preview:
+            self.add_preview.clear()
 
     # ==================== Add to Existing Tab: Add Files to Quote ====================
 
