@@ -786,7 +786,8 @@ class SearchModule(BaseModule):
                 result = msg.exec()
                 if result == QMessageBox.StandardButton.Ok and dont_show.isChecked():
                     self.app_context.set_setting('suppress_bp_link_notification', True)
-                    self.app_context.save_settings()            else:
+                    self.app_context.save_settings()
+            else:                
                 self.search_status_label.setText(f"Linked '{filename}' to blueprints and copied path")
         else:
             self.search_status_label.setText("Blueprints path copied to clipboard")
