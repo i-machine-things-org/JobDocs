@@ -1329,6 +1329,7 @@ class ReportingModule(BaseModule):
         ws = wb.active
         if ws is None:
             self._log("Warning: workbook has no active sheet, skipping formatting")
+            wb.close()
             return
 
         yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
@@ -1351,9 +1352,11 @@ class ReportingModule(BaseModule):
 
         highlighted_count = 0
 
+        changed_row_set = set(changed_rows) if changed_rows else set()
+
         # Apply highlighting for NEW changed rows (from this run)
-        if changed_rows and sched_col:
-            for row_idx in changed_rows:
+        if changed_row_set and sched_col:
+            for row_idx in changed_row_set:
                 excel_row = row_idx + 2  # 1-indexed + header
                 ws.cell(row=excel_row, column=sched_col).fill = yellow_fill
                 highlighted_count += 1
@@ -1380,7 +1383,7 @@ class ReportingModule(BaseModule):
                         # Check if this row isn't already highlighted from new changes
                         # (changed_rows are 0-indexed, excel_row is 1-indexed+header)
                         row_idx = excel_row - 2
-                        if row_idx not in changed_rows:
+                        if row_idx not in changed_row_set:
                             ws.cell(row=excel_row, column=sched_col).fill = yellow_fill
                             highlighted_count += 1
 
@@ -1417,8 +1420,8 @@ class ReportingModule(BaseModule):
                         cell_length = len(str(cell.value))
                         if cell_length > max_length:
                             max_length = cell_length
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log(f"Warning: could not measure column {column_letter}: {e}")
 
             adjusted_width = min(max_length + 2, 50)
             ws.column_dimensions[column_letter].width = adjusted_width
@@ -1431,7 +1434,10 @@ class ReportingModule(BaseModule):
         max_col = ws.max_column
         table_ref = f"A1:{ws.cell(max_row, max_col).coordinate}"
 
-        # Use sheet title in table name to avoid collisions if the file is re-opened
+        # Remove any pre-existing tables before adding ours (avoids name collision on re-save)
+        if hasattr(ws, '_tables'):
+            ws._tables.clear()  # type: ignore[union-attr]
+
         safe_title = re.sub(r'[^A-Za-z0-9_]', '_', str(ws.title) if ws.title else 'Sheet')
         table = Table(displayName=f"Table_{safe_title}", ref=table_ref)
         style = TableStyleInfo(

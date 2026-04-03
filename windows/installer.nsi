@@ -70,7 +70,7 @@ Section "JobDocs" SecMain
   SetOutPath "$INSTDIR"
 
   ; Add files
-  File "dist\jobdocs.exe"
+  File "..\dist_temp\jobdocs.exe"
   File "LICENSE"
   File "README.md"
 

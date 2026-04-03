@@ -12,6 +12,7 @@ Think of it as a filing system for your manufacturing or engineering business.
 WINDOWS INSTALLATION - EASY METHOD
 -----------------------------------
 1. Download: JobDocs-Setup.exe
+   from https://github.com/i-machine-things/JobDocs/releases
 2. Double-click the file
 3. Click "Next" a few times
 4. Done! Look for the JobDocs icon on your desktop
@@ -24,7 +25,8 @@ If Windows shows a security warning:
 
 LINUX INSTALLATION (DEBIAN/UBUNTU)
 -----------------------------------
-1. Download: jobdocs_all.deb
+1. Download: jobdocs_VERSION_all.deb
+   from https://github.com/i-machine-things/JobDocs/releases
 2. Double-click the file (Software Center opens)
 3. Click "Install"
 4. Done! Find JobDocs in your applications menu

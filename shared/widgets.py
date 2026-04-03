@@ -208,8 +208,10 @@ class DropZone(QFrame):
                         files.extend(DropZone._extract_eml_attachments(local))
                     elif ext == '.msg' and os.path.exists(local):
                         files.extend(DropZone._extract_msg_attachments(local))
-                    else:
+                    elif os.path.exists(local):
                         files.append(local)
+                    else:
+                        print(f"[DropZone]   Skipping non-existent file: {local}", flush=True)
                 else:
                     # Non-local URL (blob:, https:, etc.) — log and skip for now
                     print(f"[DropZone]   Skipping non-local URL: {url.toString()}", flush=True)
@@ -623,7 +625,7 @@ class DropZone(QFrame):
                             dest = os.path.join(extract_dir, f"{base}_{counter}{ext}")
                             counter += 1
                     with zf.open(member) as src, open(dest, 'wb') as dst:
-                        dst.write(src.read())
+                        shutil.copyfileobj(src, dst)
                     extracted.append(dest)
                     print(f"[DropZone] Extracted from zip: {os.path.basename(dest)}", flush=True)
                 if extracted:
@@ -1334,7 +1336,7 @@ class FilePreviewWidget(QWidget):
             if size < 1024 or unit == 'GB':
                 return f"{size:.1f} {unit}"
             size = size / 1024.0
-        return f"{size:.1f} GB"
+        raise AssertionError("unreachable")
 
 
 def attach_file_preview(

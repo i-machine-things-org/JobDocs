@@ -113,6 +113,8 @@ class JobDocsMainWindow(QMainWindow):
                 if self.tabs.tabText(i) == default_tab:
                     self.tabs.setCurrentIndex(i)
                     break
+            else:
+                print(f"[JobDocs] Warning: saved default tab '{default_tab}' not found; using first tab", flush=True)
         elif isinstance(default_tab, int) and 0 <= default_tab < self.tabs.count():
             self.tabs.setCurrentIndex(default_tab)
 

@@ -926,7 +926,12 @@ class OOBEWizard(QDialog):
                     pass  # Not critical if this fails
 
             # Create initial admin user in network users file
-            from modules.user_auth.user_auth import UserAuth
+            try:
+                from modules.user_auth.user_auth import UserAuth
+            except ImportError:
+                self._show_error("User authentication module is not available. "
+                                 "Admin user was not created.")
+                return
             import hashlib
             import secrets
 

@@ -301,7 +301,9 @@ class QuoteModule(BaseModule):
         """Remove selected file from quote files list (Create New tab)"""
         row = self.quote_files_list.currentRow()
         if row >= 0:
+            self.quote_files_list.blockSignals(True)
             self.quote_files_list.takeItem(row)
+            self.quote_files_list.blockSignals(False)
             del self.quote_files[row]
 
     def _on_quote_file_selected(self, row: int):

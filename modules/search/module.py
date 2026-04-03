@@ -714,9 +714,8 @@ class SearchModule(BaseModule):
         copy_action = menu.addAction("Copy Path")
         copy_action.triggered.connect(lambda: QApplication.clipboard().setText(path))
 
-        menu.addSeparator()
-
         if is_file:
+            menu.addSeparator()
             bp_action = menu.addAction("Blueprints Path")
             bp_action.triggered.connect(lambda: self._blueprints_path_action(path))
 
@@ -753,7 +752,17 @@ class SearchModule(BaseModule):
         bp_path = os.path.join(dest_dir, filename)
 
         did_link = False
-        if not os.path.exists(bp_path):
+        if os.path.exists(bp_path):
+            if not os.path.samefile(source_path, bp_path):
+                self.show_error(
+                    "Blueprints Conflict",
+                    f"A different file named '{filename}' is already linked in the blueprints folder.\n\n"
+                    f"Existing: {bp_path}\n"
+                    f"Source:   {source_path}\n\n"
+                    f"Rename one of the files to avoid the conflict."
+                )
+                return
+        else:
             try:
                 os.makedirs(dest_dir, exist_ok=True)
                 os.link(source_path, bp_path)

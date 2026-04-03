@@ -8,7 +8,7 @@ pandas>=2.0.0,<3.0.0
 openpyxl>=3.1.0
 
 # PDF preview in file list (Quote module)
-pymupdf>=1.24.0
+pymupdf>=1.24.0,<1.25.0  # CVE-2026-3029: review upper bound before upgrading
 
 # For building executables (optional)
 # pyinstaller>=6.0.0
