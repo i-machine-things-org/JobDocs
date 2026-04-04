@@ -297,6 +297,13 @@
           </widget>
          </item>
          <item>
+          <widget class="QPushButton" name="bulk_create_btn">
+           <property name="text">
+            <string>Bulk Create...</string>
+           </property>
+          </widget>
+         </item>
+         <item>
           <spacer name="horizontalSpacer_3">
            <property name="orientation">
             <enum>Qt::Orientation::Horizontal</enum>

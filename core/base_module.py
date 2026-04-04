@@ -62,6 +62,18 @@ class BaseModule(ABC):
         """
         self._app_context = app_context
 
+    def is_tab_module(self) -> bool:
+        """
+        Indicate whether this module should appear as a top-level tab.
+
+        Modules that return False are still loaded (accessible via
+        app_context.main_window.modules) but are not added to the tab bar.
+
+        Returns:
+            bool: True to show as a tab (default), False to load silently
+        """
+        return True
+
     def is_experimental(self) -> bool:
         """
         Indicate if this is an experimental module.
