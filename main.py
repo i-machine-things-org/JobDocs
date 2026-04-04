@@ -230,8 +230,10 @@ class JobDocsMainWindow(QMainWindow):
                 )
                 return
 
-            # Add each module as a tab
+            # Add each module as a tab (skip non-tab modules)
             for module in self.modules:
+                if not module.is_tab_module():
+                    continue
                 try:
                     widget = module.get_widget()
                     name = module.get_name()

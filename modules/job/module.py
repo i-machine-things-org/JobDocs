@@ -181,6 +181,7 @@ class JobModule(BaseModule):
         widget.auto_gen_job_btn.clicked.connect(self.auto_generate_job_number)
         widget.open_bp_btn.clicked.connect(self.open_blueprints_folder)
         widget.open_cf_btn.clicked.connect(self.open_customer_files_folder)
+        widget.bulk_create_btn.clicked.connect(self.open_bulk_create_dialog)
 
         # ===== Setup "Add to Existing" Tab =====
         self.add_customer_combo = widget.add_customer_combo
@@ -919,6 +920,12 @@ class JobModule(BaseModule):
                 self.show_error("Error", error)
         else:
             self.show_error("Warning", "Customer files directory not configured")
+
+    def open_bulk_create_dialog(self):
+        """Open the Bulk Job Creation dialog"""
+        from modules.bulk.module import BulkCreateDialog
+        dialog = BulkCreateDialog(self.app_context, self._widget)
+        dialog.exec()
 
     def cleanup(self):
         """Cleanup resources"""
