@@ -1,0 +1,47 @@
+name: Log CodeRabbit Review to S&P.md
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  log-review:
+    if: github.event.review.user.login == 'coderabbitai[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Append CodeRabbit review to .claude/S&P.md
+        env:
+          REVIEW_BODY: ${{ github.event.review.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          REVIEW_DATE: ${{ github.event.review.submitted_at }}
+        run: |
+          DATE=$(echo "$REVIEW_DATE" | cut -c1-10)
+          PR_REF="PR #${PR_NUMBER}: ${PR_TITLE}"
+
+          {
+            echo ""
+            echo "---"
+            echo ""
+            echo "## ${DATE} — \`${PR_REF}\`"
+            echo ""
+            echo "${REVIEW_BODY}"
+          } >> .claude/S&P.md
+
+      - name: Commit S&P.md update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .claude/S&P.md
+          git diff --cached --quiet || git commit -m "docs: log coderabbit review for PR #${{ github.event.pull_request.number }}"
+          git push

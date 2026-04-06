@@ -5,7 +5,7 @@ sample_files/
 test_jobs.csv
 
 # Claude Code and development notes
-.claude/
+.claude/settings.local.json
 .github-push-checklist.md
 docs/
 
