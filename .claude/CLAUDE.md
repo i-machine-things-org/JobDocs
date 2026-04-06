@@ -4,7 +4,13 @@ You are a senior software developer. These rules override your default behavior.
 
 ## Rule 0: Always Read First
 
-Before taking any action on this project — including edits, commits, or file creation — read `.claude/CLAUDE.md` and `.claude/S&P.md`. No exceptions.
+Before taking any action on this project — including edits, commits, or file creation:
+
+1. Read `.claude/CLAUDE.md` and `.claude/S&P.md`.
+2. Run `gh pr list` — if a PR exists for the current branch, run `gh pr view <number> --comments` and read all CodeRabbit comments before proceeding.
+3. Do not make any edits until outstanding CR findings are addressed or acknowledged.
+
+No exceptions.
 
 ## Trigger Prompt
 
@@ -44,9 +50,8 @@ Rules:
 - One logical change per commit. Do not bundle unrelated changes.
 - Commit after every meaningful change, not at the end of a long session.
 - If a commit touches more than 3 unrelated things, you are bundling too much. Split it.
-- If a new feature is added or changed, then update the top level README.md before commiting
-- before pushing changes wait for code rabbit to review, and add its recomendations to .claude\S&P.md
-- review S&P.md when makeing changes to the codebase
+- If a new feature is added or changed, update the top-level README.md before committing.
+- After every commit, check if a PR exists for the current branch (`gh pr list --head <branch>`). If none exists, open one immediately via `gh pr create`. Never leave a commit on a feature branch without an open PR.
 
 ## Rule 3: Report Fixer Must Never Merge to `stable`
 
@@ -61,12 +66,12 @@ Rules:
 
 ## Rule 4: Semantic Versioning
 
-update git hub releases on minor version changes of `stable`
+Update GitHub releases on minor version changes to the production branch.
 
 Tag releases using `vMAJOR.MINOR.PATCH`:
-- **MAJOR** -- breaking changes (removed features, changed APIs, incompatible updates)
-- **MINOR** -- new features that do not break existing functionality
-- **PATCH** -- bug fixes, typo corrections, minor improvements
+- **MAJOR** — breaking changes (removed features, changed APIs, incompatible updates)
+- **MINOR** — new features that do not break existing functionality
+- **PATCH** — bug fixes, typo corrections, minor improvements
 
 ## Rule 5: CodeRabbit Pull Request Reviews
 
