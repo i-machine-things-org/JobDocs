@@ -1237,7 +1237,7 @@ class FilePreviewWidget(QWidget):
 
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setMinimumSize(80, 80)
+        self.image_label.setMinimumSize(200, 200)
         self.image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.image_label.setStyleSheet("background: #1e1e1e; border-radius: 3px;")
         layout.addWidget(self.image_label, stretch=1)
@@ -1297,7 +1297,13 @@ class FilePreviewWidget(QWidget):
                 if doc.page_count == 0:
                     return False
                 page = doc[0]
-                pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+                # Cap rendered size: a fixed 1.5× scale can exceed Qt's 256 MB
+                # allocation limit for high-res embedded images. Scale to fit
+                # within MAX_DIM × MAX_DIM pixels instead.
+                MAX_DIM = 600
+                rect = page.rect
+                scale = min(MAX_DIM / rect.width, MAX_DIM / rect.height, 1.5)
+                pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
                 data = pix.tobytes('png')
             finally:
                 doc.close()
@@ -1358,8 +1364,8 @@ class FilePreviewWidget(QWidget):
 def attach_file_preview(
     files_list,
     parent_layout,
-    splitter_sizes=(320, 180),
-    min_preview_width=130,
+    splitter_sizes=(320, 320),
+    min_preview_width=200,
 ) -> FilePreviewWidget:
     """Remove files_list from parent_layout, wrap it with a FilePreviewWidget
     in a QSplitter, reinsert at the same index, and return the preview widget.
