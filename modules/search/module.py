@@ -704,9 +704,26 @@ class SearchModule(BaseModule):
             return
 
         try:
-            entries = sorted(os.listdir(path), key=lambda n: (os.path.isdir(os.path.join(path, n)), n.lower()))
+            raw = os.listdir(path)
         except OSError:
             return
+
+        def _is_hidden(full_path: str, name: str) -> bool:
+            if name.startswith('.'):
+                return True
+            try:
+                import ctypes
+                attrs = ctypes.windll.kernel32.GetFileAttributesW(full_path)
+                if attrs != -1 and (attrs & 0x2):  # FILE_ATTRIBUTE_HIDDEN
+                    return True
+            except Exception:
+                pass
+            return False
+
+        entries = sorted(
+            [n for n in raw if not _is_hidden(os.path.join(path, n), n)],
+            key=lambda n: (os.path.isdir(os.path.join(path, n)), n.lower()),
+        )
 
         for name in entries:
             full_path = os.path.join(path, name)
