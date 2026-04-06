@@ -9,6 +9,7 @@ Uses background threading to prevent UI lockup during searches.
 import os
 import sys
 import re
+import ctypes
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any
@@ -23,6 +24,19 @@ from PyQt6 import uic
 
 from core.base_module import BaseModule
 from shared.utils import open_folder
+
+
+def _is_hidden_file(full_path: str, name: str) -> bool:
+    """Return True if the file/folder should be treated as hidden."""
+    if name.startswith('.'):
+        return True
+    try:
+        attrs = ctypes.windll.kernel32.GetFileAttributesW(full_path)
+        if attrs != -1 and (attrs & 0x2):  # FILE_ATTRIBUTE_HIDDEN
+            return True
+    except (AttributeError, OSError):
+        pass
+    return False
 
 
 class SearchWorker(QThread):
@@ -708,21 +722,9 @@ class SearchModule(BaseModule):
         except OSError:
             return
 
-        def _is_hidden(full_path: str, name: str) -> bool:
-            if name.startswith('.'):
-                return True
-            try:
-                import ctypes
-                attrs = ctypes.windll.kernel32.GetFileAttributesW(full_path)
-                if attrs != -1 and (attrs & 0x2):  # FILE_ATTRIBUTE_HIDDEN
-                    return True
-            except Exception:
-                pass
-            return False
-
         entries = sorted(
-            [n for n in raw if not _is_hidden(os.path.join(path, n), n)],
-            key=lambda n: (os.path.isdir(os.path.join(path, n)), n.lower()),
+            [n for n in raw if not _is_hidden_file(os.path.join(path, n), n)],
+            key=lambda n: (not os.path.isdir(os.path.join(path, n)), n.lower()),
         )
 
         for name in entries:
