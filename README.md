@@ -142,6 +142,7 @@ Use the **Import Blueprints** tab to:
 
 The **Search** tab provides powerful search capabilities:
 - Search by customer name, job number, description, or drawing
+- Filter by PO number (Strict Format mode)
 - Filter by inspection status (searches inspection reports directory)
 - Two search modes:
   - **Search All Folders** (Legacy mode): Full recursive search through all folders
@@ -249,7 +250,7 @@ JobDocs/
 │   ├── search/          # Search module
 │   ├── import_bp/       # Import blueprints module
 │   ├── history/         # History module
-│   ├── reporting/       # Reporting module
+│   ├── reporting/       # Reporting module (experimental)
 │   └── _template/       # Template for custom modules
 ├── build_scripts/       # Build configuration
 ├── windows/             # Windows installer files

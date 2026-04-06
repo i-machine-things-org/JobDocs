@@ -198,10 +198,15 @@ class AppContext:
         Returns:
             Path to the job folder
         """
-        structure = self._settings.get('job_folder_structure', '{customer}/{job_folder}/job documents')
+        structure = self._settings.get('job_folder_structure', '{customer}/{po_number}/{job_folder}')
 
         # Replace placeholders
-        path_str = structure.replace('{customer}', customer).replace('{job_folder}', job_folder_name)
+        path_str = structure.replace('{customer}', customer).replace('{job_folder}', job_folder_name).replace('{po_number}', po_number)
+
+        # Clean up any double slashes from empty placeholders
+        path_str = path_str.replace('//', '/')
+        # Remove leading/trailing slashes
+        path_str = path_str.strip('/')
 
         # Replace PO number placeholder if present
         if '{po_number}' in path_str:

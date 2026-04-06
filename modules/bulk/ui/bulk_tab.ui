@@ -53,14 +53,14 @@
       <item>
        <widget class="QLabel" name="label">
         <property name="text">
-         <string>Format: customer, job#, description, drawings...</string>
+         <string>Format: customer, job#, PO#, description, drawings...</string>
         </property>
        </widget>
       </item>
       <item>
        <widget class="QLabel" name="label_2">
         <property name="text">
-         <string>Example: Acme Corp, 12345, Widget Assembly, DWG-001</string>
+         <string>Example: Acme Corp, 12345, PO-2025-001, Widget Assembly, DWG-001</string>
         </property>
        </widget>
       </item>
@@ -143,8 +143,8 @@
         </property>
         <property name="placeholderText">
          <string># CSV format (# = comments)
-Acme Corp, 12345, Widget Assembly, DWG-001
-Beta Inc, 54321, Custom Part</string>
+Acme Corp, 12345, PO-2025-001, Widget Assembly, DWG-001
+Beta Inc, 54321, PO-2025-002, Custom Part</string>
         </property>
        </widget>
       </item>
@@ -190,6 +190,11 @@ Beta Inc, 54321, Custom Part</string>
         <column>
          <property name="text">
           <string>Job #</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>PO #</string>
          </property>
         </column>
         <column>

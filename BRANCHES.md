@@ -28,7 +28,7 @@ testing      - Active development and testing
 - Creating official releases
 
 **Latest Features** (as of last merge):
-- PO number support for job creation and search results
+- PO number support for job creation and PO # search filter
 - Link Drawings button and dialog for jobs and quotes
 - Inspection checkbox in search (searches inspection reports directory)
 - Background search with cancel option
@@ -151,6 +151,16 @@ All branches share the same core architecture and data formats:
 - Network shared configurations work across all branches
 
 This means you can switch between branches without losing data, though some features may only be available in specific branches.
+
+---
+
+## Current Status (2026-03-19)
+
+- **stable**: Stable with PO number support, ready for production
+- **PSM-stable**: PSM-specific customizations (delivery schedule, link drawings, inspection/PO search filters), production-ready for PSM
+- **testing**: Latest features including auto-generate, session tracking, admin module, version management tools
+  - Ready for testing and validation
+  - Pending merge to stable after thorough testing
 
 ---
 

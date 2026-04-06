@@ -90,8 +90,9 @@ class HistoryModule(BaseModule):
             self.history_table.setItem(row, 0, QTableWidgetItem(date))
             self.history_table.setItem(row, 1, QTableWidgetItem(job.get('customer', '')))
             self.history_table.setItem(row, 2, QTableWidgetItem(job.get('job_number', '')))
-            self.history_table.setItem(row, 3, QTableWidgetItem(job.get('description', '')))
-            self.history_table.setItem(row, 4, QTableWidgetItem(', '.join(job.get('drawings', []))))
+            self.history_table.setItem(row, 3, QTableWidgetItem(job.get('po_number', '')))
+            self.history_table.setItem(row, 4, QTableWidgetItem(job.get('description', '')))
+            self.history_table.setItem(row, 5, QTableWidgetItem(', '.join(job.get('drawings', []))))
 
     def clear_history(self):
         """Clear all job history after confirmation"""
