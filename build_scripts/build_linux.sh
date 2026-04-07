@@ -66,7 +66,7 @@ fi
 # Clean previous builds
 echo "[3/5] Cleaning previous builds..."
 cd ..
-rm -rf "${BUILD_PATH}/" "${DIST_PATH}/"
+rm -rf "${BUILD_PATH:?Build path cannot be empty}/" "${DIST_PATH:?Dist path cannot be empty}/"
 echo "      Cleaned"
 
 # Build the executable
