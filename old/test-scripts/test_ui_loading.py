@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 try:
     # Import the main application
     import importlib.util
-    spec = importlib.util.spec_from_file_location("jobdocs", Path(__file__).parent / "JobDocs-qt.py")
+    spec = importlib.util.spec_from_file_location("jobdocs", Path(__file__).resolve().parents[1] / "legacy" / "JobDocs-qt.py")
     jobdocs_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(jobdocs_module)
     JobDocs = jobdocs_module.JobDocs
