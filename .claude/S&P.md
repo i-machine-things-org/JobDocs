@@ -400,3 +400,79 @@ Reviewing files that changed from the base of the PR and between 98817da82ab297b
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-07 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+
+**Actionable comments posted: 2**
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+````
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In @.claude/S&P.md:
+- Line 150: Markdownlint MD040 flags four fenced code blocks in .claude/S&P.md
+that lack language identifiers; update each opening fence reported (the four
+occurrences flagged) to include a language token (e.g., change ``` to ```text)
+so each fenced block has a language specifier, ensuring you apply the same
+change to all four openings.
+- Line 217: Remove the extra spaces inside the inline code span around the ITAR
+token (e.g., change ` [ITAR] ` to `[ITAR]`) to satisfy MD038; while here, make
+the detection and replacement consistent with the search module by using the
+same pattern checks and replacements (use startswith(('[ITAR] ', '[ITAR-BP] '))
+where the code currently uses startswith('[ITAR]') and ensure both '[ITAR] ' and
+'[ITAR]' variants are handled in the string replacement logic so behavior
+matches the other module).
+````
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: defaults
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `b1a39c2d-dd5c-4ae6-b35c-b6434ad71515`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 25c795501f4654ebc73fe1e87a1c727a06404e50 and 910cb708457d66c0f9255a29821330b18a3e3f20.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `.claude/S&P.md`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
