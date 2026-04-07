@@ -307,19 +307,22 @@ if __name__ == "__main__":
     print("JobDocs Database Integration - Example Usage\n")
 
     # Create connection using environment variables for secure credential handling
-    # Set JOBBOSS_USER and JOBBOSS_PASSWORD environment variables
+    # Require JOBBOSS_USER and JOBBOSS_PASSWORD environment variables
+    required = ["JOBBOSS_USER", "JOBBOSS_PASSWORD"]
+    missing = [k for k in required if not os.environ.get(k)]
+    if missing:
+        raise RuntimeError(
+            f"Missing required environment variables: {', '.join(missing)}\n"
+            "Set JOBBOSS_HOST, JOBBOSS_PORT, JOBBOSS_DB, JOBBOSS_USER, JOBBOSS_PASSWORD."
+        )
+
     jobboss = JobBOSSIntegration(
         host=os.environ.get("JOBBOSS_HOST", "localhost"),
         port=int(os.environ.get("JOBBOSS_PORT", "1433")),
         database=os.environ.get("JOBBOSS_DB", "JobBOSS"),
-        username=os.environ.get("JOBBOSS_USER", "user"),
-        password=os.environ.get("JOBBOSS_PASSWORD", "password")
+        username=os.environ["JOBBOSS_USER"],
+        password=os.environ["JOBBOSS_PASSWORD"],
     )
-
-    print("Note: For secure credential handling, set these environment variables:")
-    print("      JOBBOSS_HOST, JOBBOSS_PORT, JOBBOSS_DB")
-    print("      JOBBOSS_USER, JOBBOSS_PASSWORD")
-    print("      Using defaults for this example.\n")
 
     # Test connection
     success, message = jobboss.test_connection()
