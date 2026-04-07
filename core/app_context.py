@@ -308,14 +308,14 @@ class AppContext:
                                             print(f"[find_job_folders]     ✓ Found job: {item}", flush=True)
                                             jobs.append((item, expected_docs_path))
                                         else:
-                                            print(f"[find_job_folders]     ✗ Path doesn't exist", flush=True)
+                                            print("[find_job_folders]     ✗ Path doesn't exist", flush=True)
                                     else:
                                         print(f"[find_job_folders]   Found job (no suffix): {item}", flush=True)
                                         jobs.append((item, item_path))
                         except OSError as e:
                             print(f"[find_job_folders] OSError: {e}", flush=True)
                     else:
-                        print(f"[find_job_folders] Prefix path doesn't exist!", flush=True)
+                        print("[find_job_folders] Prefix path doesn't exist!", flush=True)
 
         print(f"[find_job_folders] Returning {len(jobs)} jobs", flush=True)
         return jobs

@@ -49,8 +49,9 @@ class ModuleLoader:
         deprecated_modules = {'add_to_job'}
 
         if is_frozen:
-            # In frozen mode, return hardcoded list of modules
-            # These must match the modules in the spec file's hiddenimports
+            # In frozen mode, return hardcoded list of modules.
+            # Must match the modules in the spec file's hiddenimports.
+            # PSM-only modules (reporting) are excluded from stable builds (Rule 3).
             all_modules = [
                 'quote',
                 'job',
@@ -59,7 +60,6 @@ class ModuleLoader:
                 'search',
                 'import_bp',
                 'history',
-                'reporting'
             ]
             return [m for m in all_modules if m not in deprecated_modules]
         else:
