@@ -156,6 +156,11 @@ mkdir JobDocs-Windows
 
 REM Copy executable
 copy "%EXE_PATH%" JobDocs-Windows\ >nul
+if errorlevel 1 (
+    echo       ERROR: Failed to copy JobDocs.exe to distribution folder.
+    pause
+    exit /b 1
+)
 
 REM Create README
 echo Creating README...
