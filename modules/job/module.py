@@ -414,7 +414,7 @@ class JobModule(BaseModule):
                             self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
                     job_dest = job_path / file_name
-                    if not job_dest.exists():
+                    if bp_dest.exists() and not job_dest.exists():
                         create_file_link(bp_dest, job_dest, link_type)
                 else:
                     job_dest = job_path / file_name
@@ -650,6 +650,10 @@ class JobModule(BaseModule):
             self.refresh_job_tree()
             return
 
+        if self._worker and self._worker.isRunning():
+            self._worker.cancel()
+            self._worker.wait()
+
         self.job_tree.clear()
 
         # Mirror the filter logic from refresh_job_tree so search respects the UI controls
@@ -872,6 +876,7 @@ class JobModule(BaseModule):
     def open_blueprints_folder(self):
         """Open active customer's blueprints folder, or base directory if nothing selected"""
         folder_to_open = None
+        is_itar = False
 
         # First check if there's a selected customer in the tree
         items = self.job_tree.selectedItems() if self.job_tree else []
@@ -879,8 +884,8 @@ class JobModule(BaseModule):
             item = items[0]
             # Get display name (parent if job selected, or item itself if customer)
             display_name = item.parent().text(0) if item.parent() else item.text(0)
-            is_itar = display_name.startswith('[ITAR]')
-            customer = display_name.replace('[ITAR] ', '').replace('[ITAR]', '').strip()
+            is_itar = display_name.startswith(('[ITAR] ', '[ITAR-BP] '))
+            customer = display_name.replace('[ITAR-BP] ', '').replace('[ITAR] ', '').replace('[ITAR]', '').strip()
             bp_dir = self.app_context.get_setting(
                 'itar_blueprints_dir' if is_itar else 'blueprints_dir', ''
             )
@@ -902,9 +907,11 @@ class JobModule(BaseModule):
                     if os.path.exists(customer_bp):
                         folder_to_open = customer_bp
 
-        # Fallback to base blueprints directory
+        # Fallback to base blueprints directory (respect ITAR state)
         if not folder_to_open:
-            bp_dir = self.app_context.get_setting('blueprints_dir', '')
+            bp_dir = self.app_context.get_setting(
+                'itar_blueprints_dir' if is_itar else 'blueprints_dir', ''
+            )
             if not bp_dir or not os.path.exists(bp_dir):
                 self.show_error("Warning", "Blueprints directory not configured")
                 return
