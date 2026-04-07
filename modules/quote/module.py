@@ -836,8 +836,8 @@ class QuoteModule(BaseModule):
             item = items[0]
             # Get display name (parent if quote selected, or item itself if customer)
             display_name = item.parent().text(0) if item.parent() else item.text(0)
-            is_itar = display_name.startswith('[ITAR]')
-            customer = display_name.replace('[ITAR] ', '').replace('[ITAR]', '').strip()
+            is_itar = display_name.startswith(('[ITAR] ', '[ITAR-BP] '))
+            customer = display_name.replace('[ITAR-BP] ', '').replace('[ITAR] ', '').replace('[ITAR]', '').strip()
             bp_dir = self.app_context.get_setting(
                 'itar_blueprints_dir' if is_itar else 'blueprints_dir', ''
             )
