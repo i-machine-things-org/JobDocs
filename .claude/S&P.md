@@ -29,7 +29,7 @@ Review this file before making changes to the codebase.
 ## 2026-04-07 — Full codebase review (PR #5 — review/full-codebase)
 
 **Review:** CodeRabbit full codebase snapshot review — 16 findings across 10 files.
-**Result:** All 16 fixes applied on `fix/coderabbit-full-review`.
+**Result:** 15 fixes applied on `fix/coderabbit-full-review`. Finding 15 (`old/test-scripts/test_ui_loading.py`) not committed — `old/` is gitignored.
 
 ### Findings
 
