@@ -670,7 +670,8 @@ class SearchModule(BaseModule):
                 self.show_error("Not Found", "Could not determine customer for this result")
                 return
 
-            is_itar = '[ITAR]' in self.search_results[row]['customer']
+            customer_label = self.search_results[row]['customer']
+            is_itar = customer_label.startswith(('[ITAR] ', '[ITAR-BP] '))
             bp_dir = self.app_context.get_setting('itar_blueprints_dir' if is_itar else 'blueprints_dir', '')
             if bp_dir:
                 customer_bp = os.path.join(bp_dir, customer)
@@ -782,7 +783,8 @@ class SearchModule(BaseModule):
         if not customer:
             return None, None
 
-        is_itar = '[ITAR]' in self.search_results[row]['customer']
+        customer_label = self.search_results[row]['customer']
+        is_itar = customer_label.startswith(('[ITAR] ', '[ITAR-BP] '))
         bp_dir = self.app_context.get_setting(
             'itar_blueprints_dir' if is_itar else 'blueprints_dir', ''
         )
