@@ -476,3 +476,235 @@ Reviewing files that changed from the base of the PR and between 25c795501f4654e
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-07 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+
+**Actionable comments posted: 1**
+
+<details>
+<summary>♻️ Duplicate comments (3)</summary><blockquote>
+
+<details>
+<summary>.claude/S&P.md (3)</summary><blockquote>
+
+`217-217`: _⚠️ Potential issue_ | _🟡 Minor_
+
+**Remove spaces inside inline code span.**
+
+Line 217 has spaces inside the backticks around the ITAR token, triggering MD038. Change `` ` [ITAR] ` `` to `` `[ITAR]` ``.
+
+
+
+
+<details>
+<summary>📝 Suggested fix</summary>
+
+```diff
+-The search module (lines 674, 787) uses `startswith(('[ITAR] ', '[ITAR-BP] '))` to detect ITAR customers, but this module at line 839 uses `startswith('[ITAR]')`. While the simpler pattern technically matches `[ITAR-BP]` prefixes, it lacks the explicit space requirement and is inconsistent with the search module's more precise approach. The code also replaces both `[ITAR] ` and `[ITAR]` patterns, suggesting both formats should be handled consistently.
++The search module (lines 674, 787) uses `startswith(('[ITAR] ', '[ITAR-BP] '))` to detect ITAR customers, but this module at line 839 uses `startswith('[ITAR]')`. While the simpler pattern technically matches `[ITAR-BP]` prefixes, it lacks the explicit space requirement and is inconsistent with the search module's more precise approach. The code also replaces both `[ITAR]` and `[ITAR]` patterns, suggesting both formats should be handled consistently.
+```
+
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In @.claude/S&P.md at line 217, Fix the inline code span that contains extra
+spaces around the ITAR token: replace the backticked string that currently reads
+with spaces around the token (i.e., "` [ITAR] `") so it becomes a
+properly-formatted inline code span "`[ITAR]`"; ensure other similar occurrences
+match this format (no leading/trailing spaces inside backticks) to satisfy MD038
+and keep consistency with the search module's token usage.
+```
+
+</details>
+
+---
+
+`31-96`: _⚠️ Potential issue_ | _🟡 Minor_
+
+**Resolve the contradiction about finding 15's commit status.**
+
+Line 32 states "All 16 fixes applied" but lines 93-96 explicitly note that the change to `old/test-scripts/test_ui_loading.py` (finding 15) was "applied locally but not committed." Either update line 32 to "15 fixes applied" or rephrase to clarify that finding 15 was addressed locally but excluded from the commit.
+
+
+
+
+<details>
+<summary>📝 Suggested fix</summary>
+
+```diff
+-**Result:** All 16 fixes applied on `fix/coderabbit-full-review`.
++**Result:** 15 fixes applied on `fix/coderabbit-full-review`. Finding 15 applied locally only (file gitignored).
+```
+
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In @.claude/S&P.md around lines 31 - 96, Update the summary to resolve the
+contradiction between the top-line "All 16 fixes applied on
+`fix/coderabbit-full-review`" and the Finding 15 note that the change to
+`old/test-scripts/test_ui_loading.py` was "applied locally but not committed":
+either change the summary string "All 16 fixes applied on
+`fix/coderabbit-full-review`" to "15 fixes applied on
+`fix/coderabbit-full-review`" or append a clarifying parenthetical to the
+summary indicating that Finding 15 was fixed locally but intentionally excluded
+from the commit; locate the exact summary text "All 16 fixes applied on
+`fix/coderabbit-full-review`" and the Finding 15 bullet mentioning "applied
+locally but not committed" to make the consistent edit.
+```
+
+</details>
+
+---
+
+`150-150`: _⚠️ Potential issue_ | _🟡 Minor_
+
+**Add language identifiers to fenced code blocks.**
+
+Multiple fenced code blocks lack language identifiers (lines 150, 193, 231, 253, 413), triggering MD040 warnings. Add `text` or an appropriate language identifier after each opening fence.
+
+
+
+
+<details>
+<summary>📝 Suggested fix</summary>
+
+```diff
+-```
++```text
+ Verify each finding against the current code and only fix it if needed.
+```
+
+Apply this change to all five occurrences.
+
+</details>
+
+
+Also applies to: 193-193, 231-231, 253-253, 413-413
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+````
+Verify each finding against the current code and only fix it if needed.
+
+In @.claude/S&P.md at line 150, Update each fenced code block that currently
+opens with ``` so it includes a language identifier (e.g., change ``` to
+```text) for the five occurrences flagged (the plain triple-backtick fences near
+the reported spots). Locate the opening fences (``` ) and replace them with
+```text (or another appropriate language identifier) so each code block has an
+explicit language, mirroring the suggested fix example (```text Verify each
+finding against the current code and only fix it if needed.). Ensure you apply
+this change to all five occurrences flagged in the comment.
+````
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+````
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In @.claude/S&P.md:
+- Line 406: The duplicate H2 "2026-04-07 — `PR `#6`: fix: address all 16
+CodeRabbit findings from full codebase review`" at line 406 should be made
+unique to avoid MD024; edit that heading (the H2 string) to append a
+distinguishing suffix such as a run identifier or timestamp (e.g., "— Run ID:
+<id>" or "— review run 2") so it differs from the earlier H2 at line 106; update
+only the heading text for the section starting with "## 2026-04-07 — `PR `#6`:
+fix: address all 16 CodeRabbit findings from full codebase review`".
+
+---
+
+Duplicate comments:
+In @.claude/S&P.md:
+- Line 217: Fix the inline code span that contains extra spaces around the ITAR
+token: replace the backticked string that currently reads with spaces around the
+token (i.e., "` [ITAR] `") so it becomes a properly-formatted inline code span
+"`[ITAR]`"; ensure other similar occurrences match this format (no
+leading/trailing spaces inside backticks) to satisfy MD038 and keep consistency
+with the search module's token usage.
+- Around line 31-96: Update the summary to resolve the contradiction between the
+top-line "All 16 fixes applied on `fix/coderabbit-full-review`" and the Finding
+15 note that the change to `old/test-scripts/test_ui_loading.py` was "applied
+locally but not committed": either change the summary string "All 16 fixes
+applied on `fix/coderabbit-full-review`" to "15 fixes applied on
+`fix/coderabbit-full-review`" or append a clarifying parenthetical to the
+summary indicating that Finding 15 was fixed locally but intentionally excluded
+from the commit; locate the exact summary text "All 16 fixes applied on
+`fix/coderabbit-full-review`" and the Finding 15 bullet mentioning "applied
+locally but not committed" to make the consistent edit.
+- Line 150: Update each fenced code block that currently opens with ``` so it
+includes a language identifier (e.g., change ``` to ```text) for the five
+occurrences flagged (the plain triple-backtick fences near the reported spots).
+Locate the opening fences (``` ) and replace them with ```text (or another
+appropriate language identifier) so each code block has an explicit language,
+mirroring the suggested fix example (```text Verify each finding against the
+current code and only fix it if needed.). Ensure you apply this change to all
+five occurrences flagged in the comment.
+````
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: defaults
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `e4e7be04-be8f-4aa7-979c-ce1dad4459d4`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 910cb708457d66c0f9255a29821330b18a3e3f20 and 975f9df492b8403858dfb483a8c67e54a463590b.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `.claude/S&P.md`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
