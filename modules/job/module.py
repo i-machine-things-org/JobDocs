@@ -407,24 +407,22 @@ class JobModule(BaseModule):
 
                 if is_blueprint_file(file_name, blueprint_extensions):
                     bp_dest = customer_bp / file_name
-                    try:
-                        shutil.copy2(file_path, bp_dest)
-                    except FileExistsError:
-                        pass
-                    except PermissionError:
-                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                    if not bp_dest.exists():
+                        try:
+                            shutil.copy2(file_path, bp_dest)
+                        except PermissionError:
+                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
                     job_dest = job_path / file_name
                     if not job_dest.exists():
                         create_file_link(bp_dest, job_dest, link_type)
                 else:
                     job_dest = job_path / file_name
-                    try:
-                        shutil.copy2(file_path, job_dest)
-                    except FileExistsError:
-                        pass
-                    except PermissionError:
-                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                    if not job_dest.exists():
+                        try:
+                            shutil.copy2(file_path, job_dest)
+                        except PermissionError:
+                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
             # Link existing drawings
             if drawings:
@@ -803,34 +801,35 @@ class JobModule(BaseModule):
             try:
                 if dest == 'blueprints':
                     bp_dest = customer_bp / file_name
-                    try:
-                        shutil.copy2(file_path, bp_dest)
-                        added += 1
-                    except FileExistsError:
-                        skipped += 1
-                    except PermissionError:
-                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                    if not bp_dest.exists():
+                        try:
+                            shutil.copy2(file_path, bp_dest)
+                            added += 1
+                        except PermissionError:
+                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                            skipped += 1
+                    else:
                         skipped += 1
 
                 elif dest == 'job':
                     job_dest = Path(job_path) / file_name
-                    try:
-                        shutil.copy2(file_path, job_dest)
-                        added += 1
-                    except FileExistsError:
-                        skipped += 1
-                    except PermissionError:
-                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                    if not job_dest.exists():
+                        try:
+                            shutil.copy2(file_path, job_dest)
+                            added += 1
+                        except PermissionError:
+                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                            skipped += 1
+                    else:
                         skipped += 1
 
                 else:  # both
                     bp_dest = customer_bp / file_name
-                    try:
-                        shutil.copy2(file_path, bp_dest)
-                    except FileExistsError:
-                        pass
-                    except PermissionError:
-                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                    if not bp_dest.exists():
+                        try:
+                            shutil.copy2(file_path, bp_dest)
+                        except PermissionError:
+                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
                     job_dest = Path(job_path) / file_name
                     if not job_dest.exists():
