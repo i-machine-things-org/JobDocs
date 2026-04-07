@@ -708,3 +708,459 @@ Reviewing files that changed from the base of the PR and between 910cb708457d66c
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-07 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+
+**Actionable comments posted: 1**
+
+> [!CAUTION]
+> Some comments are outside the diff and can’t be posted inline due to platform limitations.
+> 
+> 
+> 
+> <details>
+> <summary>⚠️ Outside diff range comments (3)</summary><blockquote>
+> 
+> <details>
+> <summary>core/module_loader.py (1)</summary><blockquote>
+> 
+> `52-64`: _⚠️ Potential issue_ | _🟡 Minor_
+> 
+> **Frozen module list correctly matches spec file; clarify undefined "Rule 3" reference.**
+> 
+> Verification confirms the hardcoded module list aligns with `hiddenimports` in JobDocs.spec—all seven modules are present with their full module paths. The filtering logic correctly handles deprecated modules.
+> 
+> However, the comment on line 54 references "Rule 3" without any definition or documentation in the codebase. Expand this reference inline to clarify what "Rule 3" means, or add a link to external documentation where it is defined. This will help future maintainers understand the rationale for excluding PSM-only modules.
+> 
+> The implicit maintenance coupling between this file and the spec file's `hiddenimports` is unavoidable but acceptable—just ensure any future changes to module lists are coordinated between both locations.
+> 
+> <details>
+> <summary>🤖 Prompt for AI Agents</summary>
+> 
+> ```
+> Verify each finding against the current code and only fix it if needed.
+> 
+> In `@core/module_loader.py` around lines 52 - 64, The inline comment in
+> module_loader.py referencing "Rule 3" is ambiguous; update the comment above the
+> hardcoded all_modules list to briefly explain what "Rule 3" means (e.g.,
+> "PSM-only modules are excluded from stable builds per release policy: PSM
+> modules are runtime-only and must not be bundled") or add a one-line link to the
+> external policy doc, and mention the coupling to JobDocs.spec's hiddenimports so
+> future maintainers know to update both all_modules and hiddenimports together;
+> ensure references to all_modules and deprecated_modules remain unchanged.
+> ```
+> 
+> </details>
+> 
+> </blockquote></details>
+> <details>
+> <summary>modules/quote/module.py (1)</summary><blockquote>
+> 
+> `802-815`: _⚠️ Potential issue_ | _🟠 Major_
+> 
+> **Link creation not gated by `bp_dest` existence in the "both" destination path.**
+> 
+> Same issue as in `modules/job/module.py`: if the copy to `bp_dest` fails due to `PermissionError`, `bp_dest` won't exist but line 812 still attempts to create a link from it.
+> 
+> <details>
+> <summary>Suggested fix</summary>
+> 
+> ```diff
+>                  else:  # both
+>                      bp_dest = customer_bp / file_name
+> +                    bp_ready = bp_dest.exists()
+> -                    if not bp_dest.exists():
+> +                    if not bp_ready:
+>                          try:
+>                              shutil.copy2(file_path, bp_dest)
+> +                            bp_ready = True
+>                          except PermissionError:
+>                              self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+>  
+>                      quote_dest = Path(quote_path) / file_name
+> -                    if not quote_dest.exists():
+> +                    if bp_ready and not quote_dest.exists():
+>                          create_file_link(bp_dest, quote_dest, link_type)
+>                          added += 1
+>                      else:
+>                          skipped += 1
+> ```
+> </details>
+> 
+> <details>
+> <summary>🤖 Prompt for AI Agents</summary>
+> 
+> ```
+> Verify each finding against the current code and only fix it if needed.
+> 
+> In `@modules/quote/module.py` around lines 802 - 815, The copy-to-bp_dest can fail
+> with PermissionError but the code still attempts to create a link from bp_dest;
+> change the "both" branch so that you only call create_file_link(bp_dest,
+> quote_dest, link_type) and increment added if bp_dest.exists() (or perform the
+> link inside the try block after a successful shutil.copy2) and otherwise skip
+> linking/increment skipped and log the PermissionError; ensure references to
+> bp_dest, quote_dest, create_file_link, file_path, file_name, link_type, added,
+> and skipped are updated so added is only increased when the link was actually
+> created.
+> ```
+> 
+> </details>
+> 
+> </blockquote></details>
+> <details>
+> <summary>modules/job/module.py (1)</summary><blockquote>
+> 
+> `849-862`: _⚠️ Potential issue_ | _🟠 Major_
+> 
+> **Link creation not gated by `bp_dest` existence in the "both" destination path.**
+> 
+> If the copy to `bp_dest` fails due to `PermissionError`, `bp_dest` won't exist but line 859 still attempts to create a link from it. This will fail or produce undefined behavior.
+> 
+> <details>
+> <summary>Suggested fix</summary>
+> 
+> ```diff
+>                  else:  # both
+>                      bp_dest = customer_bp / file_name
+> +                    bp_ready = bp_dest.exists()
+> -                    if not bp_dest.exists():
+> +                    if not bp_ready:
+>                          try:
+>                              shutil.copy2(file_path, bp_dest)
+> +                            bp_ready = True
+>                          except PermissionError:
+>                              self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+>  
+>                      job_dest = Path(job_path) / file_name
+> -                    if not job_dest.exists():
+> +                    if bp_ready and not job_dest.exists():
+>                          create_file_link(bp_dest, job_dest, link_type)
+>                          added += 1
+>                      else:
+>                          skipped += 1
+> ```
+> </details>
+> 
+> <details>
+> <summary>🤖 Prompt for AI Agents</summary>
+> 
+> ```
+> Verify each finding against the current code and only fix it if needed.
+> 
+> In `@modules/job/module.py` around lines 849 - 862, The current "both" branch may
+> call create_file_link(bp_dest, job_dest, link_type) even if the prior
+> shutil.copy2 failed and bp_dest does not exist; update the block so that after
+> the except PermissionError path you only attempt create_file_link if
+> bp_dest.exists(), otherwise skip linking (and increment skipped) and keep the
+> existing warning; ensure added is incremented only when create_file_link
+> succeeds and reference bp_dest, job_dest, create_file_link, link_type,
+> file_path, and file_name when locating the change.
+> ```
+> 
+> </details>
+> 
+> </blockquote></details>
+> 
+> </blockquote></details>
+
+<details>
+<summary>♻️ Duplicate comments (3)</summary><blockquote>
+
+<details>
+<summary>.claude/S&P.md (3)</summary><blockquote>
+
+`406-406`: _⚠️ Potential issue_ | _🟡 Minor_
+
+**Make repeated PR `#6` H2 headings unique.**
+
+Line 406 and Line 482 repeat the same H2 text (already duplicated with Line 106), which keeps triggering MD024.
+
+ 
+
+<details>
+<summary>Suggested edit</summary>
+
+```diff
+-## 2026-04-07 — `PR `#6`: fix: address all 16 CodeRabbit findings from full codebase review`
++## 2026-04-07 — `PR `#6`: fix: address all 16 CodeRabbit findings from full codebase review` — review run 2
+
+...
+
+-## 2026-04-07 — `PR `#6`: fix: address all 16 CodeRabbit findings from full codebase review`
++## 2026-04-07 — `PR `#6`: fix: address all 16 CodeRabbit findings from full codebase review` — review run 3
+```
+</details>
+
+
+Also applies to: 482-482
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In @.claude/S&P.md at line 406, The H2 "2026-04-07 — `PR `#6`: fix: address all 16
+CodeRabbit findings from full codebase review`" is duplicated; update the
+repeated H2 occurrences so each heading is unique (for example append a
+disambiguator like "(continued)", "(part 2)", or a specific file/module tag)
+where the same exact heading string appears; locate the headings by searching
+for that exact H2 text and change the duplicates to unique variants while
+keeping the original heading intact for the first occurrence.
+```
+
+</details>
+
+---
+
+`413-413`: _⚠️ Potential issue_ | _🟡 Minor_
+
+**Add language identifiers to newly added fenced blocks.**
+
+Line 413, Line 514, Line 551, Line 599, and Line 621 still open fenced blocks without a language, so MD040 persists in the new sections.
+
+ 
+
+<details>
+<summary>Suggested edit</summary>
+
+```diff
+-````
++```text
+ Verify each finding against the current code and only fix it if needed.
+ ...
+-````
++```
+```
+</details>
+
+
+Also applies to: 514-514, 551-551, 599-599, 621-621
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+````
+Verify each finding against the current code and only fix it if needed.
+
+In @.claude/S&P.md at line 413, Several fenced code blocks were added without
+language identifiers; update each opening triple-backtick fence for the newly
+added blocks (the ones that wrap the "Verify each finding against the current
+code..." and similar note blocks) to include a language tag such as text (i.e.,
+change ``` to ```text) so MD040 is resolved; locate the untagged fences (the
+bare ``` blocks) and replace them with ```text for consistency.
+````
+
+</details>
+
+---
+
+`217-217`: _⚠️ Potential issue_ | _🟡 Minor_
+
+**Remove internal spacing in inline code span.**
+
+Line 217 still contains a spaced code span variant (`[ITAR] `), which triggers MD038.
+
+ 
+
+<details>
+<summary>Suggested edit</summary>
+
+```diff
+-The code also replaces both `[ITAR] ` and `[ITAR]` patterns, suggesting both formats should be handled consistently.
++The code also handles both `[ITAR]` (with and without trailing-space variants in raw text), suggesting both formats should be handled consistently.
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In @.claude/S&P.md at line 217, The inline code span contains a trailing space
+variant `[ITAR] ` which triggers MD038; update the text to use the non-spaced
+inline code span `[ITAR]` and make the markdown consistent by replacing any
+other occurrences of `[ITAR] ` with `[ITAR]`; also ensure the document's
+described detection logic references the exact patterns (`startswith(('[ITAR] ',
+'[ITAR-BP] ')` vs `startswith('[ITAR]')`) consistently in prose so readers and
+the code replacement logic that handles both `[ITAR] ` and `[ITAR]` are aligned.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🧹 Nitpick comments (1)</summary><blockquote>
+
+<details>
+<summary>core/app_context.py (1)</summary><blockquote>
+
+`268-268`: **Remove extraneous `f` prefix from string literal.**
+
+This f-string has no placeholders—the double braces `{{po_number}}` produce a literal `{po_number}`. Remove the `f` prefix.
+
+```diff
+-                    print(f"[find_job_folders] Detected {{po_number}} in prefix, enumerating PO dirs", flush=True)
++                    print("[find_job_folders] Detected {po_number} in prefix, enumerating PO dirs", flush=True)
+```
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@core/app_context.py` at line 268, In the print in find_job_folders, remove
+the unnecessary f-string prefix so the literal "{po_number}" is printed
+correctly; change the print call that currently uses print(f"[find_job_folders]
+Detected {{po_number}} in prefix, enumerating PO dirs", flush=True) to a regular
+string literal without the leading f to avoid treating it as an f-string.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+````
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@modules/quote/module.py`:
+- Around line 829-868: In open_blueprints_folder: initialize is_itar = False at
+the start, ensure the branch that reads the customer combo sets is_itar (e.g.,
+from self.quote_itar_check.isChecked()), and change the fallback get_setting
+call to use 'itar_blueprints_dir' when is_itar is True (otherwise
+'blueprints_dir'); this makes the final bp_dir lookup consistent with how
+is_itar is determined earlier in the function.
+
+---
+
+Outside diff comments:
+In `@core/module_loader.py`:
+- Around line 52-64: The inline comment in module_loader.py referencing "Rule 3"
+is ambiguous; update the comment above the hardcoded all_modules list to briefly
+explain what "Rule 3" means (e.g., "PSM-only modules are excluded from stable
+builds per release policy: PSM modules are runtime-only and must not be
+bundled") or add a one-line link to the external policy doc, and mention the
+coupling to JobDocs.spec's hiddenimports so future maintainers know to update
+both all_modules and hiddenimports together; ensure references to all_modules
+and deprecated_modules remain unchanged.
+
+In `@modules/job/module.py`:
+- Around line 849-862: The current "both" branch may call
+create_file_link(bp_dest, job_dest, link_type) even if the prior shutil.copy2
+failed and bp_dest does not exist; update the block so that after the except
+PermissionError path you only attempt create_file_link if bp_dest.exists(),
+otherwise skip linking (and increment skipped) and keep the existing warning;
+ensure added is incremented only when create_file_link succeeds and reference
+bp_dest, job_dest, create_file_link, link_type, file_path, and file_name when
+locating the change.
+
+In `@modules/quote/module.py`:
+- Around line 802-815: The copy-to-bp_dest can fail with PermissionError but the
+code still attempts to create a link from bp_dest; change the "both" branch so
+that you only call create_file_link(bp_dest, quote_dest, link_type) and
+increment added if bp_dest.exists() (or perform the link inside the try block
+after a successful shutil.copy2) and otherwise skip linking/increment skipped
+and log the PermissionError; ensure references to bp_dest, quote_dest,
+create_file_link, file_path, file_name, link_type, added, and skipped are
+updated so added is only increased when the link was actually created.
+
+---
+
+Duplicate comments:
+In @.claude/S&P.md:
+- Line 406: The H2 "2026-04-07 — `PR `#6`: fix: address all 16 CodeRabbit findings
+from full codebase review`" is duplicated; update the repeated H2 occurrences so
+each heading is unique (for example append a disambiguator like "(continued)",
+"(part 2)", or a specific file/module tag) where the same exact heading string
+appears; locate the headings by searching for that exact H2 text and change the
+duplicates to unique variants while keeping the original heading intact for the
+first occurrence.
+- Line 413: Several fenced code blocks were added without language identifiers;
+update each opening triple-backtick fence for the newly added blocks (the ones
+that wrap the "Verify each finding against the current code..." and similar note
+blocks) to include a language tag such as text (i.e., change ``` to ```text) so
+MD040 is resolved; locate the untagged fences (the bare ``` blocks) and replace
+them with ```text for consistency.
+- Line 217: The inline code span contains a trailing space variant `[ITAR] `
+which triggers MD038; update the text to use the non-spaced inline code span
+`[ITAR]` and make the markdown consistent by replacing any other occurrences of
+`[ITAR] ` with `[ITAR]`; also ensure the document's described detection logic
+references the exact patterns (`startswith(('[ITAR] ', '[ITAR-BP] ')` vs
+`startswith('[ITAR]')`) consistently in prose so readers and the code
+replacement logic that handles both `[ITAR] ` and `[ITAR]` are aligned.
+
+---
+
+Nitpick comments:
+In `@core/app_context.py`:
+- Line 268: In the print in find_job_folders, remove the unnecessary f-string
+prefix so the literal "{po_number}" is printed correctly; change the print call
+that currently uses print(f"[find_job_folders] Detected {{po_number}} in prefix,
+enumerating PO dirs", flush=True) to a regular string literal without the
+leading f to avoid treating it as an f-string.
+````
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: defaults
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `025e0b68-45ef-480e-8831-db9dbd3c3d71`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 975f9df492b8403858dfb483a8c67e54a463590b and c109116f1c4b7d324166a6ee69dbed87a8eab211.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (5)</summary>
+
+* `.claude/S&P.md`
+* `core/app_context.py`
+* `core/module_loader.py`
+* `modules/job/module.py`
+* `modules/quote/module.py`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
