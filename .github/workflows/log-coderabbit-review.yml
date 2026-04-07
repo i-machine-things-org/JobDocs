@@ -36,12 +36,12 @@ jobs:
             echo "## ${DATE} — \`${PR_REF}\`"
             echo ""
             echo "${REVIEW_BODY}"
-          } >> .claude/S&P.md
+          } >> ".claude/S&P.md"
 
       - name: Commit S&P.md update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .claude/S&P.md
+          git add ".claude/S&P.md"
           git diff --cached --quiet || git commit -m "docs: log coderabbit review for PR #${{ github.event.pull_request.number }}"
           git push
