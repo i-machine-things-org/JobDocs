@@ -651,12 +651,31 @@ class JobModule(BaseModule):
             return
 
         self.job_tree.clear()
-        dirs_to_search = self._get_customer_files_dirs()
+
+        # Mirror the filter logic from refresh_job_tree so search respects the UI controls
+        dirs_to_search = []
+        if self.add_all_radio.isChecked():
+            dirs_to_search = self._get_customer_files_dirs()
+        elif self.add_standard_radio.isChecked():
+            cf_dir = self.app_context.get_setting('customer_files_dir', '')
+            if cf_dir and os.path.exists(cf_dir):
+                dirs_to_search.append(('', cf_dir))
+        else:  # ITAR only
+            itar_cf_dir = self.app_context.get_setting('itar_customer_files_dir', '')
+            if itar_cf_dir and os.path.exists(itar_cf_dir):
+                dirs_to_search.append(('ITAR', itar_cf_dir))
+
+        selected_customer = self.add_customer_combo.currentText()
+        show_all = selected_customer == "(All Customers)" or not selected_customer
+
         results = 0
 
         for prefix, cf_dir in dirs_to_search:
             try:
-                customers = [d for d in os.listdir(cf_dir) if os.path.isdir(os.path.join(cf_dir, d))]
+                if show_all:
+                    customers = [d for d in os.listdir(cf_dir) if os.path.isdir(os.path.join(cf_dir, d))]
+                else:
+                    customers = [selected_customer] if os.path.isdir(os.path.join(cf_dir, selected_customer)) else []
 
                 for customer in sorted(customers):
                     customer_path = os.path.join(cf_dir, customer)
