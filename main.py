@@ -512,29 +512,6 @@ Search across all customers and jobs.</p>
         # Hook for modules to refresh history displays
         self.log_message("History refreshed")
 
-    # ==================== Job Creation (for Bulk module) ====================
-
-    def create_single_job(self, customer: str, job_number: str, description: str,
-                         drawings: List[str], is_itar: bool, quote_files: List[str]) -> bool:
-        """
-        Create a single job (called by Bulk module).
-        This is a simplified version - full implementation would be in Job module.
-        """
-        try:
-            # This is a stub - in reality, the Job module handles job creation
-            # The Bulk module calls this to create jobs
-            self.add_to_history('job', {
-                'customer': customer,
-                'job_number': job_number,
-                'description': description,
-                'drawings': drawings,
-                'is_itar': is_itar
-            })
-            return True
-        except Exception as e:
-            self.log_message(f"Error creating job {job_number}: {e}")
-            return False
-
     # ==================== Application Cleanup ====================
 
     def closeEvent(self, event):  # pyright: ignore[reportIncompatibleMethodOverride]
