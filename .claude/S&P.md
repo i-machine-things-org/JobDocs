@@ -1201,3 +1201,224 @@ Reviewing files that changed from the base of the PR and between 975f9df492b8403
    - Double braces produce literal; f-prefix was redundant
    - Fix: removed f prefix
 
+
+---
+
+## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+
+
+
+> [!CAUTION]
+> Some comments are outside the diff and can’t be posted inline due to platform limitations.
+> 
+> 
+> 
+> <details>
+> <summary>⚠️ Outside diff range comments (1)</summary><blockquote>
+> 
+> <details>
+> <summary>modules/quote/module.py (1)</summary><blockquote>
+> 
+> `602-610`: _⚠️ Potential issue_ | _🟠 Major_
+> 
+> **Missing worker cancellation before synchronous search.**
+> 
+> Unlike `search_jobs` in the job module (which now cancels any running worker at lines 653-655), `search_quotes` does not cancel `self._worker` before clearing the tree and performing a synchronous search. If `refresh_quote_tree()` is still loading, its queued `customer_loaded` emissions can repopulate `self.quote_tree` after line 610 clears it, mixing stale browse results with search results.
+> 
+> 
+> <details>
+> <summary>Suggested fix</summary>
+> 
+> ```diff
+>      def search_quotes(self):
+>          """Search for quotes matching the search term"""
+>          search_term = self.add_search_edit.text().strip().lower()
+>  
+>          if not search_term:
+>              self.refresh_quote_tree()
+>              return
+>  
+> +        if self._worker and self._worker.isRunning():
+> +            self._worker.cancel()
+> +            self._worker.wait()
+> +
+>          self.quote_tree.clear()
+> ```
+> </details>
+> 
+> <details>
+> <summary>🤖 Prompt for AI Agents</summary>
+> 
+> ```
+> Verify each finding against the current code and only fix it if needed.
+> 
+> In `@modules/quote/module.py` around lines 602 - 610, search_quotes is missing
+> cancellation of any running background worker, so add the same worker-cancel
+> logic used in search_jobs: if self._worker exists and is running, call its
+> cancel/stop method and wait/handle cancellation before calling
+> self.refresh_quote_tree() or clearing self.quote_tree; ensure this runs at the
+> start of search_quotes (referencing method name search_quotes and attribute
+> self._worker) so pending customer_loaded signals from refresh_quote_tree()
+> cannot repopulate the tree after you clear it.
+> ```
+> 
+> </details>
+> 
+> </blockquote></details>
+> 
+> </blockquote></details>
+
+<details>
+<summary>🧹 Nitpick comments (2)</summary><blockquote>
+
+<details>
+<summary>.claude/S&P.md (2)</summary><blockquote>
+
+`1200-1202`: **Minor grammar nit: hyphenate "f-prefix".**
+
+Static analysis flags line 1202. The phrase "removed f prefix" should be "removed f-prefix" (compound modifier).
+
+```diff
+-   - Fix: removed f prefix
++   - Fix: removed f-prefix
+```
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In @.claude/S&P.md around lines 1200 - 1202, Update the documentation line that
+currently reads "removed f prefix" to use the hyphenated compound modifier
+"removed f-prefix" in the S&P entry referencing the change to
+core/app_context.py (the "f-prefix on {{po_number}} print" note); edit the
+sentence in .claude/S&P.md so the phrase is "removed f-prefix".
+```
+
+</details>
+
+---
+
+`960-992`: **MD038 warning is in a quoted duplicate-comment log entry.**
+
+Line 964 triggers MD038 due to the spaced code span `` `[ITAR] ` ``, but this text is inside a `<details>` block quoting a prior CodeRabbit comment. Since this is a verbatim log of historical review feedback (not new prose you're authoring), editing it would misrepresent the original comment.
+
+If you want a clean lint pass, you could either:
+1. Wrap the entire quoted section in a raw HTML block so linters skip it, or
+2. Accept the warning as a known artifact of logging verbatim review history.
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In @.claude/S&P.md around lines 960 - 992, The quoted duplicate-comment log
+entry contains a spaced inline code span `[ITAR] ` that triggers MD038; do not
+alter the historical verbatim text — instead wrap that entire
+quoted/duplicate-comment block (the <details> / quoted review text containing ``
+`[ITAR] ` ``) in a raw HTML pre/code block (e.g., <pre><code>...</code></pre>)
+so linters skip it, or alternatively replace only the spaced inline code span
+`[ITAR] ` with the non-spaced `[ITAR]` everywhere in that quoted section if you
+prefer to normalize; target the quoted duplicate-comment block and the exact
+token `[ITAR] ` when making the change.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Outside diff comments:
+In `@modules/quote/module.py`:
+- Around line 602-610: search_quotes is missing cancellation of any running
+background worker, so add the same worker-cancel logic used in search_jobs: if
+self._worker exists and is running, call its cancel/stop method and wait/handle
+cancellation before calling self.refresh_quote_tree() or clearing
+self.quote_tree; ensure this runs at the start of search_quotes (referencing
+method name search_quotes and attribute self._worker) so pending customer_loaded
+signals from refresh_quote_tree() cannot repopulate the tree after you clear it.
+
+---
+
+Nitpick comments:
+In @.claude/S&P.md:
+- Around line 1200-1202: Update the documentation line that currently reads
+"removed f prefix" to use the hyphenated compound modifier "removed f-prefix" in
+the S&P entry referencing the change to core/app_context.py (the "f-prefix on
+{{po_number}} print" note); edit the sentence in .claude/S&P.md so the phrase is
+"removed f-prefix".
+- Around line 960-992: The quoted duplicate-comment log entry contains a spaced
+inline code span `[ITAR] ` that triggers MD038; do not alter the historical
+verbatim text — instead wrap that entire quoted/duplicate-comment block (the
+<details> / quoted review text containing `` `[ITAR] ` ``) in a raw HTML
+pre/code block (e.g., <pre><code>...</code></pre>) so linters skip it, or
+alternatively replace only the spaced inline code span `[ITAR] ` with the
+non-spaced `[ITAR]` everywhere in that quoted section if you prefer to
+normalize; target the quoted duplicate-comment block and the exact token `[ITAR]
+` when making the change.
+```
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: defaults
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `67f46ac5-a17e-4956-8a33-3a2d718681f4`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between c109116f1c4b7d324166a6ee69dbed87a8eab211 and cf2b71e71e902622ab3e565e9b21f89bf024cd49.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (5)</summary>
+
+* `.claude/S&P.md`
+* `core/app_context.py`
+* `core/module_loader.py`
+* `modules/job/module.py`
+* `modules/quote/module.py`
+
+</details>
+
+<details>
+<summary>✅ Files skipped from review due to trivial changes (1)</summary>
+
+* core/app_context.py
+
+</details>
+
+<details>
+<summary>🚧 Files skipped from review as they are similar to previous changes (1)</summary>
+
+* core/module_loader.py
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
