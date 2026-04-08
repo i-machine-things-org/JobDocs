@@ -1647,3 +1647,139 @@ Reviewing files that changed from the base of the PR and between c109116f1c4b7d3
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+
+**Actionable comments posted: 2**
+
+<details>
+<summary>♻️ Duplicate comments (1)</summary><blockquote>
+
+<details>
+<summary>.claude/S&P.md (1)</summary><blockquote>
+
+`1252-1252`: _⚠️ Potential issue_ | _🟡 Minor_
+
+**Add language identifier to fenced code block.**
+
+This fenced code block lacks a language identifier, triggering MD040. This same issue was flagged in a previous review but remains unresolved.
+
+<details>
+<summary>📝 Suggested fix</summary>
+
+```diff
+-```
++```text
+ Verify each finding against the current code and only fix it if needed.
+```
+
+</details>
+
+
+
+
+Also applies to: 1289-1289
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In @.claude/S&P.md at line 1252, A fenced code block containing the text "Verify
+each finding against the current code and only fix it if needed." is missing a
+language identifier (MD040); update the opening fence to include a language tag
+(e.g., add "text" after the backticks) so it becomes a labeled fenced code block
+and repeat the same fix for the other occurrence flagged at the secondary
+location.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+````
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In @.claude/S&P.md:
+- Line 1465: Three fenced code blocks open with bare ``` (no language) and
+trigger MD040; update each opening fence to include the language identifier
+"text". Locate the three occurrences of triple-backtick blocks (one that
+contains the line "Verify each finding against the current code and only fix it
+if needed." and the two other similar bare fences near it) and change their
+opening from ``` to ```text so all fenced blocks consistently include a language
+identifier.
+- Line 1428: The duplicate heading at the second occurrence (previously flagged
+by MD024) should be made unique — edit the duplicate heading text around where
+the heading at line 1428 appears and append a distinguishing suffix (e.g., the
+run timestamp or the Run ID `2d6f1879-407a-463f-9f80-eff48353efd1` from the
+document metadata) so the two headings are no longer identical; update only the
+heading text (not other content) to preserve context and avoid further MD024
+violations.
+
+---
+
+Duplicate comments:
+In @.claude/S&P.md:
+- Line 1252: A fenced code block containing the text "Verify each finding
+against the current code and only fix it if needed." is missing a language
+identifier (MD040); update the opening fence to include a language tag (e.g.,
+add "text" after the backticks) so it becomes a labeled fenced code block and
+repeat the same fix for the other occurrence flagged at the secondary location.
+````
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: defaults
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `22e1d0e8-9e8a-48b4-a33c-3427b0b438db`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 9cf55370acf1fd78e528878667bb00c0c05857eb and a760adb4d5433ac4d5cdb84f225bffbabdd8a97b.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `.claude/S&P.md`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
