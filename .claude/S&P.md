@@ -961,7 +961,7 @@ bare ``` blocks) and replace them with ```text for consistency.
 
 **Remove internal spacing in inline code span.**
 
-Line 217 still contains a spaced code span variant (`[ITAR] `), which triggers MD038.
+Line 217 still contains a spaced code span variant (`[ITAR]`), which triggers MD038.
 
  
 
@@ -1199,7 +1199,7 @@ Reviewing files that changed from the base of the PR and between 975f9df492b8403
 
 7. **Unused f-prefix on {{po_number}} print** - `core/app_context.py`
    - Double braces produce literal; f-prefix was redundant
-   - Fix: removed f prefix
+   - Fix: removed f-prefix
 
 
 ---
@@ -1311,7 +1311,7 @@ If you want a clean lint pass, you could either:
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 In @.claude/S&P.md around lines 960 - 992, The quoted duplicate-comment log
@@ -1334,7 +1334,7 @@ token `[ITAR] ` when making the change.
 <details>
 <summary>🤖 Prompt for all review comments with AI agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 Outside diff comments:
