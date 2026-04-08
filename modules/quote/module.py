@@ -607,6 +607,10 @@ class QuoteModule(BaseModule):
             self.refresh_quote_tree()
             return
 
+        if self._worker and self._worker.isRunning():
+            self._worker.cancel()
+            self._worker.wait()
+
         self.quote_tree.clear()
 
         # Mirror the filter logic from refresh_quote_tree so search respects the UI controls
