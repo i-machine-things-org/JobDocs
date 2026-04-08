@@ -29,13 +29,21 @@ jobs:
           DATE=$(echo "$REVIEW_DATE" | cut -c1-10)
           PR_REF="PR #${PR_NUMBER}: ${PR_TITLE}"
 
+          # Compute a unique run number to avoid MD024 duplicate-heading violations.
+          RUN_COUNT=$(grep -c "^## ${DATE}.*${PR_NUMBER}" ".claude/S&P.md" 2>/dev/null || true)
+          RUN_NUM=$((RUN_COUNT + 1))
+          HEADING="## ${DATE} — \`${PR_REF}\` — review run ${RUN_NUM}"
+
+          # Sanitize review body: add 'text' to bare fence openers (MD040).
+          CLEAN_BODY=$(python3 .github/scripts/sanitize_review.py)
+
           {
             echo ""
             echo "---"
             echo ""
-            echo "## ${DATE} — \`${PR_REF}\`"
+            echo "${HEADING}"
             echo ""
-            echo "${REVIEW_BODY}"
+            echo "${CLEAN_BODY}"
           } >> ".claude/S&P.md"
 
       - name: Commit S&P.md update
