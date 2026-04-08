@@ -147,7 +147,7 @@ Review this file before making changes to the codebase.
 > <details>
 > <summary>🤖 Prompt for AI Agents</summary>
 > 
-> ```
+> ```text
 > Verify each finding against the current code and only fix it if needed.
 > 
 > In `@modules/job/module.py` around lines 645 - 666, Before clearing and performing
@@ -190,7 +190,7 @@ Note: Line 268's f-string with `{{po_number}}` is intentional (escaped braces di
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 In `@core/app_context.py` around lines 311 - 318, The print statements inside
@@ -214,7 +214,7 @@ interpolation using the variables referenced (item, e) as appropriate.
 
 `837-848`: **Align ITAR prefix detection to match search module pattern for consistency.**
 
-The search module (lines 674, 787) uses `startswith(('[ITAR] ', '[ITAR-BP] '))` to detect ITAR customers, but this module at line 839 uses `startswith('[ITAR]')`. While the simpler pattern technically matches `[ITAR-BP]` prefixes, it lacks the explicit space requirement and is inconsistent with the search module's more precise approach. The code also replaces both `[ITAR] ` and `[ITAR]` patterns, suggesting both formats should be handled consistently.
+The search module (lines 674, 787) uses `startswith(('[ITAR] ', '[ITAR-BP] '))` to detect ITAR customers, but this module at line 839 uses `startswith('[ITAR]')`. While the simpler pattern technically matches `[ITAR-BP]` prefixes, it lacks the explicit space requirement and is inconsistent with the search module's more precise approach. The code also handles both `[ITAR]` (with and without trailing-space variants in raw text), suggesting both formats should be handled consistently.
 
 Update line 839:
 
@@ -228,7 +228,7 @@ This aligns with the search module's pattern and improves clarity about expected
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 In `@modules/quote/module.py` around lines 837 - 848, The ITAR prefix detection in
@@ -250,7 +250,7 @@ resolution uses the consistent prefix detection used elsewhere.
 <details>
 <summary>🤖 Prompt for all review comments with AI agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 Inline comments:
@@ -403,14 +403,14 @@ Reviewing files that changed from the base of the PR and between 98817da82ab297b
 
 ---
 
-## 2026-04-07 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+## 2026-04-07 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 2
 
 **Actionable comments posted: 2**
 
 <details>
 <summary>🤖 Prompt for all review comments with AI agents</summary>
 
-````
+````text
 Verify each finding against the current code and only fix it if needed.
 
 Inline comments:
@@ -479,7 +479,7 @@ Reviewing files that changed from the base of the PR and between 25c795501f4654e
 
 ---
 
-## 2026-04-07 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+## 2026-04-07 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 3
 
 **Actionable comments posted: 1**
 
@@ -502,7 +502,7 @@ Line 217 has spaces inside the backticks around the ITAR token, triggering MD038
 <summary>📝 Suggested fix</summary>
 
 ```diff
--The search module (lines 674, 787) uses `startswith(('[ITAR] ', '[ITAR-BP] '))` to detect ITAR customers, but this module at line 839 uses `startswith('[ITAR]')`. While the simpler pattern technically matches `[ITAR-BP]` prefixes, it lacks the explicit space requirement and is inconsistent with the search module's more precise approach. The code also replaces both `[ITAR] ` and `[ITAR]` patterns, suggesting both formats should be handled consistently.
+-The search module (lines 674, 787) uses `startswith(('[ITAR] ', '[ITAR-BP] '))` to detect ITAR customers, but this module at line 839 uses `startswith('[ITAR]')`. While the simpler pattern technically matches `[ITAR-BP]` prefixes, it lacks the explicit space requirement and is inconsistent with the search module's more precise approach. The code also handles both `[ITAR]` (with and without trailing-space variants in raw text), suggesting both formats should be handled consistently.
 +The search module (lines 674, 787) uses `startswith(('[ITAR] ', '[ITAR-BP] '))` to detect ITAR customers, but this module at line 839 uses `startswith('[ITAR]')`. While the simpler pattern technically matches `[ITAR-BP]` prefixes, it lacks the explicit space requirement and is inconsistent with the search module's more precise approach. The code also replaces both `[ITAR]` and `[ITAR]` patterns, suggesting both formats should be handled consistently.
 ```
 
@@ -511,7 +511,7 @@ Line 217 has spaces inside the backticks around the ITAR token, triggering MD038
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 In @.claude/S&P.md at line 217, Fix the inline code span that contains extra
@@ -548,7 +548,7 @@ Line 32 states "All 16 fixes applied" but lines 93-96 explicitly note that the c
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 In @.claude/S&P.md around lines 31 - 96, Update the summary to resolve the
@@ -596,7 +596,7 @@ Also applies to: 193-193, 231-231, 253-253, 413-413
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-````
+````text
 Verify each finding against the current code and only fix it if needed.
 
 In @.claude/S&P.md at line 150, Update each fenced code block that currently
@@ -618,7 +618,7 @@ this change to all five occurrences flagged in the comment.
 <details>
 <summary>🤖 Prompt for all review comments with AI agents</summary>
 
-````
+````text
 Verify each finding against the current code and only fix it if needed.
 
 Inline comments:
@@ -711,7 +711,7 @@ Reviewing files that changed from the base of the PR and between 910cb708457d66c
 
 ---
 
-## 2026-04-07 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+## 2026-04-07 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 4
 
 **Actionable comments posted: 1**
 
@@ -739,7 +739,7 @@ Reviewing files that changed from the base of the PR and between 910cb708457d66c
 > <details>
 > <summary>🤖 Prompt for AI Agents</summary>
 > 
-> ```
+> ```text
 > Verify each finding against the current code and only fix it if needed.
 > 
 > In `@core/module_loader.py` around lines 52 - 64, The inline comment in
@@ -792,7 +792,7 @@ Reviewing files that changed from the base of the PR and between 910cb708457d66c
 > <details>
 > <summary>🤖 Prompt for AI Agents</summary>
 > 
-> ```
+> ```text
 > Verify each finding against the current code and only fix it if needed.
 > 
 > In `@modules/quote/module.py` around lines 802 - 815, The copy-to-bp_dest can fail
@@ -846,7 +846,7 @@ Reviewing files that changed from the base of the PR and between 910cb708457d66c
 > <details>
 > <summary>🤖 Prompt for AI Agents</summary>
 > 
-> ```
+> ```text
 > Verify each finding against the current code and only fix it if needed.
 > 
 > In `@modules/job/module.py` around lines 849 - 862, The current "both" branch may
@@ -899,7 +899,7 @@ Also applies to: 482-482
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 In @.claude/S&P.md at line 406, The H2 "2026-04-07 — `PR `#6`: fix: address all 16
@@ -942,7 +942,7 @@ Also applies to: 514-514, 551-551, 599-599, 621-621
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-````
+````text
 Verify each finding against the current code and only fix it if needed.
 
 In @.claude/S&P.md at line 413, Several fenced code blocks were added without
@@ -969,7 +969,7 @@ Line 217 still contains a spaced code span variant (`[ITAR] `), which triggers M
 <summary>Suggested edit</summary>
 
 ```diff
--The code also replaces both `[ITAR] ` and `[ITAR]` patterns, suggesting both formats should be handled consistently.
+-The code also handles both `[ITAR]` (with and without trailing-space variants in raw text), suggesting both formats should be handled consistently.
 +The code also handles both `[ITAR]` (with and without trailing-space variants in raw text), suggesting both formats should be handled consistently.
 ```
 </details>
@@ -977,7 +977,7 @@ Line 217 still contains a spaced code span variant (`[ITAR] `), which triggers M
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 In @.claude/S&P.md at line 217, The inline code span contains a trailing space
@@ -1013,7 +1013,7 @@ This f-string has no placeholders—the double braces `{{po_number}}` produce a 
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 In `@core/app_context.py` at line 268, In the print in find_job_folders, remove
@@ -1032,7 +1032,7 @@ string literal without the leading f to avoid treating it as an f-string.
 <details>
 <summary>🤖 Prompt for all review comments with AI agents</summary>
 
-````
+````text
 Verify each finding against the current code and only fix it if needed.
 
 Inline comments:
@@ -1164,3 +1164,40 @@ Reviewing files that changed from the base of the PR and between 975f9df492b8403
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+---
+
+## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 5
+
+**Review:** CodeRabbit re-review after fixes from runs 2-4. Run ID: `025e0b68-45ef-480e-8831-db9dbd3c3d71`
+**Result:** 5 fixes applied on `fix/coderabbit-full-review`. Markdown lint issues in S&P.md resolved; code fixes in job/quote/module_loader/app_context applied.
+
+### Findings
+
+1. **Duplicate H2 headings in S&P.md (MD024)** - `.claude/S&P.md`
+   - Repeated `## 2026-04-07 -- PR #6...` heading caused MD024 violations
+   - Fix: suffix run 2, 3, 4 headings with `-- review run N`
+
+2. **Trailing space inside inline code span (MD038)** - `.claude/S&P.md`
+   - Bare backtick-wrapped `[ITAR]` with trailing space triggered MD038
+   - Fix: reworded to remove space, applied to all three occurrences
+
+3. **Missing language identifiers on fenced blocks (MD040)** - `.claude/S&P.md`
+   - Bare ``` and ```` openers throughout CR review logs lacked language tags
+   - Fix: added `text` tag to all opener fences
+
+4. **Link creation not gated by bp_dest existence -- "both" branch** - `modules/job/module.py`, `modules/quote/module.py`
+   - If shutil.copy2 raised PermissionError, bp_dest would not exist but create_file_link was still called
+   - Fix: introduced bp_ready flag; link only created when copy succeeded or file pre-existed
+
+5. **ITAR fallback in open_blueprints_folder ignored is_itar** - `modules/quote/module.py`
+   - Fallback get_setting always used 'blueprints_dir'; ITAR users reached wrong base directory
+   - Fix: initialize is_itar=False before selection logic; fallback uses 'itar_blueprints_dir' if is_itar
+
+6. **Ambiguous Rule 3 comment in module_loader.py** - `core/module_loader.py`
+   - Comment referenced "Rule 3" without naming the policy doc or noting spec coupling
+   - Fix: expanded comment to reference .claude/CLAUDE.md Rule 3 and build_scripts/JobDocs.spec
+
+7. **Unused f-prefix on {{po_number}} print** - `core/app_context.py`
+   - Double braces produce literal; f-prefix was redundant
+   - Fix: removed f prefix
+
