@@ -2156,3 +2156,73 @@ Reviewing files that changed from the base of the PR and between 3cc548e871b5710
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 7
+
+**Actionable comments posted: 1**
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```text
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In @.claude/S&P.md:
+- Line 1939: The H2 "2026-04-08 — `PR `#6`: fix: address all 16 CodeRabbit
+findings from full codebase review` — review run 6" is duplicated; update the
+second occurrence to a unique heading (e.g., change the trailing "review run 6"
+to "review run 6b", "review run 7", or append a short qualifier like "(duplicate
+run)") so the H2 is distinct; locate the duplicate heading text and replace only
+the heading line to preserve the rest of the section.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: defaults
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `ad300eb4-8313-40ca-ac99-841504e90630`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 397c82d934f0b38295774db5306e4c94619ea9c0 and 2b20225f0e90a3db2fbe453f8549bdfd093427e5.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `.claude/S&P.md`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
