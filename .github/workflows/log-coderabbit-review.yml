@@ -36,7 +36,6 @@ jobs:
           RUN_NUM=$(( ${MAX_RUN:-0} + 1 ))
           HEADING="## ${DATE} — \`${PR_REF}\` — review run ${RUN_NUM}"
 
-          # Append the raw review body.
           {
             echo ""
             echo "---"
@@ -45,9 +44,6 @@ jobs:
             echo ""
             echo "${REVIEW_BODY}"
           } >> ".claude/S&P.md"
-
-          # Sanitize the full file: add 'text' to all bare fence openers (MD040).
-          python3 .github/scripts/sanitize_review.py ".claude/S&P.md"
 
       - name: Commit S&P.md update
         run: |
