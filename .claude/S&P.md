@@ -1783,3 +1783,153 @@ Reviewing files that changed from the base of the PR and between 9cf55370acf1fd7
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+
+
+
+<details>
+<summary>♻️ Duplicate comments (2)</summary><blockquote>
+
+<details>
+<summary>.claude/S&P.md (2)</summary><blockquote>
+
+`1252-1252`: _⚠️ Potential issue_ | _🟡 Minor_
+
+**Add language identifiers to all remaining fenced code openings (MD040).**
+
+These fences are still opened without a language token. Update each opener to include one (typically `text`; preserve triple vs quadruple backtick style as needed).
+
+<details>
+<summary>📝 Suggested patch pattern</summary>
+
+```diff
+-```
++```text
+ Verify each finding against the current code and only fix it if needed.
+ ```
+
+-````
++````text
+ Verify each finding against the current code and only fix it if needed.
+ ````
+```
+</details>
+
+ 
+
+
+Also applies to: 1289-1289, 1465-1465, 1500-1500, 1525-1525, 1688-1688, 1708-1708
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+`````
+Verify each finding against the current code and only fix it if needed.
+
+In @.claude/S&P.md at line 1252, Several fenced code blocks are opened without
+language identifiers (MD040); locate each opening backtick fence (both triple
+``` and quadruple ````) that precedes the text "Verify each finding against the
+current code and only fix it if needed." and add a language token (e.g., text)
+to the opener so the fences become ```text and ````text respectively; apply the
+same change to the other occurrences referenced (the other identical fences
+further down) to ensure all remaining unlabelled fences are labeled.
+`````
+
+</details>
+
+---
+
+`1428-1428`: _⚠️ Potential issue_ | _🟡 Minor_
+
+**Make repeated H2 headings unique to resolve MD024.**
+
+Line 1428 and Line 1653 use the same H2 text, which keeps `no-duplicate-heading` failing. Please append a distinct suffix (for example run ID / “review run N”) to one of them.
+
+ 
+
+
+Also applies to: 1653-1653
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In @.claude/S&P.md at line 1428, Two identical H2 headings ("2026-04-08 — `PR
+`#6`: fix: address all 16 CodeRabbit findings from full codebase review`") cause
+MD024; locate both H2 occurrences and make one unique by appending a short
+suffix such as " — review run 1" or a run ID (e.g., change one heading to
+"2026-04-08 — `PR `#6`: ...` — review run 1"); ensure the modified H2 string is
+distinct from the other so the linter no longer reports no-duplicate-heading.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+`````
+Verify each finding against the current code and only fix it if needed.
+
+Duplicate comments:
+In @.claude/S&P.md:
+- Line 1252: Several fenced code blocks are opened without language identifiers
+(MD040); locate each opening backtick fence (both triple ``` and quadruple ````)
+that precedes the text "Verify each finding against the current code and only
+fix it if needed." and add a language token (e.g., text) to the opener so the
+fences become ```text and ````text respectively; apply the same change to the
+other occurrences referenced (the other identical fences further down) to ensure
+all remaining unlabelled fences are labeled.
+- Line 1428: Two identical H2 headings ("2026-04-08 — `PR `#6`: fix: address all
+16 CodeRabbit findings from full codebase review`") cause MD024; locate both H2
+occurrences and make one unique by appending a short suffix such as " — review
+run 1" or a run ID (e.g., change one heading to "2026-04-08 — `PR `#6`: ...` —
+review run 1"); ensure the modified H2 string is distinct from the other so the
+linter no longer reports no-duplicate-heading.
+`````
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: defaults
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `fccea686-81f9-41d4-bb25-7f31b67c1834`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between a760adb4d5433ac4d5cdb84f225bffbabdd8a97b and 3cc548e871b5710612482df3a9f9a4dedc1c927e.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `.claude/S&P.md`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
