@@ -2226,3 +2226,166 @@ Reviewing files that changed from the base of the PR and between 397c82d934f0b38
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 12
+
+
+
+<details>
+<summary>♻️ Duplicate comments (2)</summary><blockquote>
+
+<details>
+<summary>.claude/S&P.md (2)</summary><blockquote>
+
+`1971-1979`: _⚠️ Potential issue_ | _🟡 Minor_
+
+**Add a language identifier to the six-backtick fenced block.**
+
+Line 1971 opens a fenced block with `````` but no language tag, which keeps MD040 active in this section.
+
+ 
+
+<details>
+<summary>🛠️ Suggested fix</summary>
+
+```diff
+-``````
++``````text
+ Verify each finding against the current code and only fix it if needed.
+ ...
+ ``````
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```````text
+Verify each finding against the current code and only fix it if needed.
+
+In @.claude/S&P.md around lines 1971 - 1979, The six-backtick fenced code block
+opening token (``````) in the .claude/S&P.md content should include a language
+identifier to satisfy MD040; edit the opening fence near the existing `````` to
+add a language tag (for example change the opening fence from `````` to
+``````text or ``````bash) and leave the existing closing `````` fence unchanged
+so the block is properly classified.
+```````
+
+</details>
+
+---
+
+`1976-1977`: _⚠️ Potential issue_ | _🟡 Minor_
+
+**Avoid ambiguous inline backtick spans in prompt prose.**
+
+Line 1976 and Line 1977 still use backtick-heavy inline literals that trigger MD038. Prefer plain wording (e.g., “five-backtick opener + text”) instead of raw fence literals.
+
+ 
+
+<details>
+<summary>🛠️ Suggested fix</summary>
+
+```diff
+-block is properly classified (e.g., change the opening fence to `````text or
+-`````bash); update only the opening fence near the existing ````` to include the
++block is properly classified (e.g., change the opening fence to five-backtick + `text` or `bash`);
++update only the opening fence near the existing five-backtick marker to include the
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+``````text
+Verify each finding against the current code and only fix it if needed.
+
+In @.claude/S&P.md around lines 1976 - 1977, The prose at the two occurrences
+flagged by MD038 uses ambiguous raw backtick fence literals; update the phrases
+near the existing ````` markers (lines referenced in the comment) to avoid
+inline backtick spans by using descriptive wording such as "five-backtick opener
++ text" or "five-backtick + `bash`" and reword the sentence to "change the
+opening fence to five-backtick + text or five-backtick + bash; update only the
+opening fence near the existing five-backtick marker to include the…" so no raw
+multi-backtick sequences remain in the sentence.
+``````
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```````text
+Verify each finding against the current code and only fix it if needed.
+
+Duplicate comments:
+In @.claude/S&P.md:
+- Around line 1971-1979: The six-backtick fenced code block opening token
+(``````) in the .claude/S&P.md content should include a language identifier to
+satisfy MD040; edit the opening fence near the existing `````` to add a language
+tag (for example change the opening fence from `````` to ``````text or
+``````bash) and leave the existing closing `````` fence unchanged so the block
+is properly classified.
+- Around line 1976-1977: The prose at the two occurrences flagged by MD038 uses
+ambiguous raw backtick fence literals; update the phrases near the existing
+````` markers (lines referenced in the comment) to avoid inline backtick spans
+by using descriptive wording such as "five-backtick opener + text" or
+"five-backtick + `bash`" and reword the sentence to "change the opening fence to
+five-backtick + text or five-backtick + bash; update only the opening fence near
+the existing five-backtick marker to include the…" so no raw multi-backtick
+sequences remain in the sentence.
+```````
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: defaults
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `39534453-1735-4420-ba62-b3d544474cc9`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 2b20225f0e90a3db2fbe453f8549bdfd093427e5 and bd662b951161e1dc93ed6b6a4822bb769aab229d.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (3)</summary>
+
+* `.claude/S&P.md`
+* `.github/scripts/sanitize_review.py`
+* `.github/workflows/log-coderabbit-review.yml`
+
+</details>
+
+<details>
+<summary>🚧 Files skipped from review as they are similar to previous changes (2)</summary>
+
+* .github/workflows/log-coderabbit-review.yml
+* .github/scripts/sanitize_review.py
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
