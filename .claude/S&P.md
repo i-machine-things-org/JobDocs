@@ -1826,7 +1826,7 @@ Also applies to: 1289-1289, 1465-1465, 1500-1500, 1525-1525, 1688-1688, 1708-170
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-`````
+`````text
 Verify each finding against the current code and only fix it if needed.
 
 In @.claude/S&P.md at line 1252, Several fenced code blocks are opened without
@@ -1876,7 +1876,7 @@ distinct from the other so the linter no longer reports no-duplicate-heading.
 <details>
 <summary>🤖 Prompt for all review comments with AI agents</summary>
 
-`````
+`````text
 Verify each finding against the current code and only fix it if needed.
 
 Duplicate comments:
@@ -1936,7 +1936,7 @@ Reviewing files that changed from the base of the PR and between a760adb4d5433ac
 
 ---
 
-## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 6
+## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 10
 
 **Actionable comments posted: 5**
 
@@ -2004,7 +2004,7 @@ This would prevent the feedback loop where each review run adds more content tha
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-`````
+`````text
 Verify each finding against the current code and only fix it if needed.
 
 In @.claude/S&P.md around lines 26 - 1935, The S&P.md file is still getting
@@ -2029,7 +2029,7 @@ sanitization to the commit workflow (pre-commit hook or CI step) so
 <details>
 <summary>🤖 Prompt for all review comments with AI agents</summary>
 
-``````
+``````text
 Verify each finding against the current code and only fix it if needed.
 
 Inline comments:
@@ -2159,7 +2159,7 @@ Reviewing files that changed from the base of the PR and between 3cc548e871b5710
 
 ---
 
-## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 7
+## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 11
 
 **Actionable comments posted: 1**
 

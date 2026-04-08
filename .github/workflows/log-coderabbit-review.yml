@@ -29,22 +29,25 @@ jobs:
           DATE=$(echo "$REVIEW_DATE" | cut -c1-10)
           PR_REF="PR #${PR_NUMBER}: ${PR_TITLE}"
 
-          # Compute a unique run number to avoid MD024 duplicate-heading violations.
-          RUN_COUNT=$(grep -c "^## ${DATE}.*${PR_NUMBER}" ".claude/S&P.md" 2>/dev/null || true)
-          RUN_NUM=$((RUN_COUNT + 1))
+          # Compute the next unique run number to avoid MD024 duplicate-heading violations.
+          # Extract the highest existing "review run N" suffix for this date+PR, then increment.
+          MAX_RUN=$(grep "^## ${DATE}.*#${PR_NUMBER}:.*review run" ".claude/S&P.md" 2>/dev/null \
+            | grep -oE '[0-9]+$' | sort -n | tail -1)
+          RUN_NUM=$(( ${MAX_RUN:-0} + 1 ))
           HEADING="## ${DATE} — \`${PR_REF}\` — review run ${RUN_NUM}"
 
-          # Sanitize review body: add 'text' to bare fence openers (MD040).
-          CLEAN_BODY=$(python3 .github/scripts/sanitize_review.py)
-
+          # Append the raw review body.
           {
             echo ""
             echo "---"
             echo ""
             echo "${HEADING}"
             echo ""
-            echo "${CLEAN_BODY}"
+            echo "${REVIEW_BODY}"
           } >> ".claude/S&P.md"
+
+          # Sanitize the full file: add 'text' to all bare fence openers (MD040).
+          python3 .github/scripts/sanitize_review.py ".claude/S&P.md"
 
       - name: Commit S&P.md update
         run: |
