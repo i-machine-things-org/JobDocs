@@ -265,7 +265,7 @@ class AppContext:
 
                 if '{po_number}' in prefix:
                     # Template has a PO number segment — enumerate actual PO subdirectories
-                    print(f"[find_job_folders] Detected {{po_number}} in prefix, enumerating PO dirs", flush=True)
+                    print("[find_job_folders] Detected {po_number} in prefix, enumerating PO dirs", flush=True)
                     po_parts = prefix.split('{po_number}')
                     pre_po = po_parts[0].strip('/')
                     post_po = po_parts[1].strip('/') if len(po_parts) > 1 else ''

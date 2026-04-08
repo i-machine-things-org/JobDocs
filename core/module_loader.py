@@ -51,7 +51,8 @@ class ModuleLoader:
         if is_frozen:
             # In frozen mode, return hardcoded list of modules.
             # Must match the modules in the spec file's hiddenimports.
-            # PSM-only modules (reporting) are excluded from stable builds (Rule 3).
+            # PSM-only modules (reporting) excluded from stable builds per .claude/CLAUDE.md Rule 3.
+            # Keep this list in sync with hiddenimports in build_scripts/JobDocs.spec.
             all_modules = [
                 'quote',
                 'job',
