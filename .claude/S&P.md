@@ -109,47 +109,47 @@ Review this file before making changes to the codebase.
 
 > [!CAUTION]
 > Some comments are outside the diff and can’t be posted inline due to platform limitations.
-> 
-> 
-> 
+>
+>
+>
 > <details>
 > <summary>⚠️ Outside diff range comments (1)</summary><blockquote>
-> 
+>
 > <details>
 > <summary>modules/job/module.py (1)</summary><blockquote>
-> 
+>
 > `645-666`: _⚠️ Potential issue_ | _🟠 Major_
-> 
+>
 > **Cancel the active tree worker before running a synchronous search.**
-> 
+>
 > If `refresh_job_tree()` is still loading, its queued `customer_loaded` emissions can repopulate `self.job_tree` after Line 653 clears it, so the search view ends up mixed with stale browse results. Reuse the cancel/wait block from Lines 597-600 before the synchronous search starts.
-> 
+>
 > <details>
 > <summary>Suggested fix</summary>
-> 
+>
 > ```diff
 >      def search_jobs(self):
 >          """Search for jobs matching the search term"""
 >          search_term = self.add_search_edit.text().strip().lower()
->  
+>
 >          if not search_term:
 >              self.refresh_job_tree()
 >              return
->  
+>
 > +        if self._worker and self._worker.isRunning():
 > +            self._worker.cancel()
 > +            self._worker.wait()
 > +
 >          self.job_tree.clear()
-> ```
+> ```text
 > </details>
-> 
+>
 > <details>
 > <summary>🤖 Prompt for AI Agents</summary>
-> 
+>
 > ```text
 > Verify each finding against the current code and only fix it if needed.
-> 
+>
 > In `@modules/job/module.py` around lines 645 - 666, Before clearing and performing
 > the synchronous search in search_jobs, cancel and wait for any active tree
 > worker using the same cancel/wait logic used elsewhere (the block that cancels
@@ -158,11 +158,11 @@ Review this file before making changes to the codebase.
 > start of search_jobs (before self.job_tree.clear()) to ensure refresh_job_tree
 > or any running worker is stopped prior to the synchronous search.
 > ```
-> 
+>
 > </details>
-> 
+>
 > </blockquote></details>
-> 
+>
 > </blockquote></details>
 
 <details>
@@ -178,7 +178,7 @@ Static analysis correctly identifies these f-strings have no interpolation:
 ```diff
 -                                        print(f"[find_job_folders]     ✗ Path doesn't exist", flush=True)
 +                                        print("[find_job_folders]     ✗ Path doesn't exist", flush=True)
-```
+```text
 
 ```diff
 -                        print(f"[find_job_folders] Prefix path doesn't exist!", flush=True)
@@ -204,7 +204,7 @@ path doesn't exist!" so that plain string literals are used or proper
 .format/f-string interpolation is applied consistently; update the print calls
 (in the function find_job_folders) to either drop the f or perform correct
 interpolation using the variables referenced (item, e) as appropriate.
-```
+```text
 
 </details>
 
@@ -239,7 +239,7 @@ customer extraction to remove the matching prefix(s) (e.g., strip the bracketed
 prefix plus trailing space) before building bp_dir/customer_bp; make this change
 in the block that defines display_name, is_itar, customer and bp_dir so folder
 resolution uses the consistent prefix detection used elsewhere.
-```
+```text
 
 </details>
 
@@ -312,7 +312,7 @@ Nitpick comments:
 In `@core/app_context.py`:
 - Around line 311-318: The print statements inside find_job_folders use
 unnecessary f-string prefixes for messages with no interpolation; remove the
-leading f from the string literals in the calls that print "[find_job_folders]  
+leading f from the string literals in the calls that print "[find_job_folders]
 ✗ Path doesn't exist", "[find_job_folders]   Found job (no suffix): {item}" only
 if {item} is actually not being interpolated (otherwise keep interpolation),
 "[find_job_folders] OSError: {e}" only if you will format the exception
@@ -427,7 +427,7 @@ same pattern checks and replacements (use startswith(('[ITAR] ', '[ITAR-BP] '))
 where the code currently uses startswith('[ITAR]') and ensure both '[ITAR] ' and
 '[ITAR]' variants are handled in the string replacement logic so behavior
 matches the other module).
-````
+````text
 
 </details>
 
@@ -504,7 +504,7 @@ Line 217 has spaces inside the backticks around the ITAR token, triggering MD038
 ```diff
 -The search module (lines 674, 787) uses `startswith(('[ITAR] ', '[ITAR-BP] '))` to detect ITAR customers, but this module at line 839 uses `startswith('[ITAR]')`. While the simpler pattern technically matches `[ITAR-BP]` prefixes, it lacks the explicit space requirement and is inconsistent with the search module's more precise approach. The code also handles both `[ITAR]` (with and without trailing-space variants in raw text), suggesting both formats should be handled consistently.
 +The search module (lines 674, 787) uses `startswith(('[ITAR] ', '[ITAR-BP] '))` to detect ITAR customers, but this module at line 839 uses `startswith('[ITAR]')`. While the simpler pattern technically matches `[ITAR-BP]` prefixes, it lacks the explicit space requirement and is inconsistent with the search module's more precise approach. The code also replaces both `[ITAR]` and `[ITAR]` patterns, suggesting both formats should be handled consistently.
-```
+```text
 
 </details>
 
@@ -541,7 +541,7 @@ Line 32 states "All 16 fixes applied" but lines 93-96 explicitly note that the c
 ```diff
 -**Result:** All 16 fixes applied on `fix/coderabbit-full-review`.
 +**Result:** 15 fixes applied on `fix/coderabbit-full-review`. Finding 15 applied locally only (file gitignored).
-```
+```text
 
 </details>
 
@@ -584,7 +584,7 @@ Multiple fenced code blocks lack language identifiers (lines 150, 193, 231, 253,
 -```
 +```text
  Verify each finding against the current code and only fix it if needed.
-```
+```text
 
 Apply this change to all five occurrences.
 
@@ -607,7 +607,7 @@ the reported spots). Locate the opening fences (``` ) and replace them with
 explicit language, mirroring the suggested fix example (```text Verify each
 finding against the current code and only fix it if needed.). Ensure you apply
 this change to all five occurrences flagged in the comment.
-````
+````text
 
 </details>
 
@@ -717,31 +717,31 @@ Reviewing files that changed from the base of the PR and between 910cb708457d66c
 
 > [!CAUTION]
 > Some comments are outside the diff and can’t be posted inline due to platform limitations.
-> 
-> 
-> 
+>
+>
+>
 > <details>
 > <summary>⚠️ Outside diff range comments (3)</summary><blockquote>
-> 
+>
 > <details>
 > <summary>core/module_loader.py (1)</summary><blockquote>
-> 
+>
 > `52-64`: _⚠️ Potential issue_ | _🟡 Minor_
-> 
+>
 > **Frozen module list correctly matches spec file; clarify undefined "Rule 3" reference.**
-> 
+>
 > Verification confirms the hardcoded module list aligns with `hiddenimports` in JobDocs.spec—all seven modules are present with their full module paths. The filtering logic correctly handles deprecated modules.
-> 
+>
 > However, the comment on line 54 references "Rule 3" without any definition or documentation in the codebase. Expand this reference inline to clarify what "Rule 3" means, or add a link to external documentation where it is defined. This will help future maintainers understand the rationale for excluding PSM-only modules.
-> 
+>
 > The implicit maintenance coupling between this file and the spec file's `hiddenimports` is unavoidable but acceptable—just ensure any future changes to module lists are coordinated between both locations.
-> 
+>
 > <details>
 > <summary>🤖 Prompt for AI Agents</summary>
-> 
+>
 > ```text
 > Verify each finding against the current code and only fix it if needed.
-> 
+>
 > In `@core/module_loader.py` around lines 52 - 64, The inline comment in
 > module_loader.py referencing "Rule 3" is ambiguous; update the comment above the
 > hardcoded all_modules list to briefly explain what "Rule 3" means (e.g.,
@@ -751,22 +751,22 @@ Reviewing files that changed from the base of the PR and between 910cb708457d66c
 > future maintainers know to update both all_modules and hiddenimports together;
 > ensure references to all_modules and deprecated_modules remain unchanged.
 > ```
-> 
+>
 > </details>
-> 
+>
 > </blockquote></details>
 > <details>
 > <summary>modules/quote/module.py (1)</summary><blockquote>
-> 
+>
 > `802-815`: _⚠️ Potential issue_ | _🟠 Major_
-> 
+>
 > **Link creation not gated by `bp_dest` existence in the "both" destination path.**
-> 
+>
 > Same issue as in `modules/job/module.py`: if the copy to `bp_dest` fails due to `PermissionError`, `bp_dest` won't exist but line 812 still attempts to create a link from it.
-> 
+>
 > <details>
 > <summary>Suggested fix</summary>
-> 
+>
 > ```diff
 >                  else:  # both
 >                      bp_dest = customer_bp / file_name
@@ -778,7 +778,7 @@ Reviewing files that changed from the base of the PR and between 910cb708457d66c
 > +                            bp_ready = True
 >                          except PermissionError:
 >                              self.log_message(f"Warning: Could not copy {file_name} (file in use)")
->  
+>
 >                      quote_dest = Path(quote_path) / file_name
 > -                    if not quote_dest.exists():
 > +                    if bp_ready and not quote_dest.exists():
@@ -786,15 +786,15 @@ Reviewing files that changed from the base of the PR and between 910cb708457d66c
 >                          added += 1
 >                      else:
 >                          skipped += 1
-> ```
+> ```text
 > </details>
-> 
+>
 > <details>
 > <summary>🤖 Prompt for AI Agents</summary>
-> 
+>
 > ```text
 > Verify each finding against the current code and only fix it if needed.
-> 
+>
 > In `@modules/quote/module.py` around lines 802 - 815, The copy-to-bp_dest can fail
 > with PermissionError but the code still attempts to create a link from bp_dest;
 > change the "both" branch so that you only call create_file_link(bp_dest,
@@ -805,22 +805,22 @@ Reviewing files that changed from the base of the PR and between 910cb708457d66c
 > and skipped are updated so added is only increased when the link was actually
 > created.
 > ```
-> 
+>
 > </details>
-> 
+>
 > </blockquote></details>
 > <details>
 > <summary>modules/job/module.py (1)</summary><blockquote>
-> 
+>
 > `849-862`: _⚠️ Potential issue_ | _🟠 Major_
-> 
+>
 > **Link creation not gated by `bp_dest` existence in the "both" destination path.**
-> 
+>
 > If the copy to `bp_dest` fails due to `PermissionError`, `bp_dest` won't exist but line 859 still attempts to create a link from it. This will fail or produce undefined behavior.
-> 
+>
 > <details>
 > <summary>Suggested fix</summary>
-> 
+>
 > ```diff
 >                  else:  # both
 >                      bp_dest = customer_bp / file_name
@@ -832,7 +832,7 @@ Reviewing files that changed from the base of the PR and between 910cb708457d66c
 > +                            bp_ready = True
 >                          except PermissionError:
 >                              self.log_message(f"Warning: Could not copy {file_name} (file in use)")
->  
+>
 >                      job_dest = Path(job_path) / file_name
 > -                    if not job_dest.exists():
 > +                    if bp_ready and not job_dest.exists():
@@ -840,15 +840,15 @@ Reviewing files that changed from the base of the PR and between 910cb708457d66c
 >                          added += 1
 >                      else:
 >                          skipped += 1
-> ```
+> ```text
 > </details>
-> 
+>
 > <details>
 > <summary>🤖 Prompt for AI Agents</summary>
-> 
+>
 > ```text
 > Verify each finding against the current code and only fix it if needed.
-> 
+>
 > In `@modules/job/module.py` around lines 849 - 862, The current "both" branch may
 > call create_file_link(bp_dest, job_dest, link_type) even if the prior
 > shutil.copy2 failed and bp_dest does not exist; update the block so that after
@@ -858,11 +858,11 @@ Reviewing files that changed from the base of the PR and between 910cb708457d66c
 > succeeds and reference bp_dest, job_dest, create_file_link, link_type,
 > file_path, and file_name when locating the change.
 > ```
-> 
+>
 > </details>
-> 
+>
 > </blockquote></details>
-> 
+>
 > </blockquote></details>
 
 <details>
@@ -890,7 +890,7 @@ Line 406 and Line 482 repeat the same H2 text (already duplicated with Line 106)
 
 -## 2026-04-07 — `PR `#6`: fix: address all 16 CodeRabbit findings from full codebase review`
 +## 2026-04-07 — `PR `#6`: fix: address all 16 CodeRabbit findings from full codebase review` — review run 3
-```
+```text
 </details>
 
 
@@ -933,7 +933,7 @@ Line 413, Line 514, Line 551, Line 599, and Line 621 still open fenced blocks wi
  ...
 -````
 +```
-```
+```text
 </details>
 
 
@@ -951,7 +951,7 @@ added blocks (the ones that wrap the "Verify each finding against the current
 code..." and similar note blocks) to include a language tag such as text (i.e.,
 change ``` to ```text) so MD040 is resolved; locate the untagged fences (the
 bare ``` blocks) and replace them with ```text for consistency.
-````
+````text
 
 </details>
 
@@ -971,7 +971,7 @@ Line 217 still contains a spaced code span variant (`[ITAR]`), which triggers MD
 ```diff
 -The code also handles both `[ITAR]` (with and without trailing-space variants in raw text), suggesting both formats should be handled consistently.
 +The code also handles both `[ITAR]` (with and without trailing-space variants in raw text), suggesting both formats should be handled consistently.
-```
+```text
 </details>
 
 <details>
@@ -1008,7 +1008,7 @@ This f-string has no placeholders—the double braces `{{po_number}}` produce a 
 ```diff
 -                    print(f"[find_job_folders] Detected {{po_number}} in prefix, enumerating PO dirs", flush=True)
 +                    print("[find_job_folders] Detected {po_number} in prefix, enumerating PO dirs", flush=True)
-```
+```text
 
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
@@ -1204,40 +1204,40 @@ Reviewing files that changed from the base of the PR and between 975f9df492b8403
 
 ---
 
-## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 6
 
 
 
 > [!CAUTION]
 > Some comments are outside the diff and can’t be posted inline due to platform limitations.
-> 
-> 
-> 
+>
+>
+>
 > <details>
 > <summary>⚠️ Outside diff range comments (1)</summary><blockquote>
-> 
+>
 > <details>
 > <summary>modules/quote/module.py (1)</summary><blockquote>
-> 
+>
 > `602-610`: _⚠️ Potential issue_ | _🟠 Major_
-> 
+>
 > **Missing worker cancellation before synchronous search.**
-> 
+>
 > Unlike `search_jobs` in the job module (which now cancels any running worker at lines 653-655), `search_quotes` does not cancel `self._worker` before clearing the tree and performing a synchronous search. If `refresh_quote_tree()` is still loading, its queued `customer_loaded` emissions can repopulate `self.quote_tree` after line 610 clears it, mixing stale browse results with search results.
-> 
-> 
+>
+>
 > <details>
 > <summary>Suggested fix</summary>
-> 
+>
 > ```diff
 >      def search_quotes(self):
 >          """Search for quotes matching the search term"""
 >          search_term = self.add_search_edit.text().strip().lower()
->  
+>
 >          if not search_term:
 >              self.refresh_quote_tree()
 >              return
->  
+>
 > +        if self._worker and self._worker.isRunning():
 > +            self._worker.cancel()
 > +            self._worker.wait()
@@ -1245,13 +1245,13 @@ Reviewing files that changed from the base of the PR and between 975f9df492b8403
 >          self.quote_tree.clear()
 > ```
 > </details>
-> 
+>
 > <details>
 > <summary>🤖 Prompt for AI Agents</summary>
-> 
-> ```
+>
+> ```text
 > Verify each finding against the current code and only fix it if needed.
-> 
+>
 > In `@modules/quote/module.py` around lines 602 - 610, search_quotes is missing
 > cancellation of any running background worker, so add the same worker-cancel
 > logic used in search_jobs: if self._worker exists and is running, call its
@@ -1260,12 +1260,12 @@ Reviewing files that changed from the base of the PR and between 975f9df492b8403
 > start of search_quotes (referencing method name search_quotes and attribute
 > self._worker) so pending customer_loaded signals from refresh_quote_tree()
 > cannot repopulate the tree after you clear it.
-> ```
-> 
+> ```text
+>
 > </details>
-> 
+>
 > </blockquote></details>
-> 
+>
 > </blockquote></details>
 
 <details>
@@ -1286,7 +1286,7 @@ Static analysis flags line 1202. The phrase "removed f prefix" should be "remove
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 In @.claude/S&P.md around lines 1200 - 1202, Update the documentation line that
@@ -1294,7 +1294,7 @@ currently reads "removed f prefix" to use the hyphenated compound modifier
 "removed f-prefix" in the S&P entry referencing the change to
 core/app_context.py (the "f-prefix on {{po_number}} print" note); edit the
 sentence in .claude/S&P.md so the phrase is "removed f-prefix".
-```
+```text
 
 </details>
 
@@ -1365,7 +1365,7 @@ alternatively replace only the spaced inline code span `[ITAR] ` with the
 non-spaced `[ITAR]` everywhere in that quoted section if you prefer to
 normalize; target the quoted duplicate-comment block and the exact token `[ITAR]
 ` when making the change.
-```
+```text
 
 </details>
 
@@ -1425,7 +1425,7 @@ Reviewing files that changed from the base of the PR and between c109116f1c4b7d3
 
 ---
 
-## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 7
 
 **Actionable comments posted: 3**
 
@@ -1462,7 +1462,7 @@ Line 900 still enters the Create-tab branch whenever no customer-specific folder
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 In `@modules/job/module.py` around lines 900 - 916, The code currently delays
@@ -1476,7 +1476,7 @@ os.path.join(bp_dir, customer)) and in the fallback bp_dir lookup via
 self.app_context.get_setting('itar_blueprints_dir' if is_itar else
 'blueprints_dir', ''), and ensure you only run the create-tab/customer branch
 when folder_to_open is still empty to preserve any tree-selected folder_to_open.
-```
+```text
 
 </details>
 
@@ -1497,7 +1497,7 @@ when folder_to_open is still empty to preserve any tree-selected folder_to_open.
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 In `@modules/job/module.py` around lines 659 - 682, Extract the duplicated
@@ -1522,7 +1522,7 @@ existing directories so callers can iterate customers as before.
 <details>
 <summary>🤖 Prompt for all review comments with AI agents</summary>
 
-````
+````text
 Verify each finding against the current code and only fix it if needed.
 
 Inline comments:
@@ -1650,7 +1650,7 @@ Reviewing files that changed from the base of the PR and between c109116f1c4b7d3
 
 ---
 
-## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 8
 
 **Actionable comments posted: 2**
 
@@ -1673,7 +1673,7 @@ This fenced code block lacks a language identifier, triggering MD040. This same 
 -```
 +```text
  Verify each finding against the current code and only fix it if needed.
-```
+```text
 
 </details>
 
@@ -1685,7 +1685,7 @@ Also applies to: 1289-1289
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 In @.claude/S&P.md at line 1252, A fenced code block containing the text "Verify
@@ -1694,7 +1694,7 @@ language identifier (MD040); update the opening fence to include a language tag
 (e.g., add "text" after the backticks) so it becomes a labeled fenced code block
 and repeat the same fix for the other occurrence flagged at the secondary
 location.
-```
+```text
 
 </details>
 
@@ -1705,7 +1705,7 @@ location.
 <details>
 <summary>🤖 Prompt for all review comments with AI agents</summary>
 
-````
+````text
 Verify each finding against the current code and only fix it if needed.
 
 Inline comments:
@@ -1786,7 +1786,7 @@ Reviewing files that changed from the base of the PR and between 9cf55370acf1fd7
 
 ---
 
-## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review` — review run 9
 
 
 
@@ -1856,7 +1856,7 @@ Also applies to: 1653-1653
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 
-```
+```text
 Verify each finding against the current code and only fix it if needed.
 
 In @.claude/S&P.md at line 1428, Two identical H2 headings ("2026-04-08 — `PR
