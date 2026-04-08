@@ -1422,3 +1422,228 @@ Reviewing files that changed from the base of the PR and between c109116f1c4b7d3
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-08 — `PR #6: fix: address all 16 CodeRabbit findings from full codebase review`
+
+**Actionable comments posted: 3**
+
+<details>
+<summary>♻️ Duplicate comments (1)</summary><blockquote>
+
+<details>
+<summary>modules/job/module.py (1)</summary><blockquote>
+
+`900-916`: _⚠️ Potential issue_ | _🟠 Major_
+
+**Preserve the active ITAR context through the fallback path.**
+
+Line 900 still enters the Create-tab branch whenever no customer-specific folder was found, even if a tree selection already established the context, and Line 903 only updates `is_itar` when `customer` is non-empty. That means an empty customer + checked ITAR box still falls back to `blueprints_dir`, and a missing tree folder can be replaced by stale Create-tab state instead of the selected ITAR base.
+
+ 
+
+<details>
+<summary>Suggested fix</summary>
+
+```diff
+-        if not folder_to_open and self.customer_combo:
++        elif self.customer_combo:
++            is_itar = self.itar_check.isChecked() if self.itar_check else False
+             customer = self.customer_combo.currentText().strip()
+             if customer:
+-                is_itar = self.itar_check.isChecked() if self.itar_check else False
+                 bp_dir = self.app_context.get_setting(
+                     'itar_blueprints_dir' if is_itar else 'blueprints_dir', ''
+                 )
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@modules/job/module.py` around lines 900 - 916, The code currently delays
+computing is_itar until after checking customer text, causing an empty customer
+with the ITAR checkbox set to use the non-ITAR blueprints_dir and allowing
+Create-tab state to override a prior tree selection; to fix, compute is_itar
+up-front from self.itar_check (e.g., is_itar = self.itar_check.isChecked() if
+self.itar_check else False) before any customer or folder_to_open logic so the
+same is_itar is used both when building customer_bp (customer_bp =
+os.path.join(bp_dir, customer)) and in the fallback bp_dir lookup via
+self.app_context.get_setting('itar_blueprints_dir' if is_itar else
+'blueprints_dir', ''), and ensure you only run the create-tab/customer branch
+when folder_to_open is still empty to preserve any tree-selected folder_to_open.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🧹 Nitpick comments (1)</summary><blockquote>
+
+<details>
+<summary>modules/job/module.py (1)</summary><blockquote>
+
+`659-682`: **Extract the add-tab filter selection into one helper.**
+
+`search_jobs()` now has a second copy of the same radio/customer filtering logic from `refresh_job_tree()`/`JobTreeWorker.run()`. Since this PR is explicitly keeping search and refresh aligned, pulling that branching into one helper will keep the next filter change from drifting again.
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@modules/job/module.py` around lines 659 - 682, Extract the duplicated
+"add-tab" radio/customer filtering from search_jobs() and
+refresh_job_tree()/JobTreeWorker.run() into a single helper (e.g.,
+_get_add_tab_dirs) that returns the dirs_to_search list of (prefix, dir) and the
+selected_customer/show_all flag; have search_jobs(), refresh_job_tree(), and
+JobTreeWorker.run() call this helper instead of re-implementing the logic that
+inspects add_all_radio, add_standard_radio, add_customer_combo,
+app_context.get_setting('customer_files_dir'/'itar_customer_files_dir'),
+_get_customer_files_dirs(), and os.path.exists; ensure the helper preserves the
+exact behavior (including empty/default handling) and only returns validated
+existing directories so callers can iterate customers as before.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+````
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In @.claude/S&P.md:
+- Line 1252: Two fenced code blocks were opened without language identifiers
+(MD040); update both opening fences to include the language token "text" so they
+read "```text". Locate the two occurrences of bare "```" around the snippet that
+begins "Verify each finding against the current code and only fix it if needed."
+(the occurrences noted at the two problem locations) and change each opening
+fence to "```text" to silence the warnings and match the document style.
+
+In `@core/app_context.py`:
+- Around line 266-273: The prefix handling allows "{po_number}" embedded inside
+a segment (e.g. "PO-{po_number}") which breaks directory discovery; update the
+logic in the function that processes prefix (the code using variables prefix,
+pre_po, post_po, base_path and referenced by build_job_path()) to enforce that
+"{po_number}" is its own path segment or reject the template: either validate by
+splitting prefix on path separators and require one segment exactly equal to
+"{po_number}" (and if not, raise/log a configuration error and skip/abort), or
+parse the surrounding segment properly by extracting the full segment containing
+the placeholder rather than naively joining pre_po and base_path; ensure the
+check handles leading/trailing segments (start, middle, end) consistently and
+produces a clear error when templates are invalid.
+- Around line 274-292: The current try/except in find_job_folders wraps the
+entire loop over base_path so a single OSError aborts processing all PO dirs;
+instead, move the OSError handling to each PO directory iteration (around the
+os.listdir and os.path operations for po_dir/sub_path) so that on exception you
+log or print the error (keeping the existing "[find_job_folders]" message) and
+continue to the next po_dir; update the code that builds jobs (using base_path,
+po_dir, sub_path, suffix, post_po, jobs) to remain unchanged except skip the
+failing subtree on error.
+
+---
+
+Duplicate comments:
+In `@modules/job/module.py`:
+- Around line 900-916: The code currently delays computing is_itar until after
+checking customer text, causing an empty customer with the ITAR checkbox set to
+use the non-ITAR blueprints_dir and allowing Create-tab state to override a
+prior tree selection; to fix, compute is_itar up-front from self.itar_check
+(e.g., is_itar = self.itar_check.isChecked() if self.itar_check else False)
+before any customer or folder_to_open logic so the same is_itar is used both
+when building customer_bp (customer_bp = os.path.join(bp_dir, customer)) and in
+the fallback bp_dir lookup via
+self.app_context.get_setting('itar_blueprints_dir' if is_itar else
+'blueprints_dir', ''), and ensure you only run the create-tab/customer branch
+when folder_to_open is still empty to preserve any tree-selected folder_to_open.
+
+---
+
+Nitpick comments:
+In `@modules/job/module.py`:
+- Around line 659-682: Extract the duplicated "add-tab" radio/customer filtering
+from search_jobs() and refresh_job_tree()/JobTreeWorker.run() into a single
+helper (e.g., _get_add_tab_dirs) that returns the dirs_to_search list of
+(prefix, dir) and the selected_customer/show_all flag; have search_jobs(),
+refresh_job_tree(), and JobTreeWorker.run() call this helper instead of
+re-implementing the logic that inspects add_all_radio, add_standard_radio,
+add_customer_combo,
+app_context.get_setting('customer_files_dir'/'itar_customer_files_dir'),
+_get_customer_files_dirs(), and os.path.exists; ensure the helper preserves the
+exact behavior (including empty/default handling) and only returns validated
+existing directories so callers can iterate customers as before.
+````
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: defaults
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `2d6f1879-407a-463f-9f80-eff48353efd1`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between c109116f1c4b7d324166a6ee69dbed87a8eab211 and 9cf55370acf1fd78e528878667bb00c0c05857eb.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (5)</summary>
+
+* `.claude/S&P.md`
+* `core/app_context.py`
+* `core/module_loader.py`
+* `modules/job/module.py`
+* `modules/quote/module.py`
+
+</details>
+
+<details>
+<summary>🚧 Files skipped from review as they are similar to previous changes (2)</summary>
+
+* core/module_loader.py
+* modules/quote/module.py
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
