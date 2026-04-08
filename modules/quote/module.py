@@ -801,14 +801,16 @@ class QuoteModule(BaseModule):
 
                 else:  # both
                     bp_dest = customer_bp / file_name
-                    if not bp_dest.exists():
+                    bp_ready = bp_dest.exists()
+                    if not bp_ready:
                         try:
                             shutil.copy2(file_path, bp_dest)
+                            bp_ready = True
                         except PermissionError:
                             self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
                     quote_dest = Path(quote_path) / file_name
-                    if not quote_dest.exists():
+                    if bp_ready and not quote_dest.exists():
                         create_file_link(bp_dest, quote_dest, link_type)
                         added += 1
                     else:
@@ -829,6 +831,7 @@ class QuoteModule(BaseModule):
     def open_blueprints_folder(self):
         """Open active customer's blueprints folder, or base directory if nothing selected"""
         folder_to_open = None
+        is_itar = False
 
         # First check if there's a selected customer in the tree
         items = self.quote_tree.selectedItems() if self.quote_tree else []
@@ -861,7 +864,7 @@ class QuoteModule(BaseModule):
 
         # Fallback to base blueprints directory
         if not folder_to_open:
-            bp_dir = self.app_context.get_setting('blueprints_dir', '')
+            bp_dir = self.app_context.get_setting('itar_blueprints_dir' if is_itar else 'blueprints_dir', '')
             if not bp_dir or not os.path.exists(bp_dir):
                 self.show_error("Warning", "Blueprints directory not configured")
                 return

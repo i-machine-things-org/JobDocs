@@ -848,14 +848,16 @@ class JobModule(BaseModule):
 
                 else:  # both
                     bp_dest = customer_bp / file_name
-                    if not bp_dest.exists():
+                    bp_ready = bp_dest.exists()
+                    if not bp_ready:
                         try:
                             shutil.copy2(file_path, bp_dest)
+                            bp_ready = True
                         except PermissionError:
                             self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
                     job_dest = Path(job_path) / file_name
-                    if not job_dest.exists():
+                    if bp_ready and not job_dest.exists():
                         create_file_link(bp_dest, job_dest, link_type)
                         added += 1
                     else:
