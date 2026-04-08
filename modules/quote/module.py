@@ -494,7 +494,7 @@ class QuoteModule(BaseModule):
                 self._copy_info_from_folder(folder_path)
 
     def show_link_drawings_dialog(self):
-        """Show dialog to search and link existing drawings/inspection reports by drawing number"""
+        """Show dialog to search and link existing drawings by drawing number"""
         dialog = DrawingSearchDialog(self.get_widget(), self.app_context)
 
         if dialog.exec():
@@ -507,7 +507,7 @@ class QuoteModule(BaseModule):
                         self.quote_files_list.addItem(os.path.basename(file_path))
                         files_added += 1
                 if files_added > 0:
-                    self.log_message(f"Linked {files_added} drawing(s)/report(s)")
+                    self.log_message(f"Linked {files_added} drawing(s)")
 
     def _copy_info_from_folder(self, folder_path: str):
         """Copy job/quote info from folder to form, including optional file copy"""

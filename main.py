@@ -47,7 +47,6 @@ class JobDocsMainWindow(QMainWindow):
         'db_password': '',
         'remote_server_path': '',  # Network path or URL for remote settings sync
         'report_template_path': '',  # Path to Excel template for Report Fixer
-        'inspection_report_dir': '',  # Directory containing inspection reports
         'suppress_bp_link_notification': False,  # Suppress "linked to blueprints" confirmation dialog
         'skip_image_attachments': True
     }

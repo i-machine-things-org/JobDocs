@@ -1066,14 +1066,14 @@ class FileCopyDialog(QDialog):
 
 
 class DrawingSearchDialog(QDialog):
-    """Dialog for searching and linking existing drawings and inspection reports by drawing number"""
+    """Dialog for searching and linking existing drawings by drawing number"""
 
     def __init__(self, parent, app_context):
         super().__init__(parent)
         self.app_context = app_context
         self.selected_files = []
 
-        self.setWindowTitle("Link Drawings & Inspection Reports")
+        self.setWindowTitle("Link Drawings")
         self.resize(750, 550)
 
         layout = QVBoxLayout(self)
@@ -1125,7 +1125,7 @@ class DrawingSearchDialog(QDialog):
         self.search_input.setFocus()
 
     def perform_search(self):
-        """Search for drawings and inspection reports matching the drawing number"""
+        """Search for drawings matching the drawing number"""
         search_term = self.search_input.text().strip().lower()
         self.results_tree.clear()
 
@@ -1136,7 +1136,6 @@ class DrawingSearchDialog(QDialog):
         # Get directories to search
         blueprints_dir = self.app_context.get_setting('blueprints_dir', '')
         itar_blueprints_dir = self.app_context.get_setting('itar_blueprints_dir', '')
-        inspection_dir = self.app_context.get_setting('inspection_report_dir', '')
 
         results = []
 
@@ -1144,7 +1143,6 @@ class DrawingSearchDialog(QDialog):
         for base_dir, location_prefix in [
             (blueprints_dir, 'Blueprints'),
             (itar_blueprints_dir, 'ITAR Blueprints'),
-            (inspection_dir, 'Inspection Reports')
         ]:
             if not base_dir or not os.path.exists(base_dir):
                 continue

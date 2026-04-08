@@ -2389,3 +2389,167 @@ Reviewing files that changed from the base of the PR and between 2b20225f0e90a3d
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-08 — `PR #7: fix: remove inspection reports feature` — review run 1
+
+
+
+<details>
+<summary>🧹 Nitpick comments (2)</summary><blockquote>
+
+<details>
+<summary>modules/quote/module.py (1)</summary><blockquote>
+
+`497-510`: **Remove stale “report(s)” wording from link log message.**
+
+Line 510 still mentions reports, which contradicts the drawings-only behavior and this PR’s objective.
+
+
+<details>
+<summary>Proposed text fix</summary>
+
+```diff
+-                    self.log_message(f"Linked {files_added} drawing(s)/report(s)")
++                    self.log_message(f"Linked {files_added} drawing(s)")
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@modules/quote/module.py` around lines 497 - 510, The log message in the
+drawing-linking flow still says "drawing(s)/report(s)" which is stale; in the
+method where the DrawingSearchDialog is used (the block creating dialog =
+DrawingSearchDialog(self.get_widget(), self.app_context) and iterating
+selected_files in the same function), update the process that calls
+self.log_message(...) to use wording that only references drawings (e.g.,
+"Linked {files_added} drawing(s)") so the message matches the drawings-only
+behavior; keep the variable files_added and the existing pluralization format
+intact.
+```
+
+</details>
+
+</blockquote></details>
+<details>
+<summary>modules/job/module.py (1)</summary><blockquote>
+
+`531-544`: **Update link log message to match drawings-only behavior.**
+
+Line 544 still contains “report(s)”, which is inconsistent with the updated dialog purpose.
+
+
+<details>
+<summary>Proposed text fix</summary>
+
+```diff
+-                    self.log_message(f"Linked {files_added} drawing(s)/report(s)")
++                    self.log_message(f"Linked {files_added} drawing(s)")
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@modules/job/module.py` around lines 531 - 544, The log message after linking
+files still says "Linked {files_added} drawing(s)/report(s)" which is
+inconsistent with the drawings-only dialog (DrawingSearchDialog); update the
+call to self.log_message in this method to only reference drawings (e.g.,
+"Linked {files_added} drawing(s)") so it matches the UI behavior and the items
+added to self.job_files/self.job_files_list.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Nitpick comments:
+In `@modules/job/module.py`:
+- Around line 531-544: The log message after linking files still says "Linked
+{files_added} drawing(s)/report(s)" which is inconsistent with the drawings-only
+dialog (DrawingSearchDialog); update the call to self.log_message in this method
+to only reference drawings (e.g., "Linked {files_added} drawing(s)") so it
+matches the UI behavior and the items added to
+self.job_files/self.job_files_list.
+
+In `@modules/quote/module.py`:
+- Around line 497-510: The log message in the drawing-linking flow still says
+"drawing(s)/report(s)" which is stale; in the method where the
+DrawingSearchDialog is used (the block creating dialog =
+DrawingSearchDialog(self.get_widget(), self.app_context) and iterating
+selected_files in the same function), update the process that calls
+self.log_message(...) to use wording that only references drawings (e.g.,
+"Linked {files_added} drawing(s)") so the message matches the drawings-only
+behavior; keep the variable files_added and the existing pluralization format
+intact.
+```
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `aac89868-4af1-48a7-bf17-10a94883c7c3`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between e31866f1abe4a4f72ca7044240df8f53d92ccbda and 1bf612c4361d4f54a65b3577925686f8c81520b4.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (7)</summary>
+
+* `core/settings_dialog.py`
+* `main.py`
+* `modules/job/module.py`
+* `modules/quote/module.py`
+* `modules/search/module.py`
+* `modules/search/ui/search_tab.ui`
+* `shared/widgets.py`
+
+</details>
+
+<details>
+<summary>💤 Files with no reviewable changes (4)</summary>
+
+* core/settings_dialog.py
+* modules/search/module.py
+* main.py
+* modules/search/ui/search_tab.ui
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->

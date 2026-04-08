@@ -298,7 +298,6 @@ class SearchModule(BaseModule):
         self.search_all_radio = None
         self.search_strict_radio = None
         self.search_blueprints_check = None
-        self.search_inspection_check = None
         self.mode_row_widget = None
         self.legacy_options_widget = None
         self.search_btn = None
@@ -340,7 +339,6 @@ class SearchModule(BaseModule):
         self.search_all_radio = widget.search_all_radio
         self.search_strict_radio = widget.search_strict_radio
         self.search_blueprints_check = widget.search_blueprints_check
-        self.search_inspection_check = widget.search_inspection_check
         self.mode_row_widget = widget.mode_row_widget
         self.legacy_options_widget = widget.legacy_options_widget
         self.search_btn = widget.search_btn
@@ -495,12 +493,6 @@ class SearchModule(BaseModule):
             itar_bp_dir = self.app_context.get_setting('itar_blueprints_dir', '')
             if itar_bp_dir and os.path.exists(itar_bp_dir):
                 dirs_to_search.append(('ITAR-BP', itar_bp_dir))
-
-        # Optionally search inspection reports directory
-        if self.search_inspection_check.isChecked():
-            ir_dir = self.app_context.get_setting('inspection_report_dir', '')
-            if ir_dir and os.path.exists(ir_dir):
-                dirs_to_search.append(('IR', ir_dir))
 
         # Determine which fields to search
         if strict_mode:
