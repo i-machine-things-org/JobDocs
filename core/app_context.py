@@ -263,31 +263,59 @@ class AppContext:
                 suffix = parts[1].strip('/')
                 print(f"[find_job_folders] Prefix: '{prefix}', Suffix: '{suffix}'", flush=True)
 
-                prefix_path = os.path.join(customer_path, prefix) if prefix else customer_path
-                print(f"[find_job_folders] Prefix path: {prefix_path}", flush=True)
-
-                if os.path.exists(prefix_path):
-                    try:
-                        items = os.listdir(prefix_path)
-                        print(f"[find_job_folders] Found {len(items)} items in prefix path", flush=True)
-                        for item in items:
-                            item_path = os.path.join(prefix_path, item)
-                            if os.path.isdir(item_path):
-                                if suffix:
-                                    expected_docs_path = os.path.join(item_path, suffix)
-                                    print(f"[find_job_folders]   Checking {item} -> {expected_docs_path}", flush=True)
-                                    if os.path.exists(expected_docs_path):
-                                        print(f"[find_job_folders]     ✓ Found job: {item}", flush=True)
-                                        jobs.append((item, expected_docs_path))
-                                    else:
-                                        print(f"[find_job_folders]     ✗ Path doesn't exist", flush=True)
-                                else:
-                                    print(f"[find_job_folders]   Found job (no suffix): {item}", flush=True)
-                                    jobs.append((item, item_path))
-                    except OSError as e:
-                        print(f"[find_job_folders] OSError: {e}", flush=True)
+                if '{po_number}' in prefix:
+                    # Template has a PO number segment — enumerate actual PO subdirectories
+                    print("[find_job_folders] Detected {po_number} in prefix, enumerating PO dirs", flush=True)
+                    po_parts = prefix.split('{po_number}')
+                    pre_po = po_parts[0].strip('/')
+                    post_po = po_parts[1].strip('/') if len(po_parts) > 1 else ''
+                    base_path = os.path.join(customer_path, pre_po) if pre_po else customer_path
+                    if os.path.exists(base_path):
+                        try:
+                            for po_dir in sorted(os.listdir(base_path)):
+                                po_path = os.path.join(base_path, po_dir)
+                                if not os.path.isdir(po_path):
+                                    continue
+                                sub_path = os.path.join(po_path, post_po) if post_po else po_path
+                                if not os.path.exists(sub_path):
+                                    continue
+                                for item in sorted(os.listdir(sub_path)):
+                                    item_path = os.path.join(sub_path, item)
+                                    if os.path.isdir(item_path):
+                                        if suffix:
+                                            expected_docs_path = os.path.join(item_path, suffix)
+                                            if os.path.exists(expected_docs_path):
+                                                jobs.append((item, expected_docs_path))
+                                        else:
+                                            jobs.append((item, item_path))
+                        except OSError as e:
+                            print(f"[find_job_folders] OSError enumerating PO dirs: {e}", flush=True)
                 else:
-                    print(f"[find_job_folders] Prefix path doesn't exist!", flush=True)
+                    prefix_path = os.path.join(customer_path, prefix) if prefix else customer_path
+                    print(f"[find_job_folders] Prefix path: {prefix_path}", flush=True)
+
+                    if os.path.exists(prefix_path):
+                        try:
+                            items = os.listdir(prefix_path)
+                            print(f"[find_job_folders] Found {len(items)} items in prefix path", flush=True)
+                            for item in items:
+                                item_path = os.path.join(prefix_path, item)
+                                if os.path.isdir(item_path):
+                                    if suffix:
+                                        expected_docs_path = os.path.join(item_path, suffix)
+                                        print(f"[find_job_folders]   Checking {item} -> {expected_docs_path}", flush=True)
+                                        if os.path.exists(expected_docs_path):
+                                            print(f"[find_job_folders]     ✓ Found job: {item}", flush=True)
+                                            jobs.append((item, expected_docs_path))
+                                        else:
+                                            print("[find_job_folders]     ✗ Path doesn't exist", flush=True)
+                                    else:
+                                        print(f"[find_job_folders]   Found job (no suffix): {item}", flush=True)
+                                        jobs.append((item, item_path))
+                        except OSError as e:
+                            print(f"[find_job_folders] OSError: {e}", flush=True)
+                    else:
+                        print("[find_job_folders] Prefix path doesn't exist!", flush=True)
 
         print(f"[find_job_folders] Returning {len(jobs)} jobs", flush=True)
         return jobs

@@ -56,8 +56,11 @@ if not modules_dir.exists():
     # If modules not found relative to spec, try parent directory
     modules_dir = spec_root.parent / 'modules'
 
+# PSM-only modules excluded from stable build (Rule 3: modules/reporting/ is PSM-only)
+PSM_ONLY_MODULES = {'reporting'}
+
 for module_folder in modules_dir.iterdir():
-    if module_folder.is_dir() and not module_folder.name.startswith('_'):
+    if module_folder.is_dir() and not module_folder.name.startswith('_') and module_folder.name not in PSM_ONLY_MODULES:
         ui_dir = module_folder / 'ui'
         if ui_dir.exists():
             for ui_file in ui_dir.glob('*.ui'):
@@ -140,20 +143,14 @@ hiddenimports = [
     'modules.import_bp.module',
     'modules.history',
     'modules.history.module',
-    'modules.reporting',
-    'modules.reporting.module',
-
     # Shared modules
     'shared.remote_sync',
 
     # PDF preview (imported inside function body — PyInstaller won't auto-detect)
     'fitz',
 
-    # Report Fixer dependencies
-    'pandas',
-    'openpyxl',
-    'openpyxl.worksheet.table',
-    'openpyxl.styles',
+    # NOTE: modules.reporting, pandas, openpyxl are PSM-only (Rule 3).
+    # Include them only in a PSM-specific build spec, not here.
 ]
 
 # Find main.py

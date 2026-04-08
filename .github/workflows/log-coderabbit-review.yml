@@ -29,19 +29,26 @@ jobs:
           DATE=$(echo "$REVIEW_DATE" | cut -c1-10)
           PR_REF="PR #${PR_NUMBER}: ${PR_TITLE}"
 
+          # Compute the next unique run number to avoid MD024 duplicate-heading violations.
+          # Extract the highest existing "review run N" suffix for this date+PR, then increment.
+          MAX_RUN=$(grep "^## ${DATE}.*#${PR_NUMBER}:.*review run" ".claude/S&P.md" 2>/dev/null \
+            | grep -oE '[0-9]+$' | sort -n | tail -1)
+          RUN_NUM=$(( ${MAX_RUN:-0} + 1 ))
+          HEADING="## ${DATE} — \`${PR_REF}\` — review run ${RUN_NUM}"
+
           {
             echo ""
             echo "---"
             echo ""
-            echo "## ${DATE} — \`${PR_REF}\`"
+            echo "${HEADING}"
             echo ""
             echo "${REVIEW_BODY}"
-          } >> .claude/S&P.md
+          } >> ".claude/S&P.md"
 
       - name: Commit S&P.md update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .claude/S&P.md
+          git add ".claude/S&P.md"
           git diff --cached --quiet || git commit -m "docs: log coderabbit review for PR #${{ github.event.pull_request.number }}"
           git push

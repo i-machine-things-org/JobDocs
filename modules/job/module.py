@@ -407,24 +407,22 @@ class JobModule(BaseModule):
 
                 if is_blueprint_file(file_name, blueprint_extensions):
                     bp_dest = customer_bp / file_name
-                    try:
-                        shutil.copy2(file_path, bp_dest)
-                    except FileExistsError:
-                        pass
-                    except PermissionError:
-                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                    if not bp_dest.exists():
+                        try:
+                            shutil.copy2(file_path, bp_dest)
+                        except PermissionError:
+                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
                     job_dest = job_path / file_name
-                    if not job_dest.exists():
+                    if bp_dest.exists() and not job_dest.exists():
                         create_file_link(bp_dest, job_dest, link_type)
                 else:
                     job_dest = job_path / file_name
-                    try:
-                        shutil.copy2(file_path, job_dest)
-                    except FileExistsError:
-                        pass
-                    except PermissionError:
-                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                    if not job_dest.exists():
+                        try:
+                            shutil.copy2(file_path, job_dest)
+                        except PermissionError:
+                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
             # Link existing drawings
             if drawings:
@@ -652,13 +650,36 @@ class JobModule(BaseModule):
             self.refresh_job_tree()
             return
 
+        if self._worker and self._worker.isRunning():
+            self._worker.cancel()
+            self._worker.wait()
+
         self.job_tree.clear()
-        dirs_to_search = self._get_customer_files_dirs()
+
+        # Mirror the filter logic from refresh_job_tree so search respects the UI controls
+        dirs_to_search = []
+        if self.add_all_radio.isChecked():
+            dirs_to_search = self._get_customer_files_dirs()
+        elif self.add_standard_radio.isChecked():
+            cf_dir = self.app_context.get_setting('customer_files_dir', '')
+            if cf_dir and os.path.exists(cf_dir):
+                dirs_to_search.append(('', cf_dir))
+        else:  # ITAR only
+            itar_cf_dir = self.app_context.get_setting('itar_customer_files_dir', '')
+            if itar_cf_dir and os.path.exists(itar_cf_dir):
+                dirs_to_search.append(('ITAR', itar_cf_dir))
+
+        selected_customer = self.add_customer_combo.currentText()
+        show_all = selected_customer == "(All Customers)" or not selected_customer
+
         results = 0
 
         for prefix, cf_dir in dirs_to_search:
             try:
-                customers = [d for d in os.listdir(cf_dir) if os.path.isdir(os.path.join(cf_dir, d))]
+                if show_all:
+                    customers = [d for d in os.listdir(cf_dir) if os.path.isdir(os.path.join(cf_dir, d))]
+                else:
+                    customers = [selected_customer] if os.path.isdir(os.path.join(cf_dir, selected_customer)) else []
 
                 for customer in sorted(customers):
                     customer_path = os.path.join(cf_dir, customer)
@@ -803,37 +824,40 @@ class JobModule(BaseModule):
             try:
                 if dest == 'blueprints':
                     bp_dest = customer_bp / file_name
-                    try:
-                        shutil.copy2(file_path, bp_dest)
-                        added += 1
-                    except FileExistsError:
-                        skipped += 1
-                    except PermissionError:
-                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                    if not bp_dest.exists():
+                        try:
+                            shutil.copy2(file_path, bp_dest)
+                            added += 1
+                        except PermissionError:
+                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                            skipped += 1
+                    else:
                         skipped += 1
 
                 elif dest == 'job':
                     job_dest = Path(job_path) / file_name
-                    try:
-                        shutil.copy2(file_path, job_dest)
-                        added += 1
-                    except FileExistsError:
-                        skipped += 1
-                    except PermissionError:
-                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                    if not job_dest.exists():
+                        try:
+                            shutil.copy2(file_path, job_dest)
+                            added += 1
+                        except PermissionError:
+                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                            skipped += 1
+                    else:
                         skipped += 1
 
                 else:  # both
                     bp_dest = customer_bp / file_name
-                    try:
-                        shutil.copy2(file_path, bp_dest)
-                    except FileExistsError:
-                        pass
-                    except PermissionError:
-                        self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                    bp_ready = bp_dest.exists()
+                    if not bp_ready:
+                        try:
+                            shutil.copy2(file_path, bp_dest)
+                            bp_ready = True
+                        except PermissionError:
+                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
                     job_dest = Path(job_path) / file_name
-                    if not job_dest.exists():
+                    if bp_ready and not job_dest.exists():
                         create_file_link(bp_dest, job_dest, link_type)
                         added += 1
                     else:
@@ -853,36 +877,46 @@ class JobModule(BaseModule):
 
     def open_blueprints_folder(self):
         """Open active customer's blueprints folder, or base directory if nothing selected"""
-        bp_dir = self.app_context.get_setting('blueprints_dir', '')
-        if not bp_dir or not os.path.exists(bp_dir):
-            self.show_error("Warning", "Blueprints directory not configured")
-            return
-
         folder_to_open = None
+        is_itar = False
 
         # First check if there's a selected customer in the tree
         items = self.job_tree.selectedItems() if self.job_tree else []
         if items:
             item = items[0]
-            # Get customer name (parent if job selected, or item itself if customer)
-            if item.parent():
-                customer = item.parent().text(0)
-            else:
-                customer = item.text(0)
-            customer_bp = os.path.join(bp_dir, customer)
-            if os.path.exists(customer_bp):
-                folder_to_open = customer_bp
+            # Get display name (parent if job selected, or item itself if customer)
+            display_name = item.parent().text(0) if item.parent() else item.text(0)
+            is_itar = display_name.startswith(('[ITAR] ', '[ITAR-BP] '))
+            customer = display_name.replace('[ITAR-BP] ', '').replace('[ITAR] ', '').replace('[ITAR]', '').strip()
+            bp_dir = self.app_context.get_setting(
+                'itar_blueprints_dir' if is_itar else 'blueprints_dir', ''
+            )
+            if bp_dir:
+                customer_bp = os.path.join(bp_dir, customer)
+                if os.path.exists(customer_bp):
+                    folder_to_open = customer_bp
 
         # If nothing in tree, check customer combo on Create New tab
         if not folder_to_open and self.customer_combo:
             customer = self.customer_combo.currentText().strip()
             if customer:
-                customer_bp = os.path.join(bp_dir, customer)
-                if os.path.exists(customer_bp):
-                    folder_to_open = customer_bp
+                is_itar = self.itar_check.isChecked() if self.itar_check else False
+                bp_dir = self.app_context.get_setting(
+                    'itar_blueprints_dir' if is_itar else 'blueprints_dir', ''
+                )
+                if bp_dir:
+                    customer_bp = os.path.join(bp_dir, customer)
+                    if os.path.exists(customer_bp):
+                        folder_to_open = customer_bp
 
-        # Fallback to base blueprints directory
+        # Fallback to base blueprints directory (respect ITAR state)
         if not folder_to_open:
+            bp_dir = self.app_context.get_setting(
+                'itar_blueprints_dir' if is_itar else 'blueprints_dir', ''
+            )
+            if not bp_dir or not os.path.exists(bp_dir):
+                self.show_error("Warning", "Blueprints directory not configured")
+                return
             folder_to_open = bp_dir
 
         success, error = open_folder(folder_to_open)
