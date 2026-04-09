@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QMessageBox, QDialog
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
 
 from core.module_loader import ModuleLoader
 from core.app_context import AppContext
@@ -72,6 +73,7 @@ class JobDocsMainWindow(QMainWindow):
         # Setup UI
         self.setWindowTitle("JobDocs")
         self.resize(700, 600)
+        self._set_window_icon()
 
         # Create tab widget
         self.tabs = QTabWidget()
@@ -207,6 +209,20 @@ class JobDocsMainWindow(QMainWindow):
 
         except IOError as e:
             self.show_error_dialog("Error", f"Failed to save history: {e}")
+
+    # ==================== Window Icon ====================
+
+    def _set_window_icon(self):
+        """Set application window icon from bundled or filesystem icon."""
+        base = Path(sys._MEIPASS) if getattr(sys, 'frozen', False) else Path(__file__).parent
+        candidates = [
+            base / 'windows' / 'icon.ico',
+            base / 'JobDocs.iconset' / 'icon_256x256.png',
+        ]
+        for path in candidates:
+            if path.exists():
+                self.setWindowIcon(QIcon(str(path)))
+                break
 
     # ==================== Module Loading ====================
 

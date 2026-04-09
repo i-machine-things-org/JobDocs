@@ -33,19 +33,21 @@ APP_NAME = 'JobDocs'
 # Get the directory where this spec file is located
 spec_root = Path(SPECPATH)
 
-# Determine platform-specific settings and find icon
+# Determine platform-specific icon file
 import sys
 if sys.platform == 'win32':
-    icon_name = 'icon_256x256.png'
+    # Prefer the pre-built .ico (no Pillow conversion needed)
+    icon_path = spec_root / 'windows' / 'icon.ico'
+    if not icon_path.exists():
+        icon_path = spec_root.parent / 'windows' / 'icon.ico'
 elif sys.platform == 'darwin':
-    icon_name = 'icon_512x512.png'
-else:  # Linux
-    icon_name = 'icon_256x256.png'
-
-# Find the icon file
-icon_path = spec_root / 'JobDocs.iconset' / icon_name
-if not icon_path.exists():
-    icon_path = spec_root.parent / 'JobDocs.iconset' / icon_name
+    icon_path = spec_root / 'JobDocs.iconset' / 'icon_512x512.png'
+    if not icon_path.exists():
+        icon_path = spec_root.parent / 'JobDocs.iconset' / 'icon_512x512.png'
+else:
+    icon_path = spec_root / 'JobDocs.iconset' / 'icon_256x256.png'
+    if not icon_path.exists():
+        icon_path = spec_root.parent / 'JobDocs.iconset' / 'icon_256x256.png'
 
 ICON_FILE = str(icon_path) if icon_path.exists() else None
 
