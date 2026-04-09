@@ -2694,3 +2694,32 @@ Reviewing files that changed from the base of the PR and between f7451a9e5c1f0c4
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-09 — `.github/workflows/build-release.yml` (PR #9: build-release workflow — review run 1)
+
+**Review:** CODERABBIT FINDINGS ON INITIAL BUILD-RELEASE WORKFLOW
+**Result:** All 4 actionable findings fixed; 1 nitpick (SHA pinning) deferred
+
+### Findings
+
+1. **MD040 — Missing language identifier on code fence in CLAUDE.md**
+   - Code fence for `git tag` commands lacked a language identifier
+   - Fix: added `bash` to opening fence
+
+2. **No stable-ancestry guard on tag trigger**
+   - Workflow could fire on tags pushed from any branch, including PSM-stable
+   - Fix: added `verify-stable-ancestry` job that runs `git merge-base --is-ancestor origin/stable $GITHUB_SHA` before build
+
+3. **Dependency version mismatch — PyMuPDF pinned loosely in workflow**
+   - Workflow used `PyMuPDF>=1.23.0`; `requirements.txt` pins `pymupdf>=1.24.0,<1.25.0`
+   - Fix: changed install step to `pip install -r requirements.txt` to match tested baseline
+
+4. **SignPath step ordering — unsigned artifact must upload before signing**
+   - SignPath action reads from an uploaded artifact; release should use signed output
+   - Fix: moved `upload-artifact` before the SignPath block; added commented `download-artifact` scaffold for when signing is enabled
+
+5. **Nitpick — Pin GitHub Actions to commit SHAs (deferred)**
+   - Floating major version tags (`@v4`, `@v5`, `@v2`) weaken supply-chain guarantees
+   - Deferred: acceptable risk for now; revisit when SHA pinning tooling is in place
