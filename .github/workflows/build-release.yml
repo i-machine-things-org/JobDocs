@@ -41,7 +41,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install "pyinstaller>=6.0.0"
+          pip install "pyinstaller>=6.0.0" "Pillow"
 
       - name: Build executable
         run: |
