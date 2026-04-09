@@ -1,0 +1,66 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install "PyQt6>=6.5.0" "PyMuPDF>=1.23.0" "pyinstaller>=6.0.0"
+
+      - name: Build executable
+        run: |
+          python -m PyInstaller --distpath build_dist --workpath build_temp build_scripts/JobDocs.spec
+
+      - name: Verify build
+        run: |
+          if (!(Test-Path "build_dist/JobDocs.exe")) {
+            Write-Error "build_dist/JobDocs.exe not found — build failed"
+            exit 1
+          }
+          Write-Output "Build OK: $(Get-Item build_dist/JobDocs.exe | Select-Object -ExpandProperty Length) bytes"
+
+      # -----------------------------------------------------------------------
+      # SignPath code signing — uncomment once SignPath Foundation is approved
+      # Apply at: https://signpath.io/product/open-source
+      # -----------------------------------------------------------------------
+      # - name: Sign executable
+      #   uses: signpath/github-action-submit-signing-request@v1
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+      #     project-slug: jobdocs
+      #     signing-policy-slug: release-signing
+      #     artifact-configuration-slug: single-exe
+      #     github-artifact-name: JobDocs-unsigned
+      #     output-artifact-name: JobDocs-signed
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JobDocs-unsigned
+          path: build_dist/JobDocs.exe
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: JobDocs ${{ github.ref_name }}
+          files: build_dist/JobDocs.exe
+          generate_release_notes: true
+          fail_on_unmatched_files: true
