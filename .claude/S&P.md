@@ -2553,3 +2553,173 @@ Reviewing files that changed from the base of the PR and between e31866f1abe4a4f
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-09 — `PR #9: ci: add build-release workflow for signed Windows exe` — review run 1
+
+**Actionable comments posted: 4**
+
+<details>
+<summary>🧹 Nitpick comments (1)</summary><blockquote>
+
+<details>
+<summary>.github/workflows/build-release.yml (1)</summary><blockquote>
+
+`16-16`: **Pin GitHub Actions to commit SHAs.**
+
+Floating major version tags (`@v4`, `@v5`, `@v2`) weaken supply-chain guarantees. Pin to full commit SHAs for `actions/checkout`, `actions/setup-python`, `actions/upload-artifact`, and `softprops/action-gh-release`.
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In @.github/workflows/build-release.yml at line 16, The workflow currently uses
+floating tags like "uses: actions/checkout@v4" which weakens supply-chain
+guarantees; update each third-party action reference (e.g., actions/checkout@v4,
+actions/setup-python@..., actions/upload-artifact@...,
+softprops/action-gh-release@...) to pin to the corresponding full commit SHA for
+that action repository instead of the major/minor tag, replacing the tag strings
+with the exact commit SHAs so each "uses:" entry references a specific immutable
+commit.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+````
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In @.claude/CLAUDE.md:
+- Around line 84-87: The fenced code block containing the git commands ("git tag
+v1.2.3" and "git push origin v1.2.3") needs a language identifier to satisfy
+MD040; edit the fenced block in .claude/CLAUDE.md so the opening fence reads
+```bash (instead of just ```), preserving the two command lines and closing
+fence.
+
+In @.github/workflows/build-release.yml:
+- Around line 3-6: Add a guard that verifies the pushed tag's commit is
+descended from the stable branch before running the release workflow: create a
+pre-release job (e.g., verify-stable-ancestry) that runs on the tag event
+(on.push.tags) and uses actions/checkout to fetch origin stable, then run git
+merge-base --is-ancestor origin/stable $GITHUB_SHA (or equivalent git check) and
+fail the job if it returns non-zero; reference the job name
+verify-stable-ancestry and the CI env var GITHUB_SHA so the release job
+depends_on this verification step.
+- Around line 23-25: The CI step named "Install dependencies" currently installs
+PyMuPDF with a looser constraint (PyMuPDF>=1.23.0) which diverges from the
+tested baseline; update that step in the build-release.yml to install exact test
+requirements by running pip install -r requirements.txt (or, if you prefer
+minimal change, change the explicit package spec to match the baseline:
+pymupdf>=1.24.0,<1.25.0) so the workflow uses the same dependency bounds as the
+requirements file and ensures reproducible releases.
+- Around line 43-53: The SignPath step is referenced before the unsigned
+artifact is uploaded and the release publishes an unsigned binary; reorder the
+workflow so the job that creates and uploads the unsigned artifact (artifact
+name "JobDocs-unsigned") runs before the SignPath action
+(signpath/github-action-submit-signing-request@v1), then add a step after
+SignPath to download the signed artifact ("JobDocs-signed") and replace or point
+the release input at that signed file instead of build_dist/JobDocs.exe; ensure
+the GitHub Release step uses the downloaded "JobDocs-signed" artifact rather
+than the original unsigned file.
+
+---
+
+Nitpick comments:
+In @.github/workflows/build-release.yml:
+- Line 16: The workflow currently uses floating tags like "uses:
+actions/checkout@v4" which weakens supply-chain guarantees; update each
+third-party action reference (e.g., actions/checkout@v4,
+actions/setup-python@..., actions/upload-artifact@...,
+softprops/action-gh-release@...) to pin to the corresponding full commit SHA for
+that action repository instead of the major/minor tag, replacing the tag strings
+with the exact commit SHAs so each "uses:" entry references a specific immutable
+commit.
+````
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `1c359722-1c07-474a-898b-7b07bc030558`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between f7451a9e5c1f0c425d6922a4fcb63918be861b7d and 62d0c5bb661c6bdbcca77b7cfa86eeb3306f4476.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (2)</summary>
+
+* `.claude/CLAUDE.md`
+* `.github/workflows/build-release.yml`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-09 — `.github/workflows/build-release.yml` (PR #9: build-release workflow — review run 1)
+
+**Review:** CODERABBIT FINDINGS ON INITIAL BUILD-RELEASE WORKFLOW
+**Result:** All 4 actionable findings fixed; 1 nitpick (SHA pinning) deferred
+
+### Findings
+
+1. **MD040 — Missing language identifier on code fence in CLAUDE.md**
+   - Code fence for `git tag` commands lacked a language identifier
+   - Fix: added `bash` to opening fence
+
+2. **No stable-ancestry guard on tag trigger**
+   - Workflow could fire on tags pushed from any branch, including PSM-stable
+   - Fix: added `verify-stable-ancestry` job that runs `git merge-base --is-ancestor origin/stable $GITHUB_SHA` before build
+
+3. **Dependency version mismatch — PyMuPDF pinned loosely in workflow**
+   - Workflow used `PyMuPDF>=1.23.0`; `requirements.txt` pins `pymupdf>=1.24.0,<1.25.0`
+   - Fix: changed install step to `pip install -r requirements.txt` to match tested baseline
+
+4. **SignPath step ordering — unsigned artifact must upload before signing**
+   - SignPath action reads from an uploaded artifact; release should use signed output
+   - Fix: moved `upload-artifact` before the SignPath block; added commented `download-artifact` scaffold for when signing is enabled
+
+5. **Nitpick — Pin GitHub Actions to commit SHAs (deferred)**
+   - Floating major version tags (`@v4`, `@v5`, `@v2`) weaken supply-chain guarantees
+   - Deferred: acceptable risk for now; revisit when SHA pinning tooling is in place

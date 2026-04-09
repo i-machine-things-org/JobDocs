@@ -73,6 +73,23 @@ Tag releases using `vMAJOR.MINOR.PATCH`:
 - **MINOR** — new features that do not break existing functionality
 - **PATCH** — bug fixes, typo corrections, minor improvements
 
+### Release Workflow
+
+Pushing a `v*` tag to `stable` automatically triggers `.github/workflows/build-release.yml`, which:
+1. Builds `JobDocs.exe` via PyInstaller on a Windows runner using `build_scripts/JobDocs.spec`
+2. Signs the executable via SignPath (once approved — currently commented out pending application)
+3. Creates a GitHub Release and attaches `JobDocs.exe` as a release asset
+
+**To cut a release:**
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+**Note:** Only tag from `stable`. Do not push `v*` tags from `PSM-stable` — that branch carries Report Fixer (Rule 3) and must not produce a general release build.
+
+**SignPath:** Apply at https://signpath.io/product/open-source. Once approved, uncomment the signing step in `build-release.yml` and add `SIGNPATH_API_TOKEN` and `SIGNPATH_ORG_ID` to GitHub Actions secrets.
+
 ## Rule 5: CodeRabbit Pull Request Reviews
 
 When a pull request is open or being prepared:

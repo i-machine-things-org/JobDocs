@@ -1,0 +1,94 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  verify-stable-ancestry:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag is descended from stable
+        run: |
+          git fetch origin stable
+          if ! git merge-base --is-ancestor origin/stable "$GITHUB_SHA"; then
+            echo "ERROR: Tag $GITHUB_REF_NAME is not descended from stable. Only tag from stable."
+            exit 1
+          fi
+          echo "OK: $GITHUB_REF_NAME is descended from stable"
+
+  build-windows:
+    needs: verify-stable-ancestry
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install "pyinstaller>=6.0.0"
+
+      - name: Build executable
+        run: |
+          python -m PyInstaller --distpath build_dist --workpath build_temp build_scripts/JobDocs.spec
+
+      - name: Verify build
+        run: |
+          if (!(Test-Path "build_dist/JobDocs.exe")) {
+            Write-Error "build_dist/JobDocs.exe not found — build failed"
+            exit 1
+          }
+          Write-Output "Build OK: $(Get-Item build_dist/JobDocs.exe | Select-Object -ExpandProperty Length) bytes"
+
+      - name: Upload unsigned artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JobDocs-unsigned
+          path: build_dist/JobDocs.exe
+
+      # -----------------------------------------------------------------------
+      # SignPath code signing — uncomment once SignPath Foundation is approved
+      # Apply at: https://signpath.io/product/open-source
+      # After enabling: update the release step below to use JobDocs-signed
+      # -----------------------------------------------------------------------
+      # - name: Sign executable
+      #   uses: signpath/github-action-submit-signing-request@v1
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+      #     project-slug: jobdocs
+      #     signing-policy-slug: release-signing
+      #     artifact-configuration-slug: single-exe
+      #     github-artifact-name: JobDocs-unsigned
+      #     output-artifact-name: JobDocs-signed
+
+      # - name: Download signed artifact
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: JobDocs-signed
+      #     path: build_dist_signed
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: JobDocs ${{ github.ref_name }}
+          files: build_dist/JobDocs.exe
+          # When signing is enabled, replace the line above with:
+          # files: build_dist_signed/JobDocs.exe
+          generate_release_notes: true
+          fail_on_unmatched_files: true
