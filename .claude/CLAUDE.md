@@ -81,7 +81,7 @@ Pushing a `v*` tag to `stable` automatically triggers `.github/workflows/build-r
 3. Creates a GitHub Release and attaches `JobDocs.exe` as a release asset
 
 **To cut a release:**
-```
+```bash
 git tag v1.2.3
 git push origin v1.2.3
 ```
