@@ -127,9 +127,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.local/share/flatpak
-          key: flatpak-runtime-freedesktop-23.08-${{ runner.arch }}
+          key: flatpak-runtime-freedesktop-24.08-${{ runner.arch }}
           restore-keys: |
-            flatpak-runtime-freedesktop-23.08-
+            flatpak-runtime-freedesktop-24.08-
 
       - name: Add Flathub remote
         run: flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
@@ -137,8 +137,8 @@ jobs:
       - name: Install Flatpak runtime
         run: |
           flatpak install --user -y flathub \
-            org.freedesktop.Platform//23.08 \
-            org.freedesktop.Sdk//23.08
+            org.freedesktop.Platform//24.08 \
+            org.freedesktop.Sdk//24.08
 
       - name: Stage files for Flatpak manifest
         run: |

@@ -2,6 +2,9 @@
 <component type="desktop-application">
   <id>io.github.i_machine_things.JobDocs</id>
 
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
   <name>JobDocs</name>
   <summary>Manage blueprint files and customer job directories</summary>
 
