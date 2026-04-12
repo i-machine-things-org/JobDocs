@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=JobDocs
+GenericName=Job Document Manager
+Comment=Manage blueprint files and customer job directories
+Exec=JobDocs
+Icon=io.github.i_machine_things.JobDocs
+Type=Application
+Categories=Office;Database;
+Keywords=jobs;documents;blueprints;files;management;
+StartupNotify=true
+StartupWMClass=JobDocs

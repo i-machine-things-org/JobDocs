@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.i_machine_things.JobDocs</id>
+
+  <name>JobDocs</name>
+  <summary>Manage blueprint files and customer job directories</summary>
+
+  <description>
+    <p>
+      JobDocs is a modular desktop tool for managing blueprint files and customer
+      job directories. It supports file linking, ITAR compliance workflows, and
+      comprehensive job tracking.
+    </p>
+    <ul>
+      <li>Auto-generate sequential job and quote numbers</li>
+      <li>Single and bulk job creation (CSV import)</li>
+      <li>Blueprint file management with hard-link deduplication</li>
+      <li>ITAR-controlled project separation</li>
+      <li>Advanced search by customer, job number, description, or drawing number</li>
+      <li>History tracking for recent jobs and customers</li>
+    </ul>
+  </description>
+
+  <url type="homepage">https://github.com/i-machine-things/JobDocs</url>
+  <url type="bugtracker">https://github.com/i-machine-things/JobDocs/issues</url>
+
+  <launchable type="desktop-id">io.github.i_machine_things.JobDocs.desktop</launchable>
+
+  <provides>
+    <binary>JobDocs</binary>
+  </provides>
+
+  <content_rating type="oars-1.1"/>
+</component>

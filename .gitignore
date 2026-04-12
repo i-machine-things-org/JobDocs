@@ -46,6 +46,15 @@ Thumbs.db
 test_output/
 old/
 
+# Flatpak — staged binary and icon (copied from build_dist/ by CI, not source files)
+linux/flatpak/JobDocs
+linux/flatpak/icon_256x256.png
+
+# Flatpak builder output
+flatpak-build/
+flatpak-repo/
+*.flatpak
+
 # Build artifacts (all platforms)
 installer_output/
 dist/

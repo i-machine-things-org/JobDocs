@@ -23,6 +23,9 @@ jobs:
           fi
           echo "OK: $GITHUB_REF_NAME is descended from stable"
 
+  # ---------------------------------------------------------------------------
+  # Windows — PyInstaller single-file EXE
+  # ---------------------------------------------------------------------------
   build-windows:
     needs: verify-stable-ancestry
     runs-on: windows-latest
@@ -64,7 +67,7 @@ jobs:
       # -----------------------------------------------------------------------
       # SignPath code signing — uncomment once SignPath Foundation is approved
       # Apply at: https://signpath.io/product/open-source
-      # After enabling: update the release step below to use JobDocs-signed
+      # After enabling: update the create-release step to use JobDocs-signed
       # -----------------------------------------------------------------------
       # - name: Sign executable
       #   uses: signpath/github-action-submit-signing-request@v1
@@ -77,18 +80,124 @@ jobs:
       #     github-artifact-name: JobDocs-unsigned
       #     output-artifact-name: JobDocs-signed
 
-      # - name: Download signed artifact
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     name: JobDocs-signed
-      #     path: build_dist_signed
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JobDocs-windows
+          path: build_dist/JobDocs.exe
+
+  # ---------------------------------------------------------------------------
+  # Linux — PyInstaller binary wrapped in a Flatpak bundle
+  # ---------------------------------------------------------------------------
+  build-flatpak:
+    needs: verify-stable-ancestry
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install "pyinstaller>=6.0.0"
+
+      - name: Build PyInstaller binary
+        run: |
+          python -m PyInstaller --distpath build_dist --workpath build_temp build_scripts/JobDocs.spec
+
+      - name: Verify binary
+        run: |
+          test -f build_dist/JobDocs || { echo "build_dist/JobDocs not found — build failed"; exit 1; }
+          echo "Build OK: $(du -h build_dist/JobDocs | cut -f1)"
+
+      - name: Install Flatpak tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y flatpak flatpak-builder
+
+      - name: Cache Flatpak runtimes
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/flatpak
+          key: flatpak-runtime-freedesktop-23.08-${{ runner.arch }}
+          restore-keys: |
+            flatpak-runtime-freedesktop-23.08-
+
+      - name: Add Flathub remote
+        run: flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Install Flatpak runtime
+        run: |
+          flatpak install --user -y flathub \
+            org.freedesktop.Platform//23.08 \
+            org.freedesktop.Sdk//23.08
+
+      - name: Stage files for Flatpak manifest
+        run: |
+          cp build_dist/JobDocs linux/flatpak/JobDocs
+          cp JobDocs.iconset/icon_256x256.png linux/flatpak/icon_256x256.png
+
+      - name: Build Flatpak
+        run: |
+          flatpak-builder \
+            --user \
+            --repo=flatpak-repo \
+            --force-clean \
+            flatpak-build \
+            linux/flatpak/io.github.i_machine_things.JobDocs.yml
+          flatpak build-bundle \
+            --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
+            flatpak-repo \
+            JobDocs-linux.flatpak \
+            io.github.i_machine_things.JobDocs
+
+      - name: Verify Flatpak bundle
+        run: |
+          test -f JobDocs-linux.flatpak || { echo "JobDocs-linux.flatpak not found — build failed"; exit 1; }
+          echo "Flatpak OK: $(du -h JobDocs-linux.flatpak | cut -f1)"
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JobDocs-linux
+          path: JobDocs-linux.flatpak
+
+  # ---------------------------------------------------------------------------
+  # Release — combine both platform artifacts into a single GitHub Release
+  # ---------------------------------------------------------------------------
+  create-release:
+    needs: [build-windows, build-flatpak]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: JobDocs-windows
+          path: release-assets
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: JobDocs-linux
+          path: release-assets
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: JobDocs ${{ github.ref_name }}
-          files: build_dist/JobDocs.exe
-          # When signing is enabled, replace the line above with:
-          # files: build_dist_signed/JobDocs.exe
+          files: release-assets/*
+          # When signing is enabled, re-download JobDocs-signed instead of
+          # JobDocs-windows above, and update files: accordingly.
           generate_release_notes: true
           fail_on_unmatched_files: true
