@@ -300,9 +300,27 @@ class DropZone(QFrame):
             return []
 
         web_data = DropZone._parse_chromium_web_mime(raw)
-        mail_info = web_data.get('maillistrow')
+        # New Outlook uses different keys depending on context (inbox, search results, etc.)
+        _ROW_KEYS = (
+            'maillistrow',
+            'multimaillistconversationrows',  # search results in New Outlook
+            'conversationlistrow',
+            'itemlistrow',
+            'mailrow',
+            'messagelistrow',
+        )
+        mail_info = None
+        for _key in _ROW_KEYS:
+            if isinstance(web_data.get(_key), dict):
+                mail_info = web_data[_key]
+                print(f'[DropZone] Chromium MIME key matched: {_key!r}', flush=True)
+                break
         if not isinstance(mail_info, dict):
-            print('[DropZone] maillistrow not found in Chromium MIME data', flush=True)
+            print(
+                f'[DropZone] No recognised mail row key in Chromium MIME data. '
+                f'Keys present: {list(web_data.keys())}',
+                flush=True,
+            )
             return []
 
         # New Outlook uses parallel arrays: subjects[], itemIds[], mailboxInfos[]
