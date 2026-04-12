@@ -2723,3 +2723,252 @@ Reviewing files that changed from the base of the PR and between f7451a9e5c1f0c4
 5. **Nitpick — Pin GitHub Actions to commit SHAs (deferred)**
    - Floating major version tags (`@v4`, `@v5`, `@v2`) weaken supply-chain guarantees
    - Deferred: acceptable risk for now; revisit when SHA pinning tooling is in place
+
+---
+
+## 2026-04-12 — `PR #12: ci: add Linux Flatpak build to release workflow` — review run 1
+
+**Actionable comments posted: 3**
+
+> [!CAUTION]
+> Some comments are outside the diff and can’t be posted inline due to platform limitations.
+> 
+> 
+> 
+> <details>
+> <summary>⚠️ Outside diff range comments (1)</summary><blockquote>
+> 
+> <details>
+> <summary>.github/workflows/build-release.yml (1)</summary><blockquote>
+> 
+> `29-33`: _⚠️ Potential issue_ | _🟠 Major_
+> 
+> **Drop repository write scope from the build jobs.**
+> 
+> These jobs only read the repo and upload artifacts; neither operation requires `contents: write`. Keeping this scope on them increases blast radius if any build step, action, or dependency is compromised. Only `create-release` needs it to publish the GitHub Release.
+> 
+> 
+> 
+> <details>
+> <summary>Suggested change</summary>
+> 
+> ```diff
+>    build-windows:
+>      needs: verify-stable-ancestry
+>      runs-on: windows-latest
+>      permissions:
+> -      contents: write
+> +      contents: read
+> @@
+>    build-flatpak:
+>      needs: verify-stable-ancestry
+>      runs-on: ubuntu-latest
+>      permissions:
+> -      contents: write
+> +      contents: read
+> ```
+> </details>
+> 
+> Also applies to: 92-96
+> 
+> <details>
+> <summary>🤖 Prompt for AI Agents</summary>
+> 
+> ```
+> Verify each finding against the current code and only fix it if needed.
+> 
+> In @.github/workflows/build-release.yml around lines 29 - 33, Remove the
+> overly-broad repository write permission from the build jobs: in the
+> build-windows job (and the other build jobs with the same block) remove or
+> change the permissions block so it no longer sets contents: write; these jobs
+> only need read access and artifact upload rights, so limit to the minimal scopes
+> (or omit the permissions block to use defaults) and leave contents: write only
+> on the create-release job that actually publishes the GitHub Release (identify
+> and modify the permissions block inside the build-windows job and the equivalent
+> build jobs referenced later).
+> ```
+> 
+> </details>
+> 
+> </blockquote></details>
+> 
+> </blockquote></details>
+
+<details>
+<summary>🧹 Nitpick comments (1)</summary><blockquote>
+
+<details>
+<summary>.github/workflows/build-release.yml (1)</summary><blockquote>
+
+`61-66`: **Avoid uploading the same EXE twice while signing is disabled.**
+
+`JobDocs-unsigned` and `JobDocs-windows` currently contain the same `build_dist/JobDocs.exe`. Keeping one artifact until SignPath is enabled will simplify the release flow and cut redundant upload/storage cost.
+
+
+
+<details>
+<summary>Possible cleanup</summary>
+
+```diff
+-      - name: Upload unsigned artifact
+-        uses: actions/upload-artifact@v4
+-        with:
+-          name: JobDocs-unsigned
+-          path: build_dist/JobDocs.exe
+-
+       # -----------------------------------------------------------------------
+       # SignPath code signing — uncomment once SignPath Foundation is approved
+       # Apply at: https://signpath.io/product/open-source
+       # After enabling: update the create-release step to use JobDocs-signed
+       # -----------------------------------------------------------------------
+```
+</details>
+
+
+Also applies to: 83-87
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In @.github/workflows/build-release.yml around lines 61 - 66, The workflow is
+uploading the same build_dist/JobDocs.exe twice as artifacts named
+JobDocs-unsigned and JobDocs-windows; change the upload steps so only one
+artifact is produced when signing is disabled (e.g., guard the JobDocs-windows
+upload with the SignPath condition or remove the JobDocs-unsigned step and keep
+JobDocs-windows until signing is enabled). Update the steps labeled "Upload
+unsigned artifact" and the later "Upload signed/windows" step to reference the
+SignPath boolean (or a single upload step) and ensure only one artifact name
+(JobDocs-windows or JobDocs-unsigned) is used for build_dist/JobDocs.exe to
+avoid duplicate uploads.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In @.github/workflows/build-release.yml:
+- Around line 107-115: The GitHub Actions job currently installs Python deps and
+runs PyInstaller on the runner (steps named "Install Python dependencies" and
+"Build PyInstaller binary"), which produces a binary tied to the host libc;
+instead build the executable inside the Flatpak SDK runtime so it links against
+org.freedesktop.Platform//23.08 instead of the runner. Change the workflow to
+run PyInstaller under the Flatpak SDK (for example via flatpak run
+--command=python3 org.freedesktop.Sdk//23.08 or use flatpak-builder / a
+container image matching the SDK) and move the dependency installation and the
+PyInstaller invocation into that SDK context (replace the two steps that run pip
+install and python -m PyInstaller with equivalent commands executed inside the
+Flatpak SDK), ensuring the built binary is produced within build_dist inside the
+SDK environment.
+
+In `@linux/flatpak/io.github.i_machine_things.JobDocs.metainfo.xml`:
+- Around line 2-34: The AppStream metadata is missing the required license tags:
+add a <metadata_license> and a <project_license> element inside the <component
+type="desktop-application"> for io.github.i_machine_things.JobDocs using
+appropriate SPDX identifiers (for example
+<metadata_license>CC0-1.0</metadata_license> and
+<project_license>GPL-3.0-or-later</project_license>) so appstreamcli/Flathub
+validation passes; ensure the tags are placed alongside the existing <name>,
+<summary>, and <url> elements within the component.
+
+In `@linux/flatpak/io.github.i_machine_things.JobDocs.yml`:
+- Around line 14-15: The manifest currently grants broad home access via the
+--filesystem=home flag; replace this with scoped permissions and explicit
+user-access flows: remove --filesystem=home, add a dedicated data path like
+--filesystem=xdg-data/JobDocs for app configuration/storage, and rely on file
+chooser portals (document portal usage) or explicit per-directory --filesystem
+entries only for directories users select (e.g., --filesystem=/path/to/project
+when consented). Ensure the YAML entry for filesystem reflects the scoped path
+and update any launch/install documentation to show how the app requests
+user-selected directories via portals instead of omnibus home access.
+
+---
+
+Outside diff comments:
+In @.github/workflows/build-release.yml:
+- Around line 29-33: Remove the overly-broad repository write permission from
+the build jobs: in the build-windows job (and the other build jobs with the same
+block) remove or change the permissions block so it no longer sets contents:
+write; these jobs only need read access and artifact upload rights, so limit to
+the minimal scopes (or omit the permissions block to use defaults) and leave
+contents: write only on the create-release job that actually publishes the
+GitHub Release (identify and modify the permissions block inside the
+build-windows job and the equivalent build jobs referenced later).
+
+---
+
+Nitpick comments:
+In @.github/workflows/build-release.yml:
+- Around line 61-66: The workflow is uploading the same build_dist/JobDocs.exe
+twice as artifacts named JobDocs-unsigned and JobDocs-windows; change the upload
+steps so only one artifact is produced when signing is disabled (e.g., guard the
+JobDocs-windows upload with the SignPath condition or remove the
+JobDocs-unsigned step and keep JobDocs-windows until signing is enabled). Update
+the steps labeled "Upload unsigned artifact" and the later "Upload
+signed/windows" step to reference the SignPath boolean (or a single upload step)
+and ensure only one artifact name (JobDocs-windows or JobDocs-unsigned) is used
+for build_dist/JobDocs.exe to avoid duplicate uploads.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `985ec0eb-6726-45ab-9494-92e3d599ed12`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 552c60246291a2a21d76bbc19effc4812ad6147f and 11521ce4e660fbdf11a56ae3ad89cf35bcdad3e6.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (5)</summary>
+
+* `.github/workflows/build-release.yml`
+* `.gitignore`
+* `linux/flatpak/io.github.i_machine_things.JobDocs.desktop`
+* `linux/flatpak/io.github.i_machine_things.JobDocs.metainfo.xml`
+* `linux/flatpak/io.github.i_machine_things.JobDocs.yml`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
