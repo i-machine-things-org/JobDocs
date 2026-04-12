@@ -1,4 +1,17 @@
 #!/bin/bash
+# DEPRECATED — local build script for Linux.
+#
+# Official Linux builds are now produced by the CI/CD release workflow:
+#   .github/workflows/build-release.yml (job: build-flatpak)
+#
+# The workflow builds a PyInstaller binary and wraps it in a Flatpak bundle
+# (JobDocs-linux.flatpak), which is attached to every GitHub Release.
+#
+# For local Flatpak builds, see: linux/flatpak/README.md
+#
+# This script (raw PyInstaller binary, no Flatpak) is kept for reference
+# but is no longer the recommended build path.
+# ---------------------------------------------------------------------------
 # Build script for JobDocs on Linux
 # Creates a standalone executable using PyInstaller
 
