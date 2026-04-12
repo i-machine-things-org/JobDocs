@@ -30,7 +30,7 @@ jobs:
     needs: verify-stable-ancestry
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout
@@ -93,7 +93,7 @@ jobs:
     needs: verify-stable-ancestry
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout

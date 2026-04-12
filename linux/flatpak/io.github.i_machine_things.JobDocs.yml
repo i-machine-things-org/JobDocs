@@ -11,7 +11,12 @@ finish-args:
   - --share=ipc
   # GPU acceleration for Qt rendering
   - --device=dri
-  # File system access — JobDocs manages documents in user directories
+  # File system access — JobDocs lets users configure an arbitrary root job
+  # directory anywhere inside their home tree (set via Settings dialog with
+  # QFileDialog). Narrowing this to xdg-data/JobDocs or individual paths would
+  # break that workflow until the app is ported to the XDG FileChooser portal.
+  # TODO: replace with --filesystem=xdg-data/JobDocs + portal-based dir picker
+  #       once core/settings_dialog.py uses QFileDialog with portal support.
   - --filesystem=home
 
 modules:

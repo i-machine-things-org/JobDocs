@@ -2971,4 +2971,28 @@ Reviewing files that changed from the base of the PR and between 552c60246291a2a
 
 </details>
 
-<!-- This is an auto-generated comment by CodeRabbit for review status -->
+## 2026-04-12 — `.github/workflows/build-release.yml` + `linux/flatpak/` (Flatpak build additions)
+
+**Review:** PR #12 — ci: add Linux Flatpak build to release workflow
+**Result:** 4 findings (1 critical, 3 major). Critical and two majors fixed; one major acknowledged with documented TODO.
+
+### Findings
+
+1. **Critical — `metainfo-license-missing` (appstreamcli validation failure)**
+   - AppStream metainfo requires both `<metadata_license>` and `<project_license>` or `flatpak-builder` aborts during `appstreamcli compose`.
+   - Fix: added `<metadata_license>CC0-1.0</metadata_license>` and `<project_license>MIT</project_license>` to `io.github.i_machine_things.JobDocs.metainfo.xml`.
+   - Confirmed: local `appstreamcli compose` passes after fix.
+
+2. **Major — glibc ABI mismatch between runner and Flatpak runtime**
+   - PyInstaller binary built on `ubuntu-latest` bundles host system libs (e.g. `libsystemd.so.0`) requiring a newer `GLIBC` version than the pinned Flatpak runtime provides.
+   - CR suggested building inside the Flatpak SDK; fix applied instead: upgraded manifest and CI cache key from `org.freedesktop.Platform//23.08` to `//24.08` (glibc 2.40), which covers the runner's requirements.
+   - Confirmed: app launches cleanly under the 24.08 sandbox locally.
+
+3. **Major — `--filesystem=home` grants unrestricted home access in Flatpak sandbox**
+   - Overly broad permission exposes unrelated files; Flathub would reject this.
+   - Root cause: `core/settings_dialog.py` uses `QFileDialog` directly without the XDG FileChooser portal, so the app must be able to access any user-selected directory.
+   - Acknowledged: `--filesystem=home` kept for now with an inline TODO comment. Portal-based dir picker should replace it in a future refactor.
+
+4. **Major (outside diff) — `contents: write` on build-only jobs**
+   - `build-windows` and `build-flatpak` only checkout code and upload artifacts; neither needs write access to repository contents.
+   - Fix: narrowed both jobs to `permissions: contents: read`. Only `create-release` retains `contents: write`.
