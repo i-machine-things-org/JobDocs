@@ -1,0 +1,47 @@
+app-id: io.github.i_machine_things.JobDocs
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: JobDocs
+
+finish-args:
+  # Display — prefer Wayland, fall back to X11
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # GPU acceleration for Qt rendering
+  - --device=dri
+  # File system access — JobDocs lets users configure an arbitrary root job
+  # directory anywhere inside their home tree (set via Settings dialog with
+  # QFileDialog). Narrowing this to xdg-data/JobDocs or individual paths would
+  # break that workflow until the app is ported to the XDG FileChooser portal.
+  # TODO: replace with --filesystem=xdg-data/JobDocs + portal-based dir picker
+  #       once core/settings_dialog.py uses QFileDialog with portal support.
+  - --filesystem=home
+
+modules:
+  - name: JobDocs
+    buildsystem: simple
+    # The PyInstaller binary and support files are staged into this directory
+    # by the CI workflow before flatpak-builder is invoked.
+    sources:
+      - type: file
+        path: JobDocs
+      - type: file
+        path: io.github.i_machine_things.JobDocs.desktop
+      - type: file
+        path: io.github.i_machine_things.JobDocs.metainfo.xml
+      - type: file
+        path: icon_256x256.png
+    build-commands:
+      # Install the PyInstaller single-file binary
+      - install -Dm755 JobDocs /app/bin/JobDocs
+      # Desktop entry
+      - install -Dm644 io.github.i_machine_things.JobDocs.desktop
+          /app/share/applications/io.github.i_machine_things.JobDocs.desktop
+      # AppStream metadata
+      - install -Dm644 io.github.i_machine_things.JobDocs.metainfo.xml
+          /app/share/metainfo/io.github.i_machine_things.JobDocs.metainfo.xml
+      # Application icon (256×256 used for the Flatpak bundle icon)
+      - install -Dm644 icon_256x256.png
+          /app/share/icons/hicolor/256x256/apps/io.github.i_machine_things.JobDocs.png
