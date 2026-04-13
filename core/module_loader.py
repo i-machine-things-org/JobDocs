@@ -7,9 +7,13 @@ validates them, and provides them to the main application.
 
 import importlib
 import importlib.util
+import logging
+import types
 from pathlib import Path
 from typing import List, Dict, Any, Type
 import sys
+
+logger = logging.getLogger(__name__)
 
 from core.base_module import BaseModule
 from core.app_context import AppContext
@@ -75,13 +79,21 @@ class ModuleLoader:
             # Scan plugins_dir for external modules. These are loaded from the
             # filesystem so users can drop a plugin folder in without rebuilding the exe.
             if self.plugins_dir and self.plugins_dir.exists():
-                for item in self.plugins_dir.iterdir():
-                    if (item.is_dir() and not item.name.startswith('_')
-                            and item.name not in deprecated_modules
-                            and item.name not in all_modules):
-                        if (item / 'module.py').exists():
-                            all_modules.append(item.name)
-                            self._plugin_module_dirs[item.name] = self.plugins_dir
+                try:
+                    for item in self.plugins_dir.iterdir():
+                        try:
+                            if (item.is_dir() and not item.name.startswith('_')
+                                    and item.name not in deprecated_modules
+                                    and item.name not in all_modules):
+                                if (item / 'module.py').exists():
+                                    all_modules.append(item.name)
+                                    self._plugin_module_dirs[item.name] = self.plugins_dir
+                        except (OSError, PermissionError) as e:
+                            logger.warning("Skipping plugin item %s: %s", item, e)
+                except (OSError, PermissionError) as e:
+                    logger.warning(
+                        "Could not scan plugins directory %s: %s", self.plugins_dir, e
+                    )
 
             return [m for m in all_modules if m not in deprecated_modules]
         else:
@@ -96,15 +108,21 @@ class ModuleLoader:
             for scan_dir in scan_dirs:
                 if not scan_dir.exists():
                     continue
-                for item in scan_dir.iterdir():
-                    if item.is_dir() and not item.name.startswith('_'):
-                        if item.name in deprecated_modules:
-                            continue
-                        module_file = item / 'module.py'
-                        if module_file.exists() and item.name not in module_names:
-                            module_names.append(item.name)
-                            if scan_dir is not self.modules_dir:
-                                self._plugin_module_dirs[item.name] = scan_dir
+                try:
+                    for item in scan_dir.iterdir():
+                        try:
+                            if item.is_dir() and not item.name.startswith('_'):
+                                if item.name in deprecated_modules:
+                                    continue
+                                module_file = item / 'module.py'
+                                if module_file.exists() and item.name not in module_names:
+                                    module_names.append(item.name)
+                                    if scan_dir is not self.modules_dir:
+                                        self._plugin_module_dirs[item.name] = scan_dir
+                        except (OSError, PermissionError) as e:
+                            logger.warning("Skipping module item %s: %s", item, e)
+                except (OSError, PermissionError) as e:
+                    logger.warning("Could not scan directory %s: %s", scan_dir, e)
 
             return module_names
 
@@ -131,9 +149,20 @@ class ModuleLoader:
             module_path = plugin_dir / module_name / 'module.py'
             if not module_path.exists():
                 raise ImportError(f"Plugin module file not found: {module_path}")
+
+            # Register a parent package entry so relative imports (e.g. `from .helpers`)
+            # inside the plugin resolve correctly.
+            package_name = f"plugins.{module_name}"
+            if package_name not in sys.modules:
+                pkg = types.ModuleType(package_name)
+                pkg.__path__ = [str(module_path.parent)]
+                pkg.__package__ = package_name
+                sys.modules[package_name] = pkg
+
             spec = importlib.util.spec_from_file_location(
                 f"plugins.{module_name}.module",
-                module_path
+                module_path,
+                submodule_search_locations=[str(module_path.parent)],
             )
             if spec is None or spec.loader is None:
                 raise ImportError(f"Could not load plugin spec for {module_name}")
