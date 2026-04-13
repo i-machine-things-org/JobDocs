@@ -69,10 +69,8 @@ class _PluginInstallWorker(QThread):
 
                         if (src_root / 'module.py').exists():
                             dest = plugins_dir / repo
-                            if dest.exists():
-                                shutil.rmtree(dest)
-                            shutil.copytree(src_root, dest)
                             module_name = repo
+                            src = src_root
                         else:
                             candidates = [
                                 d for d in src_root.iterdir()
@@ -86,10 +84,23 @@ class _PluginInstallWorker(QThread):
                                 return
                             module_folder = candidates[0]
                             dest = plugins_dir / module_folder.name
+                            module_name = module_folder.name
+                            src = module_folder
+
+                        # Atomic swap: copy to a temp sibling, then replace.
+                        # Keeps the old plugin intact if the copy fails.
+                        tmp_dest = dest.with_name(dest.name + '.tmp')
+                        try:
+                            if tmp_dest.exists():
+                                shutil.rmtree(tmp_dest)
+                            shutil.copytree(src, tmp_dest)
                             if dest.exists():
                                 shutil.rmtree(dest)
-                            shutil.copytree(module_folder, dest)
-                            module_name = module_folder.name
+                            tmp_dest.rename(dest)
+                        except Exception:
+                            if tmp_dest.exists():
+                                shutil.rmtree(tmp_dest, ignore_errors=True)
+                            raise
 
                 self.success.emit(module_name, str(dest))
                 return
@@ -109,11 +120,13 @@ class _PluginInstallWorker(QThread):
 class SettingsDialog(QDialog):
     """Settings dialog"""
 
-    def __init__(self, settings: Dict[str, Any], parent=None, available_modules: List[tuple] = None):
+    def __init__(self, settings: Dict[str, Any], parent=None, available_modules: List[tuple] = None,
+                 save_callback=None):
         super().__init__(parent)
         self.settings = settings.copy()
         self.available_modules = available_modules or []  # List of (module_name, display_name) tuples
         self.module_checkboxes = {}  # Store module checkboxes
+        self._save_callback = save_callback  # Called to persist settings to disk mid-dialog
         self.setWindowTitle("Settings")
         self.setMinimumWidth(600)
         self.setup_ui()
@@ -419,6 +432,8 @@ class SettingsDialog(QDialog):
 
         # Persist immediately so the value survives if the dialog is closed without Save.
         self.settings['plugins_dir'] = plugins_dir_str
+        if self._save_callback:
+            self._save_callback({'plugins_dir': plugins_dir_str})
 
         # Normalise input to owner/repo
         repo_input = repo_input.rstrip('/')
