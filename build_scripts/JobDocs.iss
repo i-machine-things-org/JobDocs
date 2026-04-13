@@ -31,6 +31,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
+[Dirs]
+Name: "{app}\plugins"; Flags: uninsneveruninstall
+
 [Files]
 Source: "..\dist\JobDocs\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
