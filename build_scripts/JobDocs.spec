@@ -191,26 +191,34 @@ pyz = PYZ(
     cipher=None,
 )
 
-# EXE - main executable (single-file build)
+# EXE - launcher (onedir build — binaries/data go into COLLECT)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
+    exclude_binaries=True,
     name=APP_NAME,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,  # Enable UPX compression to reduce size
+    upx=True,
     upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,  # Set to False for GUI application (no console window)
+    console=False,  # GUI application — no console window
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon=ICON_FILE,
+)
+
+# COLLECT - gathers exe + all binaries/data into a single directory
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name=APP_NAME,
 )
