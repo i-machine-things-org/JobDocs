@@ -3161,3 +3161,113 @@ Reviewing files that changed from the base of the PR and between b95329c95782423
    - Updated manifest source from `type: file` to `type: dir, path: JobDocs_dir`
    - Updated build-commands: `cp -r . /app/lib/JobDocs/` + `ln -s /app/lib/JobDocs/JobDocs /app/bin/JobDocs`
    - Pattern: when switching PyInstaller from onefile to onedir, update every downstream consumer of the binary path (Flatpak staging, manifest, verify steps)
+
+---
+
+## 2026-04-13 — `PR #16: feat: plugins directory with GitHub install support` — review run 1
+
+**Actionable comments posted: 4**
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@core/module_loader.py`:
+- Around line 77-84: The plugin-directory scan currently calls
+self.plugins_dir.iterdir() and walks entries without handling
+OSError/PermissionError, so update the loops that scan self.plugins_dir (the
+block using iterdir() that appends to all_modules and sets
+self._plugin_module_dirs, and the similar block around the later scan) to wrap
+the directory iteration and per-item filesystem checks in try/except that
+catches OSError and PermissionError, logs the exception with context (including
+the plugin path and exception message) via the module logger, and
+continues—i.e., on exception skip that plugins_dir or item and do not abort
+discovery so built-in modules still load.
+- Around line 128-143: The plugin loader branch that handles external plugins
+(uses variables plugin_dir, module_path, spec, module and spec.loader) does not
+set package context so relative imports in plugin packages fail; fix by
+assigning spec.submodule_search_locations to the plugin package directory before
+exec_module and ensure the parent package (e.g. "plugins.<module_name>") is
+present in sys.modules with a ModuleType instance whose __path__ includes
+module_path.parent so relative imports (like from .helpers) resolve correctly;
+do this immediately after creating the spec (and before spec.loader.exec_module)
+and register both the package name and the full spec.name in sys.modules.
+
+In `@core/settings_dialog.py`:
+- Around line 333-339: The install flow uses the current textbox value
+(plugins_dir_edit.text()) but never persists it, so the application won't see
+the new plugins_dir on next startup; update the install handler(s) that use
+plugins_dir_str (the block around plugins_dir_edit/Text usage and the other
+occurrences referenced) to save the value to your persistent settings (e.g., via
+QSettings or the existing settings API) before proceeding with
+extraction/install, and/or refuse to treat the install as "restart-ready" until
+the in-memory textbox value matches the persisted value—i.e., call the settings
+write (e.g., setValue('plugins_dir', plugins_dir_str) or the project's
+equivalent) immediately after validating plugins_dir_str and before returning
+from the install routine.
+- Around line 363-425: The _install_github_plugin function is performing network
+and file I/O on the GUI thread; refactor it to run the download/extract/copy
+logic inside a background worker (QThread subclass or QRunnable used with
+QThreadPool) and only emit signals back to the dialog for UI updates. Move all
+calls to urllib.request.urlopen, resp.read(), zipfile.ZipFile.extractall,
+shutil.copytree, and any filesystem writes into the worker; have the worker emit
+success (module_name and dest path) and error signals (exception message) which
+the main thread connects to show QMessageBox.information/QMessageBox.critical,
+clear github_repo_edit and set installed flag, and ensure plugins_dir.mkdir is
+done in the worker or synchronized before showing success. Keep the UI handler
+(button click) lightweight: start the worker and disable the button until
+completion.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `2ed3b398-fbbf-4985-828f-b87460e3b6a7`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 6328c6b988dd687547fccc3a1e2b128722e62956 and 06a003d32c95a0c50b9a9bb35d8caaea47c91bc2.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (3)</summary>
+
+* `core/module_loader.py`
+* `core/settings_dialog.py`
+* `main.py`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
