@@ -40,6 +40,7 @@ modules:
       - cp -r . /app/lib/JobDocs/
       - chmod 755 /app/lib/JobDocs/JobDocs
       # Symlink launcher into /app/bin so Flatpak command: JobDocs resolves it
+      - install -d /app/bin
       - ln -s /app/lib/JobDocs/JobDocs /app/bin/JobDocs
       # Desktop entry
       - install -Dm644 io.github.i_machine_things.JobDocs.desktop
