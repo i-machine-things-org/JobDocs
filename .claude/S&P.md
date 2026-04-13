@@ -2996,3 +2996,147 @@ Reviewing files that changed from the base of the PR and between 552c60246291a2a
 4. **Major (outside diff) — `contents: write` on build-only jobs**
    - `build-windows` and `build-flatpak` only checkout code and upload artifacts; neither needs write access to repository contents.
    - Fix: narrowed both jobs to `permissions: contents: read`. Only `create-release` retains `contents: write`.
+
+---
+
+## 2026-04-13 — `PR #14: build: convert to onedir and add Inno Setup Windows installer` — review run 1
+
+**Actionable comments posted: 1**
+
+<details>
+<summary>🧹 Nitpick comments (1)</summary><blockquote>
+
+<details>
+<summary>.github/workflows/build-release.yml (1)</summary><blockquote>
+
+`77-81`: **Provision or at least assert `iscc` before invoking it.**
+
+Line 80 invokes `iscc build_scripts\JobDocs.iss` without installing or validating Inno Setup. This makes the Windows release job depend on the hosted runner image's toolset rather than a declared build dependency, which risks pipeline failures if the image configuration changes.
+
+<details>
+<summary>♻️ Minimal guard</summary>
+
+```diff
++      - name: Verify Inno Setup is available
++        run: |
++          if (!(Get-Command iscc -ErrorAction SilentlyContinue)) {
++            Write-Error "iscc not found on PATH"
++            exit 1
++          }
++        shell: pwsh
++
+       - name: Build Windows installer
+         run: |
+           $env:RELEASE_VERSION = "${{ github.ref_name }}"
+           iscc build_scripts\JobDocs.iss
+         shell: pwsh
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In @.github/workflows/build-release.yml around lines 77 - 81, The "Build Windows
+installer" step calls the external tool "iscc" (iscc build_scripts\JobDocs.iss)
+without ensuring Inno Setup is available; add a guard that either installs Inno
+Setup (for example via Chocolatey) or asserts presence and fails fast: use a
+PowerShell check like Get-Command iscc -ErrorAction SilentlyContinue and if
+missing run choco install innosetup --confirm (or exit with a clear error), then
+proceed to set $env:RELEASE_VERSION and run iscc; update the step that currently
+contains "iscc build_scripts\JobDocs.iss" to include this installation/check
+sequence so the job no longer depends on the runner image having iscc
+preinstalled.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In @.github/workflows/build-release.yml:
+- Around line 142-145: The workflow currently copies only the launcher binary
+(cp dist/JobDocs/JobDocs) which omits the PyInstaller onedir runtime files;
+change the staging step to copy the entire onedir tree (recursively stage the
+dist/JobDocs directory into the flatpak staging dir) so all libraries and data
+are included, and then update the Flatpak manifest's handling of JobDocs (the
+install command "install -Dm755 JobDocs /app/bin/JobDocs" and the JobDocs source
+entry) to treat JobDocs as a directory (either set the source type to dir or
+adjust build-commands to install the launcher and required runtime files from
+the staged directory), ensuring the manifest installs the launcher and its
+runtime files rather than expecting a single file.
+
+---
+
+Nitpick comments:
+In @.github/workflows/build-release.yml:
+- Around line 77-81: The "Build Windows installer" step calls the external tool
+"iscc" (iscc build_scripts\JobDocs.iss) without ensuring Inno Setup is
+available; add a guard that either installs Inno Setup (for example via
+Chocolatey) or asserts presence and fails fast: use a PowerShell check like
+Get-Command iscc -ErrorAction SilentlyContinue and if missing run choco install
+innosetup --confirm (or exit with a clear error), then proceed to set
+$env:RELEASE_VERSION and run iscc; update the step that currently contains "iscc
+build_scripts\JobDocs.iss" to include this installation/check sequence so the
+job no longer depends on the runner image having iscc preinstalled.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `d0a64a06-ed6c-4265-887a-570dacc35f6d`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between b95329c957824238499eb46595b72a57b371122e and ef7acd1a69e0430d13f20002904ccbf975c80051.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (3)</summary>
+
+* `.github/workflows/build-release.yml`
+* `build_scripts/JobDocs.iss`
+* `build_scripts/JobDocs.spec`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
