@@ -22,18 +22,27 @@ class ModuleLoader:
     Modules are discovered by scanning the modules/ directory for
     subdirectories containing a module.py file with a class that
     inherits from BaseModule.
+
+    An optional plugins_dir can be provided. Any module folder placed there
+    is loaded from the filesystem at runtime (works in both dev and frozen/exe
+    mode) so external plugins do not need to be bundled into the executable.
     """
 
-    def __init__(self, modules_dir: Path):
+    def __init__(self, modules_dir: Path, plugins_dir: Path = None):
         """
         Initialize the module loader.
 
         Args:
-            modules_dir: Path to the modules directory
+            modules_dir: Path to the built-in modules directory
+            plugins_dir: Optional directory to scan for external plugin modules
         """
         self.modules_dir = modules_dir
+        self.plugins_dir = plugins_dir
         self.loaded_modules: List[BaseModule] = []
         self._module_classes: Dict[str, Type[BaseModule]] = {}
+        # Tracks which directory each module was found in (plugins_dir entries
+        # are always loaded from the filesystem, even in a frozen exe).
+        self._plugin_module_dirs: Dict[str, Path] = {}
 
     def discover_modules(self) -> List[str]:
         """
@@ -49,9 +58,8 @@ class ModuleLoader:
         deprecated_modules = {'add_to_job'}
 
         if is_frozen:
-            # In frozen mode, return hardcoded list of modules.
+            # In frozen mode, start with the hardcoded list of built-in modules.
             # Must match the modules in the spec file's hiddenimports.
-            # PSM-only modules (reporting) excluded from stable builds per .claude/CLAUDE.md Rule 3.
             # Keep this list in sync with hiddenimports in build_scripts/JobDocs.spec.
             all_modules = [
                 'quote',
@@ -62,21 +70,41 @@ class ModuleLoader:
                 'import_bp',
                 'history',
             ]
+            self._plugin_module_dirs.clear()
+
+            # Scan plugins_dir for external modules. These are loaded from the
+            # filesystem so users can drop a plugin folder in without rebuilding the exe.
+            if self.plugins_dir and self.plugins_dir.exists():
+                for item in self.plugins_dir.iterdir():
+                    if (item.is_dir() and not item.name.startswith('_')
+                            and item.name not in deprecated_modules
+                            and item.name not in all_modules):
+                        if (item / 'module.py').exists():
+                            all_modules.append(item.name)
+                            self._plugin_module_dirs[item.name] = self.plugins_dir
+
             return [m for m in all_modules if m not in deprecated_modules]
         else:
             # In development mode, discover from filesystem
-            if not self.modules_dir.exists():
-                return []
-
+            self._plugin_module_dirs.clear()
             module_names = []
-            for item in self.modules_dir.iterdir():
-                if item.is_dir() and not item.name.startswith('_'):
-                    # Skip deprecated modules
-                    if item.name in deprecated_modules:
-                        continue
-                    module_file = item / 'module.py'
-                    if module_file.exists():
-                        module_names.append(item.name)
+
+            scan_dirs = [self.modules_dir]
+            if self.plugins_dir and self.plugins_dir.exists():
+                scan_dirs.append(self.plugins_dir)
+
+            for scan_dir in scan_dirs:
+                if not scan_dir.exists():
+                    continue
+                for item in scan_dir.iterdir():
+                    if item.is_dir() and not item.name.startswith('_'):
+                        if item.name in deprecated_modules:
+                            continue
+                        module_file = item / 'module.py'
+                        if module_file.exists() and item.name not in module_names:
+                            module_names.append(item.name)
+                            if scan_dir is not self.modules_dir:
+                                self._plugin_module_dirs[item.name] = scan_dir
 
             return module_names
 
@@ -94,31 +122,42 @@ class ModuleLoader:
             ImportError: If module cannot be loaded
             ValueError: If module doesn't contain a valid BaseModule subclass
         """
-        # Check if running in a PyInstaller frozen environment
         is_frozen = getattr(sys, 'frozen', False)
+        plugin_dir = self._plugin_module_dirs.get(module_name)
 
-        if is_frozen:
-            # In frozen mode, use standard import (modules are bundled in executable)
+        if plugin_dir is not None:
+            # External plugin — always load from the filesystem (works in both
+            # dev and frozen/exe mode; plugin .py files are not bundled in the exe).
+            module_path = plugin_dir / module_name / 'module.py'
+            if not module_path.exists():
+                raise ImportError(f"Plugin module file not found: {module_path}")
+            spec = importlib.util.spec_from_file_location(
+                f"plugins.{module_name}.module",
+                module_path
+            )
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Could not load plugin spec for {module_name}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+        elif is_frozen:
+            # Built-in frozen module — use standard import (bundled in executable)
             module_import_name = f"modules.{module_name}.module"
             try:
                 module = importlib.import_module(module_import_name)
             except ImportError as e:
                 raise ImportError(f"Could not import frozen module {module_import_name}: {e}")
         else:
-            # In development mode, load from file path
+            # Development mode — load from file path
             module_path = self.modules_dir / module_name / 'module.py'
-
             if not module_path.exists():
                 raise ImportError(f"Module file not found: {module_path}")
-
-            # Load the module
             spec = importlib.util.spec_from_file_location(
                 f"modules.{module_name}.module",
                 module_path
             )
             if spec is None or spec.loader is None:
                 raise ImportError(f"Could not load module spec for {module_name}")
-
             module = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = module
             spec.loader.exec_module(module)
@@ -175,8 +214,11 @@ class ModuleLoader:
                 module_class = self.load_module(module_name)
                 instance = module_class()
 
-                # Skip experimental modules if not enabled
-                if instance.is_experimental() and not experimental_enabled:
+                # Skip experimental modules if not enabled.
+                # External plugins (in plugins_dir) bypass this — the user opted
+                # in by placing them there.
+                is_external_plugin = module_name in self._plugin_module_dirs
+                if instance.is_experimental() and not experimental_enabled and not is_external_plugin:
                     app_context.log_message(
                         f"Skipping experimental module: {module_name}"
                     )

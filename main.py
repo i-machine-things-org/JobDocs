@@ -49,7 +49,8 @@ class JobDocsMainWindow(QMainWindow):
         'remote_server_path': '',  # Network path or URL for remote settings sync
         'report_template_path': '',  # Path to Excel template for Report Fixer
         'suppress_bp_link_notification': False,  # Suppress "linked to blueprints" confirmation dialog
-        'skip_image_attachments': True
+        'skip_image_attachments': True,
+        'plugins_dir': '',  # Local folder containing external plugin modules
     }
 
     def __init__(self):
@@ -229,7 +230,9 @@ class JobDocsMainWindow(QMainWindow):
     def load_modules(self):
         """Load all modules using the module loader"""
         modules_dir = Path(__file__).parent / 'modules'
-        loader = ModuleLoader(modules_dir)
+        plugins_dir_str = self.settings.get('plugins_dir', '')
+        plugins_dir = Path(plugins_dir_str) if plugins_dir_str else None
+        loader = ModuleLoader(modules_dir, plugins_dir=plugins_dir)
 
         try:
             # Load modules with experimental flag and disabled modules list
@@ -315,7 +318,9 @@ class JobDocsMainWindow(QMainWindow):
 
         # Discover all available modules for the settings dialog
         modules_dir = Path(__file__).parent / 'modules'
-        loader = ModuleLoader(modules_dir)
+        plugins_dir_str = self.settings.get('plugins_dir', '')
+        plugins_dir = Path(plugins_dir_str) if plugins_dir_str else None
+        loader = ModuleLoader(modules_dir, plugins_dir=plugins_dir)
         available_module_names = loader.discover_modules()
 
         # Create list of (module_name, display_name) tuples
