@@ -3301,3 +3301,143 @@ Reviewing files that changed from the base of the PR and between 6328c6b988dd687
    - Extract into `_PluginInstallWorker(QThread)` with `success = pyqtSignal(str, str)` and `error = pyqtSignal(str)`
    - GUI handler disables the Install button, starts the worker, reconnects signals to `_on_plugin_install_success` / `_on_plugin_install_error` which re-enable the button and show dialogs
    - Add `import urllib.error` (explicit) and `from PyQt6.QtCore import QThread, pyqtSignal`
+
+---
+
+## 2026-04-13 — `PR #16: feat: plugins directory with GitHub install support` — review run 2
+
+**Actionable comments posted: 1**
+
+<details>
+<summary>♻️ Duplicate comments (1)</summary><blockquote>
+
+<details>
+<summary>core/settings_dialog.py (1)</summary><blockquote>
+
+`420-421`: _⚠️ Potential issue_ | _🟠 Major_
+
+**Persist `plugins_dir` through the real settings store here.**
+
+`self.settings` is only the dialog-local copy created in `__init__`, so this assignment is still lost if the user installs successfully and then closes with Cancel. The success path says “restart” even though next startup will still read the old persisted `plugins_dir`.
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@core/settings_dialog.py` around lines 420 - 421, The dialog currently assigns
+plugins_dir_str only to the dialog-local self.settings, which doesn't persist
+across app restarts; instead write the value into the application's persistent
+settings store (use the existing app/settings manager API used elsewhere in the
+codebase) rather than only self.settings, and also update self.settings to keep
+the dialog state in sync; locate the code around self.settings and the
+plugins_dir_str assignment in settings_dialog.py and replace the local-only
+assignment with a call to the global/persistent settings API (e.g., the
+project's settings manager set/save method) so the change survives closing with
+Cancel and the restart message is accurate.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@core/settings_dialog.py`:
+- Around line 71-74: Currently the code deletes dest (plugins_dir / repo) before
+copying, which can lose a working plugin if copy fails; change the behavior in
+both places where dest is removed and replaced (the block handling dest =
+plugins_dir / repo and the analogous block at lines 88-91) to first copy
+src_root into a temporary sibling directory (e.g., dest.with_suffix('.tmp') or
+dest + '.tmp'), verify the copy succeeded, then atomically move/replace the temp
+into place using os.replace or shutil.move, and ensure you remove the temp on
+failure so the original dest remains untouched until the new copy is fully
+staged.
+
+---
+
+Duplicate comments:
+In `@core/settings_dialog.py`:
+- Around line 420-421: The dialog currently assigns plugins_dir_str only to the
+dialog-local self.settings, which doesn't persist across app restarts; instead
+write the value into the application's persistent settings store (use the
+existing app/settings manager API used elsewhere in the codebase) rather than
+only self.settings, and also update self.settings to keep the dialog state in
+sync; locate the code around self.settings and the plugins_dir_str assignment in
+settings_dialog.py and replace the local-only assignment with a call to the
+global/persistent settings API (e.g., the project's settings manager set/save
+method) so the change survives closing with Cancel and the restart message is
+accurate.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `086ba464-38ba-4dc7-88f4-505dccfc2ed6`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 06a003d32c95a0c50b9a9bb35d8caaea47c91bc2 and 0f9227abe8f1912de8831fb40bf0f32344d05427.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `.claude/S&P.md` is excluded by `!.claude/S&P.md`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (3)</summary>
+
+* `build_scripts/JobDocs.iss`
+* `core/module_loader.py`
+* `core/settings_dialog.py`
+
+</details>
+
+<details>
+<summary>✅ Files skipped from review due to trivial changes (1)</summary>
+
+* build_scripts/JobDocs.iss
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
