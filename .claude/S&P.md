@@ -3140,3 +3140,24 @@ Reviewing files that changed from the base of the PR and between b95329c95782423
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-13 — `.github/workflows/build-release.yml` (onedir build + Inno Setup, PR #14)
+
+**Review:** Two findings from CodeRabbit on PR #14.
+**Result:** Both fixed before merge.
+
+### Findings
+
+1. **iscc invoked without asserting Inno Setup is on PATH**
+   - `iscc` called directly in the Build Windows installer step with no guard
+   - Added a prior step: `Get-Command iscc -ErrorAction SilentlyContinue` — installs via choco if missing
+   - Pattern: always guard external tools not installed by `pip install` or `apt-get`
+
+2. **Flatpak staging copied only the PyInstaller launcher, not the onedir runtime tree**
+   - `cp dist/JobDocs/JobDocs linux/flatpak/JobDocs` staged only the binary; onedir requires all `.so` files and data
+   - Fixed staging to `cp -r dist/JobDocs linux/flatpak/JobDocs_dir`
+   - Updated manifest source from `type: file` to `type: dir, path: JobDocs_dir`
+   - Updated build-commands: `cp -r . /app/lib/JobDocs/` + `ln -s /app/lib/JobDocs/JobDocs /app/bin/JobDocs`
+   - Pattern: when switching PyInstaller from onefile to onedir, update every downstream consumer of the binary path (Flatpak staging, manifest, verify steps)

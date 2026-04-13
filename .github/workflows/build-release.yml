@@ -74,6 +74,13 @@ jobs:
       #     github-artifact-name: JobDocs-unsigned
       #     output-artifact-name: JobDocs-signed
 
+      - name: Ensure Inno Setup is available
+        run: |
+          if (!(Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup --confirm --no-progress
+          }
+        shell: pwsh
+
       - name: Build Windows installer
         run: |
           $env:RELEASE_VERSION = "${{ github.ref_name }}"
@@ -141,7 +148,7 @@ jobs:
 
       - name: Stage files for Flatpak manifest
         run: |
-          cp dist/JobDocs/JobDocs linux/flatpak/JobDocs
+          cp -r dist/JobDocs linux/flatpak/JobDocs_dir
           cp JobDocs.iconset/icon_256x256.png linux/flatpak/icon_256x256.png
 
       - name: Build Flatpak
