@@ -24,7 +24,7 @@ jobs:
           echo "OK: $GITHUB_REF_NAME is descended from stable"
 
   # ---------------------------------------------------------------------------
-  # Windows — PyInstaller single-file EXE
+  # Windows — PyInstaller onedir build packaged by Inno Setup
   # ---------------------------------------------------------------------------
   build-windows:
     needs: verify-stable-ancestry
@@ -47,27 +47,21 @@ jobs:
           pip install "pyinstaller>=6.0.0" "Pillow>=10.4.0,<12.0.0"
 
       - name: Build executable
-        run: |
-          python -m PyInstaller --distpath build_dist --workpath build_temp build_scripts/JobDocs.spec
+        run: python -m PyInstaller build_scripts/JobDocs.spec --clean --noconfirm
 
       - name: Verify build
         run: |
-          if (!(Test-Path "build_dist/JobDocs.exe")) {
-            Write-Error "build_dist/JobDocs.exe not found — build failed"
+          if (!(Test-Path "dist/JobDocs/JobDocs.exe")) {
+            Write-Error "dist/JobDocs/JobDocs.exe not found — build failed"
             exit 1
           }
-          Write-Output "Build OK: $(Get-Item build_dist/JobDocs.exe | Select-Object -ExpandProperty Length) bytes"
-
-      - name: Upload unsigned artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: JobDocs-unsigned
-          path: build_dist/JobDocs.exe
+          Write-Output "Build OK: $(Get-Item dist/JobDocs/JobDocs.exe | Select-Object -ExpandProperty Length) bytes"
+        shell: pwsh
 
       # -----------------------------------------------------------------------
       # SignPath code signing — uncomment once SignPath Foundation is approved
       # Apply at: https://signpath.io/product/open-source
-      # After enabling: update the create-release step to use JobDocs-signed
+      # Sign dist/JobDocs/JobDocs.exe before iscc packages it.
       # -----------------------------------------------------------------------
       # - name: Sign executable
       #   uses: signpath/github-action-submit-signing-request@v1
@@ -80,11 +74,17 @@ jobs:
       #     github-artifact-name: JobDocs-unsigned
       #     output-artifact-name: JobDocs-signed
 
+      - name: Build Windows installer
+        run: |
+          $env:RELEASE_VERSION = "${{ github.ref_name }}"
+          iscc build_scripts\JobDocs.iss
+        shell: pwsh
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: JobDocs-windows
-          path: build_dist/JobDocs.exe
+          path: installer_out/JobDocs-${{ github.ref_name }}-windows-setup.exe
 
   # ---------------------------------------------------------------------------
   # Linux — PyInstaller binary wrapped in a Flatpak bundle
@@ -110,13 +110,12 @@ jobs:
           pip install "pyinstaller>=6.0.0"
 
       - name: Build PyInstaller binary
-        run: |
-          python -m PyInstaller --distpath build_dist --workpath build_temp build_scripts/JobDocs.spec
+        run: python -m PyInstaller build_scripts/JobDocs.spec --clean --noconfirm
 
       - name: Verify binary
         run: |
-          test -f build_dist/JobDocs || { echo "build_dist/JobDocs not found — build failed"; exit 1; }
-          echo "Build OK: $(du -h build_dist/JobDocs | cut -f1)"
+          test -f dist/JobDocs/JobDocs || { echo "dist/JobDocs/JobDocs not found — build failed"; exit 1; }
+          echo "Build OK: $(du -h dist/JobDocs/JobDocs | cut -f1)"
 
       - name: Install Flatpak tools
         run: |
@@ -142,7 +141,7 @@ jobs:
 
       - name: Stage files for Flatpak manifest
         run: |
-          cp build_dist/JobDocs linux/flatpak/JobDocs
+          cp dist/JobDocs/JobDocs linux/flatpak/JobDocs
           cp JobDocs.iconset/icon_256x256.png linux/flatpak/icon_256x256.png
 
       - name: Build Flatpak
@@ -196,8 +195,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: JobDocs ${{ github.ref_name }}
-          files: release-assets/*
-          # When signing is enabled, re-download JobDocs-signed instead of
-          # JobDocs-windows above, and update files: accordingly.
+          files: |
+            release-assets/JobDocs-${{ github.ref_name }}-windows-setup.exe
+            release-assets/JobDocs-linux.flatpak
           generate_release_notes: true
           fail_on_unmatched_files: true
