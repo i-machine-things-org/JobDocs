@@ -1,4 +1,16 @@
 @echo off
+REM DEPRECATED — local build script for Windows.
+REM
+REM Official Windows builds are now produced by the CI/CD release workflow:
+REM   .github/workflows/build-release.yml (job: build-windows)
+REM
+REM The workflow builds JobDocs.exe via PyInstaller and attaches it to every
+REM GitHub Release. Download the latest release from:
+REM   https://github.com/i-machine-things/JobDocs/releases
+REM
+REM This script (local build + Program Files install + shortcut helper) is kept
+REM for developer use but is no longer the canonical distribution path.
+REM ---------------------------------------------------------------------------
 REM Build script for JobDocs on Windows
 REM Creates a standalone executable using PyInstaller
 

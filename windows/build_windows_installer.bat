@@ -1,4 +1,16 @@
 @echo off
+REM DEPRECATED — Inno Setup installer build script.
+REM
+REM Installer-based distribution was superseded by the CI/CD release workflow:
+REM   .github/workflows/build-release.yml
+REM
+REM The workflow produces a standalone JobDocs.exe (no installer required)
+REM attached to every GitHub Release. Download from:
+REM   https://github.com/i-machine-things/JobDocs/releases
+REM
+REM This script (Inno Setup .exe installer) is kept for reference but is no
+REM longer maintained or tested.
+REM ---------------------------------------------------------------------------
 REM Build Windows Installer for JobDocs
 REM This script builds the executable and creates an installer using Inno Setup
 
