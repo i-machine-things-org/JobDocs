@@ -3271,3 +3271,33 @@ Reviewing files that changed from the base of the PR and between 6328c6b988dd687
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-13 — `core/module_loader.py`, `core/settings_dialog.py` (PR #16 CR resolutions)
+
+**Review:** 4 actionable findings from CodeRabbit on PR #16 (plugins directory feature)
+**Result:** All 4 findings fixed in commits `fd8b1fa` and `e4b8e2e`
+
+### Findings
+
+1. **Wrap plugin dir scans in OSError/PermissionError handlers** (`module_loader.py`)
+   - Both frozen and dev-mode `iterdir()` loops must catch `OSError`/`PermissionError` per item and per directory
+   - Log with context via `logger.warning(...)` and continue — never abort built-in module discovery
+   - Add `import logging` and `logger = logging.getLogger(__name__)` at module level
+
+2. **Register parent package before exec_module for relative imports** (`module_loader.py`)
+   - External plugins that use `from .helpers import ...` fail because no parent package is in `sys.modules`
+   - Before creating the spec, register `plugins.<module_name>` as a `types.ModuleType` with `__path__` set to the plugin dir
+   - Pass `submodule_search_locations=[str(module_path.parent)]` to `spec_from_file_location`
+   - Add `import types` at module level
+
+3. **Persist plugins_dir before install, not only on Save** (`settings_dialog.py`)
+   - `_install_github_plugin` reads `plugins_dir_edit.text()` but never writes to `self.settings`
+   - Add `self.settings['plugins_dir'] = plugins_dir_str` immediately after validation so the value survives dialog close without Save
+
+4. **Move download/extract to background QThread** (`settings_dialog.py`)
+   - `urllib.request.urlopen`, `resp.read()`, `zipfile.ZipFile`, `shutil.copytree` all ran on the GUI thread — freezes the UI
+   - Extract into `_PluginInstallWorker(QThread)` with `success = pyqtSignal(str, str)` and `error = pyqtSignal(str)`
+   - GUI handler disables the Install button, starts the worker, reconnects signals to `_on_plugin_install_success` / `_on_plugin_install_error` which re-enable the button and show dialogs
+   - Add `import urllib.error` (explicit) and `from PyQt6.QtCore import QThread, pyqtSignal`
