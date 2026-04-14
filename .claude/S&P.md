@@ -3161,3 +3161,632 @@ Reviewing files that changed from the base of the PR and between b95329c95782423
    - Updated manifest source from `type: file` to `type: dir, path: JobDocs_dir`
    - Updated build-commands: `cp -r . /app/lib/JobDocs/` + `ln -s /app/lib/JobDocs/JobDocs /app/bin/JobDocs`
    - Pattern: when switching PyInstaller from onefile to onedir, update every downstream consumer of the binary path (Flatpak staging, manifest, verify steps)
+
+---
+
+## 2026-04-13 — `PR #16: feat: plugins directory with GitHub install support` — review run 1
+
+**Actionable comments posted: 4**
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@core/module_loader.py`:
+- Around line 77-84: The plugin-directory scan currently calls
+self.plugins_dir.iterdir() and walks entries without handling
+OSError/PermissionError, so update the loops that scan self.plugins_dir (the
+block using iterdir() that appends to all_modules and sets
+self._plugin_module_dirs, and the similar block around the later scan) to wrap
+the directory iteration and per-item filesystem checks in try/except that
+catches OSError and PermissionError, logs the exception with context (including
+the plugin path and exception message) via the module logger, and
+continues—i.e., on exception skip that plugins_dir or item and do not abort
+discovery so built-in modules still load.
+- Around line 128-143: The plugin loader branch that handles external plugins
+(uses variables plugin_dir, module_path, spec, module and spec.loader) does not
+set package context so relative imports in plugin packages fail; fix by
+assigning spec.submodule_search_locations to the plugin package directory before
+exec_module and ensure the parent package (e.g. "plugins.<module_name>") is
+present in sys.modules with a ModuleType instance whose __path__ includes
+module_path.parent so relative imports (like from .helpers) resolve correctly;
+do this immediately after creating the spec (and before spec.loader.exec_module)
+and register both the package name and the full spec.name in sys.modules.
+
+In `@core/settings_dialog.py`:
+- Around line 333-339: The install flow uses the current textbox value
+(plugins_dir_edit.text()) but never persists it, so the application won't see
+the new plugins_dir on next startup; update the install handler(s) that use
+plugins_dir_str (the block around plugins_dir_edit/Text usage and the other
+occurrences referenced) to save the value to your persistent settings (e.g., via
+QSettings or the existing settings API) before proceeding with
+extraction/install, and/or refuse to treat the install as "restart-ready" until
+the in-memory textbox value matches the persisted value—i.e., call the settings
+write (e.g., setValue('plugins_dir', plugins_dir_str) or the project's
+equivalent) immediately after validating plugins_dir_str and before returning
+from the install routine.
+- Around line 363-425: The _install_github_plugin function is performing network
+and file I/O on the GUI thread; refactor it to run the download/extract/copy
+logic inside a background worker (QThread subclass or QRunnable used with
+QThreadPool) and only emit signals back to the dialog for UI updates. Move all
+calls to urllib.request.urlopen, resp.read(), zipfile.ZipFile.extractall,
+shutil.copytree, and any filesystem writes into the worker; have the worker emit
+success (module_name and dest path) and error signals (exception message) which
+the main thread connects to show QMessageBox.information/QMessageBox.critical,
+clear github_repo_edit and set installed flag, and ensure plugins_dir.mkdir is
+done in the worker or synchronized before showing success. Keep the UI handler
+(button click) lightweight: start the worker and disable the button until
+completion.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `2ed3b398-fbbf-4985-828f-b87460e3b6a7`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 6328c6b988dd687547fccc3a1e2b128722e62956 and 06a003d32c95a0c50b9a9bb35d8caaea47c91bc2.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (3)</summary>
+
+* `core/module_loader.py`
+* `core/settings_dialog.py`
+* `main.py`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-13 — `core/module_loader.py`, `core/settings_dialog.py` (PR #16 CR resolutions)
+
+**Review:** 4 actionable findings from CodeRabbit on PR #16 (plugins directory feature)
+**Result:** All 4 findings fixed in commits `fd8b1fa` and `e4b8e2e`
+
+### Findings
+
+1. **Wrap plugin dir scans in OSError/PermissionError handlers** (`module_loader.py`)
+   - Both frozen and dev-mode `iterdir()` loops must catch `OSError`/`PermissionError` per item and per directory
+   - Log with context via `logger.warning(...)` and continue — never abort built-in module discovery
+   - Add `import logging` and `logger = logging.getLogger(__name__)` at module level
+
+2. **Register parent package before exec_module for relative imports** (`module_loader.py`)
+   - External plugins that use `from .helpers import ...` fail because no parent package is in `sys.modules`
+   - Before creating the spec, register `plugins.<module_name>` as a `types.ModuleType` with `__path__` set to the plugin dir
+   - Pass `submodule_search_locations=[str(module_path.parent)]` to `spec_from_file_location`
+   - Add `import types` at module level
+
+3. **Persist plugins_dir before install, not only on Save** (`settings_dialog.py`)
+   - `_install_github_plugin` reads `plugins_dir_edit.text()` but never writes to `self.settings`
+   - Add `self.settings['plugins_dir'] = plugins_dir_str` immediately after validation so the value survives dialog close without Save
+
+4. **Move download/extract to background QThread** (`settings_dialog.py`)
+   - `urllib.request.urlopen`, `resp.read()`, `zipfile.ZipFile`, `shutil.copytree` all ran on the GUI thread — freezes the UI
+   - Extract into `_PluginInstallWorker(QThread)` with `success = pyqtSignal(str, str)` and `error = pyqtSignal(str)`
+   - GUI handler disables the Install button, starts the worker, reconnects signals to `_on_plugin_install_success` / `_on_plugin_install_error` which re-enable the button and show dialogs
+   - Add `import urllib.error` (explicit) and `from PyQt6.QtCore import QThread, pyqtSignal`
+
+---
+
+## 2026-04-13 — `PR #16: feat: plugins directory with GitHub install support` — review run 2
+
+**Actionable comments posted: 1**
+
+<details>
+<summary>♻️ Duplicate comments (1)</summary><blockquote>
+
+<details>
+<summary>core/settings_dialog.py (1)</summary><blockquote>
+
+`420-421`: _⚠️ Potential issue_ | _🟠 Major_
+
+**Persist `plugins_dir` through the real settings store here.**
+
+`self.settings` is only the dialog-local copy created in `__init__`, so this assignment is still lost if the user installs successfully and then closes with Cancel. The success path says “restart” even though next startup will still read the old persisted `plugins_dir`.
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@core/settings_dialog.py` around lines 420 - 421, The dialog currently assigns
+plugins_dir_str only to the dialog-local self.settings, which doesn't persist
+across app restarts; instead write the value into the application's persistent
+settings store (use the existing app/settings manager API used elsewhere in the
+codebase) rather than only self.settings, and also update self.settings to keep
+the dialog state in sync; locate the code around self.settings and the
+plugins_dir_str assignment in settings_dialog.py and replace the local-only
+assignment with a call to the global/persistent settings API (e.g., the
+project's settings manager set/save method) so the change survives closing with
+Cancel and the restart message is accurate.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@core/settings_dialog.py`:
+- Around line 71-74: Currently the code deletes dest (plugins_dir / repo) before
+copying, which can lose a working plugin if copy fails; change the behavior in
+both places where dest is removed and replaced (the block handling dest =
+plugins_dir / repo and the analogous block at lines 88-91) to first copy
+src_root into a temporary sibling directory (e.g., dest.with_suffix('.tmp') or
+dest + '.tmp'), verify the copy succeeded, then atomically move/replace the temp
+into place using os.replace or shutil.move, and ensure you remove the temp on
+failure so the original dest remains untouched until the new copy is fully
+staged.
+
+---
+
+Duplicate comments:
+In `@core/settings_dialog.py`:
+- Around line 420-421: The dialog currently assigns plugins_dir_str only to the
+dialog-local self.settings, which doesn't persist across app restarts; instead
+write the value into the application's persistent settings store (use the
+existing app/settings manager API used elsewhere in the codebase) rather than
+only self.settings, and also update self.settings to keep the dialog state in
+sync; locate the code around self.settings and the plugins_dir_str assignment in
+settings_dialog.py and replace the local-only assignment with a call to the
+global/persistent settings API (e.g., the project's settings manager set/save
+method) so the change survives closing with Cancel and the restart message is
+accurate.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `086ba464-38ba-4dc7-88f4-505dccfc2ed6`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 06a003d32c95a0c50b9a9bb35d8caaea47c91bc2 and 0f9227abe8f1912de8831fb40bf0f32344d05427.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `.claude/S&P.md` is excluded by `!.claude/S&P.md`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (3)</summary>
+
+* `build_scripts/JobDocs.iss`
+* `core/module_loader.py`
+* `core/settings_dialog.py`
+
+</details>
+
+<details>
+<summary>✅ Files skipped from review due to trivial changes (1)</summary>
+
+* build_scripts/JobDocs.iss
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-14 — `PR #16: feat: plugins directory with GitHub install support` — review run 1
+
+**Actionable comments posted: 3**
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@core/settings_dialog.py`:
+- Around line 433-436: The current flow in settings_dialog.py blindly assumes
+self._save_callback({'plugins_dir': plugins_dir_str}) persisted the value;
+change the call-site in the code that sets self.settings['plugins_dir'] so it
+either catches an exception from the callback or checks a boolean success return
+(agree on one API), and if persistence failed (callback raised or returned
+False) abort before starting the plugin install/worker. Update the contract with
+the caller (main._partial_save_settings) so it either raises an IOError on
+failure or returns True/False, and in settings_dialog use that to stop the
+install worker when persistence did not succeed.
+- Around line 453-458: Disable all install-related controls when starting
+_PluginInstallWorker: besides calling self.github_install_btn.setEnabled(False),
+also disable self.plugins_dir_edit and any dialog action buttons (e.g.,
+Save/Cancel) or set a flag to block accept() and reject() while
+self._install_worker is active; re-enable those controls (or clear the blocking
+flag) in the _on_plugin_install_success and _on_plugin_install_error handlers
+where worker finishes, and ensure this same behavior is applied to the code
+paths around lines 460-474 that start the worker so the dialog cannot be
+edited/closed while installation is running.
+- Around line 90-103: The current swap removes the live plugin
+(shutil.rmtree(dest)) before ensuring the temp rename succeeded, which can leave
+no plugin if rename fails; change the sequence to perform an atomic replace of
+dest with the temp copy instead of deleting dest first: after
+shutil.copytree(src, tmp_dest) call tmp_dest.replace(dest) (or
+os.replace(tmp_dest, dest)) in place of tmp_dest.rename(dest), keep the existing
+exception handler to rmtree tmp_dest on failure, and remove the explicit
+shutil.rmtree(dest) call so the live plugin is only replaced when the atomic
+replace succeeds (refer to tmp_dest, dest, shutil.copytree, tmp_dest.rename in
+the diff).
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `4d2fe782-5341-4cf9-9edc-e4805c740200`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 0f9227abe8f1912de8831fb40bf0f32344d05427 and d5791453f964a1cfe6c38cfec135570d649d6c5e.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `.claude/S&P.md` is excluded by `!.claude/S&P.md`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (2)</summary>
+
+* `core/settings_dialog.py`
+* `main.py`
+
+</details>
+
+<details>
+<summary>🚧 Files skipped from review as they are similar to previous changes (1)</summary>
+
+* main.py
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-14 — `PR #16: feat: plugins directory with GitHub install support` — review run 2
+
+
+
+<details>
+<summary>♻️ Duplicate comments (2)</summary><blockquote>
+
+<details>
+<summary>core/settings_dialog.py (2)</summary><blockquote>
+
+`97-99`: _⚠️ Potential issue_ | _🟠 Major_
+
+**Preserve the current plugin until the final swap succeeds.**
+
+Line 98 deletes the live plugin before Line 99 is guaranteed to succeed. If rename fails, users lose the working plugin.
+
+  
+
+<details>
+<summary>Proposed safer swap (with rollback)</summary>
+
+```diff
+                         tmp_dest = dest.with_name(dest.name + '.tmp')
++                        backup_dest = dest.with_name(dest.name + '.bak')
+                         try:
+                             if tmp_dest.exists():
+                                 shutil.rmtree(tmp_dest)
++                            if backup_dest.exists():
++                                shutil.rmtree(backup_dest, ignore_errors=True)
+                             shutil.copytree(src, tmp_dest)
+                             if dest.exists():
+-                                shutil.rmtree(dest)
++                                dest.rename(backup_dest)
+                             tmp_dest.rename(dest)
++                            if backup_dest.exists():
++                                shutil.rmtree(backup_dest, ignore_errors=True)
+                         except Exception:
++                            if tmp_dest.exists():
++                                shutil.rmtree(tmp_dest, ignore_errors=True)
++                            if backup_dest.exists() and not dest.exists():
++                                backup_dest.rename(dest)
+-                            if tmp_dest.exists():
+-                                shutil.rmtree(tmp_dest, ignore_errors=True)
+                             raise
+```
+</details>
+
+```shell
+#!/bin/bash
+# Verify current non-rollback swap flow in worker
+sed -n '90,110p' core/settings_dialog.py
+```
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@core/settings_dialog.py` around lines 97 - 99, The current swap deletes the
+live plugin via shutil.rmtree(dest) before tmp_dest.rename(dest) succeeds;
+change the flow to preserve/rollback by first renaming/moving the current dest
+to a backup name (e.g., dest_backup) instead of deleting it, then rename
+tmp_dest to dest, and on any failure of tmp_dest.rename(dest) attempt to restore
+by renaming dest_backup back to dest; only remove the backup after the new dest
+is successfully in place; update the logic around dest.exists(),
+shutil.rmtree(dest) and tmp_dest.rename(dest) accordingly and ensure exceptions
+during rename trigger the rollback rename of the backup.
+```
+
+</details>
+
+---
+
+`438-443`: _⚠️ Potential issue_ | _🟠 Major_
+
+**Block dialog edits/close while plugin install worker is running.**
+
+Only the Install button is disabled. Users can still Save/Cancel/close, which can race worker callbacks against disposed UI state.
+
+  
+
+<details>
+<summary>Proposed guard for in-flight install lifecycle</summary>
+
+```diff
+ class SettingsDialog(QDialog):
+@@
+     def __init__(self, settings: Dict[str, Any], parent=None, available_modules: List[tuple] = None,
+                  save_callback=None, plugins_dir: Path = None):
+@@
+         self._plugins_dir = plugins_dir
++        self._install_in_progress = False
+@@
+-        button_box = QDialogButtonBox(
++        self.button_box = QDialogButtonBox(
+             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+         )
+-        button_box.accepted.connect(self.save)
+-        button_box.rejected.connect(self.reject)
+-        main_layout.addWidget(button_box)
++        self.button_box.accepted.connect(self.save)
++        self.button_box.rejected.connect(self.reject)
++        main_layout.addWidget(self.button_box)
+@@
+         self.github_install_btn.setEnabled(False)
++        self._install_in_progress = True
++        self.github_repo_edit.setEnabled(False)
++        self.button_box.setEnabled(False)
+         worker = _PluginInstallWorker(owner, repo, self._plugins_dir)
+@@
+         self.github_install_btn.setEnabled(True)
++        self._install_in_progress = False
++        self.github_repo_edit.setEnabled(True)
++        self.button_box.setEnabled(True)
+@@
+         self.github_install_btn.setEnabled(True)
++        self._install_in_progress = False
++        self.github_repo_edit.setEnabled(True)
++        self.button_box.setEnabled(True)
+         QMessageBox.critical(self, "Install Plugin", message)
+         worker.deleteLater()
++
++    def reject(self):
++        if self._install_in_progress:
++            QMessageBox.information(self, "Install Plugin", "Please wait for install to finish.")
++            return
++        super().reject()
+```
+</details>
+
+```shell
+#!/bin/bash
+# Verify install-state handling and whether Save/Cancel/close are guarded
+rg -n -C2 "github_install_btn.setEnabled|button_box|def reject|_install_in_progress|worker.start" core/settings_dialog.py
+```
+
+
+Also applies to: 445-459
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@core/settings_dialog.py` around lines 438 - 443, The dialog allows
+Save/Cancel/close while a plugin install worker (created in the block that sets
+self.github_install_btn and self._install_worker and starts worker) is running,
+which can race with callbacks
+(_on_plugin_install_success/_on_plugin_install_error) against a disposed UI; add
+an in-flight guard: introduce a boolean like self._install_in_progress set True
+before worker.start() and False in both _on_plugin_install_success and
+_on_plugin_install_error, disable the dialog buttons (e.g. the button box, and
+block reject/accept/close) while _install_in_progress is True, and make
+reject/accept early-return when the flag is set so callbacks won't touch
+disposed widgets.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Duplicate comments:
+In `@core/settings_dialog.py`:
+- Around line 97-99: The current swap deletes the live plugin via
+shutil.rmtree(dest) before tmp_dest.rename(dest) succeeds; change the flow to
+preserve/rollback by first renaming/moving the current dest to a backup name
+(e.g., dest_backup) instead of deleting it, then rename tmp_dest to dest, and on
+any failure of tmp_dest.rename(dest) attempt to restore by renaming dest_backup
+back to dest; only remove the backup after the new dest is successfully in
+place; update the logic around dest.exists(), shutil.rmtree(dest) and
+tmp_dest.rename(dest) accordingly and ensure exceptions during rename trigger
+the rollback rename of the backup.
+- Around line 438-443: The dialog allows Save/Cancel/close while a plugin
+install worker (created in the block that sets self.github_install_btn and
+self._install_worker and starts worker) is running, which can race with
+callbacks (_on_plugin_install_success/_on_plugin_install_error) against a
+disposed UI; add an in-flight guard: introduce a boolean like
+self._install_in_progress set True before worker.start() and False in both
+_on_plugin_install_success and _on_plugin_install_error, disable the dialog
+buttons (e.g. the button box, and block reject/accept/close) while
+_install_in_progress is True, and make reject/accept early-return when the flag
+is set so callbacks won't touch disposed widgets.
+```
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `33c76dda-ae89-418c-b244-735b3c652f87`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between d5791453f964a1cfe6c38cfec135570d649d6c5e and 0890df4e3d4e0cc3ea16cffff2bf9eb28ff18f29.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `.claude/S&P.md` is excluded by `!.claude/S&P.md`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (2)</summary>
+
+* `core/settings_dialog.py`
+* `main.py`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
