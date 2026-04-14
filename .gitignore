@@ -3,6 +3,7 @@ itar/
 not itar/
 sample_files/
 test_jobs.csv
+test_dist/
 
 # Claude Code and development notes
 .claude/settings.local.json
