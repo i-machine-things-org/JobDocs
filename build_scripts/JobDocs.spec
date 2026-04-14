@@ -151,6 +151,9 @@ hiddenimports = [
     # PDF preview (imported inside function body — PyInstaller won't auto-detect)
     'fitz',
 
+    # stdlib modules used by dynamically-loaded plugins (not reachable via static analysis)
+    'difflib',
+
     # NOTE: modules.reporting, pandas, openpyxl are PSM-only (Rule 3).
     # Include them only in a PSM-specific build spec, not here.
 ]

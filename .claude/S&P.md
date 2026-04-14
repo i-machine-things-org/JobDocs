@@ -3790,3 +3790,76 @@ Reviewing files that changed from the base of the PR and between d5791453f964a1c
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-14 — `PR #17: fix: add difflib to hiddenimports for plugin compatibility` — review run 1
+
+**Actionable comments posted: 1**
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@core/settings_dialog.py`:
+- Around line 29-30: The constructor signature uses default None for typed
+parameters without Optional: update def __init__ to annotate available_modules
+as Optional[List[tuple]] and save_callback as Optional[Callable[..., Any]] (or
+Optional[Callable] if simpler), import Optional and Callable (and Any if not
+already) from typing, and keep the defaults = None; adjust references to
+available_modules/save_callback within the class if necessary to satisfy the new
+types.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `5af0e09e-d66a-4e81-938f-bb98200fc7f1`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between c1067e4bd0a622cac8745c6ba7f82d6fc097e960 and 1eebe8483c12d53db1444ecaae592b7813b938ab.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (3)</summary>
+
+* `build_scripts/JobDocs.spec`
+* `core/settings_dialog.py`
+* `main.py`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->

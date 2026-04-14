@@ -9,125 +9,31 @@ Provides a UI for configuring application settings including:
 - Experimental features
 """
 
-import io
-import shutil
-import tempfile
-import urllib.error
-import urllib.request
-import zipfile
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any, Callable, Dict, List, Optional
 
-from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QGroupBox, QLabel, QLineEdit, QPushButton, QCheckBox,
     QRadioButton, QButtonGroup, QComboBox, QScrollArea,
-    QWidget, QFrame, QDialogButtonBox, QFileDialog, QMessageBox,
+    QWidget, QFrame, QDialogButtonBox, QFileDialog,
     QStyleFactory
 )
 
 from shared.utils import get_os_type, get_os_text
 
 
-class _PluginInstallWorker(QThread):
-    """Background worker that downloads and extracts a GitHub plugin."""
-
-    success = pyqtSignal(str, str)  # module_name, dest_path
-    error = pyqtSignal(str)         # error message
-
-    def __init__(self, owner: str, repo: str, plugins_dir: Path):
-        super().__init__()
-        self._owner = owner
-        self._repo = repo
-        self._plugins_dir = plugins_dir
-
-    def run(self):
-        owner, repo = self._owner, self._repo
-        plugins_dir = self._plugins_dir
-        plugins_dir.mkdir(parents=True, exist_ok=True)
-
-        last_error = None
-        for branch in ('main', 'master'):
-            zip_url = f"https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
-            try:
-                with urllib.request.urlopen(zip_url, timeout=30) as resp:
-                    zip_data = resp.read()
-
-                with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
-                    top_dirs = {n.split('/')[0] for n in zf.namelist() if '/' in n}
-                    if len(top_dirs) != 1:
-                        self.error.emit(
-                            "Unexpected ZIP structure — could not determine module root."
-                        )
-                        return
-                    zip_root = top_dirs.pop()
-
-                    with tempfile.TemporaryDirectory() as tmp:
-                        zf.extractall(tmp)
-                        src_root = Path(tmp) / zip_root
-
-                        if (src_root / 'module.py').exists():
-                            dest = plugins_dir / repo
-                            module_name = repo
-                            src = src_root
-                        else:
-                            candidates = [
-                                d for d in src_root.iterdir()
-                                if d.is_dir() and (d / 'module.py').exists()
-                            ]
-                            if not candidates:
-                                self.error.emit(
-                                    f"No module.py found in {owner}/{repo}. "
-                                    "Ensure the repo contains a JobDocs plugin module."
-                                )
-                                return
-                            module_folder = candidates[0]
-                            dest = plugins_dir / module_folder.name
-                            module_name = module_folder.name
-                            src = module_folder
-
-                        # Atomic swap: copy to a temp sibling, then replace.
-                        # Keeps the old plugin intact if the copy fails.
-                        tmp_dest = dest.with_name(dest.name + '.tmp')
-                        try:
-                            if tmp_dest.exists():
-                                shutil.rmtree(tmp_dest)
-                            shutil.copytree(src, tmp_dest)
-                            if dest.exists():
-                                shutil.rmtree(dest)
-                            tmp_dest.rename(dest)
-                        except Exception:
-                            if tmp_dest.exists():
-                                shutil.rmtree(tmp_dest, ignore_errors=True)
-                            raise
-
-                self.success.emit(module_name, str(dest))
-                return
-
-            except urllib.error.HTTPError as e:
-                last_error = str(e)
-                continue
-            except Exception as e:
-                self.error.emit(f"Download failed:\n{e}")
-                return
-
-        self.error.emit(
-            f"Could not download {owner}/{repo} (tried main and master branches).\n{last_error}"
-        )
-
-
 class SettingsDialog(QDialog):
     """Settings dialog"""
 
-    def __init__(self, settings: Dict[str, Any], parent=None, available_modules: List[tuple] = None,
-                 save_callback=None, plugins_dir: Path = None):
+    def __init__(self, settings: Dict[str, Any], parent=None,
+                 available_modules: Optional[List[tuple]] = None,
+                 save_callback: Optional[Callable[..., Any]] = None):
         super().__init__(parent)
         self.settings = settings.copy()
         self.available_modules = available_modules or []  # List of (module_name, display_name) tuples
         self.module_checkboxes = {}  # Store module checkboxes
         self._save_callback = save_callback  # Called to persist settings to disk mid-dialog
-        self._plugins_dir = plugins_dir
         self.setWindowTitle("Settings")
         self.setMinimumWidth(600)
         self.setup_ui()
@@ -186,27 +92,6 @@ class SettingsDialog(QDialog):
         itar_layout.addWidget(itar_cf_btn, 1, 2)
 
         scroll_layout.addWidget(itar_group)
-
-        # Plugins group
-        plugins_group = QGroupBox("Plugins")
-        plugins_layout = QGridLayout(plugins_group)
-
-        plugins_dir_label = QLabel(str(self._plugins_dir) if self._plugins_dir else "(not configured)")
-        plugins_dir_label.setStyleSheet("color: gray; font-size: 9pt;")
-        plugins_dir_label.setWordWrap(True)
-        plugins_layout.addWidget(QLabel("Plugins folder:"), 0, 0)
-        plugins_layout.addWidget(plugins_dir_label, 0, 1, 1, 2)
-
-        # GitHub install row
-        plugins_layout.addWidget(QLabel("Install from GitHub:"), 1, 0)
-        self.github_repo_edit = QLineEdit()
-        self.github_repo_edit.setPlaceholderText("owner/repo  or  https://github.com/owner/repo")
-        plugins_layout.addWidget(self.github_repo_edit, 1, 1)
-        self.github_install_btn = QPushButton("Install")
-        self.github_install_btn.clicked.connect(self._install_github_plugin)
-        plugins_layout.addWidget(self.github_install_btn, 1, 2)
-
-        scroll_layout.addWidget(plugins_group)
 
         # Link type group
         link_group = QGroupBox("Link Type")
@@ -408,55 +293,6 @@ class SettingsDialog(QDialog):
         button_box.accepted.connect(self.save)
         button_box.rejected.connect(self.reject)
         main_layout.addWidget(button_box)
-
-    def _install_github_plugin(self):
-        """Start a background download of a GitHub plugin into the plugins directory."""
-        repo_input = self.github_repo_edit.text().strip()
-        if not repo_input:
-            QMessageBox.warning(self, "Install Plugin", "Enter a GitHub repo (owner/repo or full URL).")
-            return
-
-        if not self._plugins_dir:
-            QMessageBox.warning(self, "Install Plugin", "Plugins directory is not configured.")
-            return
-
-        # Normalise input to owner/repo
-        repo_input = repo_input.rstrip('/')
-        if repo_input.startswith('https://github.com/'):
-            repo_slug = repo_input[len('https://github.com/'):]
-        elif repo_input.startswith('github.com/'):
-            repo_slug = repo_input[len('github.com/'):]
-        else:
-            repo_slug = repo_input
-
-        parts = repo_slug.split('/')
-        if len(parts) < 2:
-            QMessageBox.warning(self, "Install Plugin", f"Could not parse repo from: {repo_input}")
-            return
-        owner, repo = parts[0], parts[1]
-
-        self.github_install_btn.setEnabled(False)
-        worker = _PluginInstallWorker(owner, repo, self._plugins_dir)
-        worker.success.connect(lambda name, dest: self._on_plugin_install_success(name, dest, worker))
-        worker.error.connect(lambda msg: self._on_plugin_install_error(msg, worker))
-        self._install_worker = worker  # prevent GC while running
-        worker.start()
-
-    def _on_plugin_install_success(self, module_name: str, dest: str, worker: '_PluginInstallWorker'):
-        """Called on the main thread when a plugin install completes successfully."""
-        self.github_install_btn.setEnabled(True)
-        QMessageBox.information(
-            self, "Plugin Installed",
-            f"Plugin '{module_name}' installed to:\n{dest}\n\nRestart JobDocs to load it."
-        )
-        self.github_repo_edit.clear()
-        worker.deleteLater()
-
-    def _on_plugin_install_error(self, message: str, worker: '_PluginInstallWorker'):
-        """Called on the main thread when a plugin install fails."""
-        self.github_install_btn.setEnabled(True)
-        QMessageBox.critical(self, "Install Plugin", message)
-        worker.deleteLater()
 
     def browse_dir(self, line_edit: QLineEdit):
         dir_path = QFileDialog.getExistingDirectory(self, "Select Directory")

@@ -343,8 +343,7 @@ class JobDocsMainWindow(QMainWindow):
                 available_modules.append((module_name, module_name))
 
         dialog = SettingsDialog(self.settings, self, available_modules,
-                               save_callback=self._partial_save_settings,
-                               plugins_dir=self._get_plugins_dir())
+                               save_callback=self._partial_save_settings)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.settings = dialog.settings
 
