@@ -121,12 +121,13 @@ class SettingsDialog(QDialog):
     """Settings dialog"""
 
     def __init__(self, settings: Dict[str, Any], parent=None, available_modules: List[tuple] = None,
-                 save_callback=None):
+                 save_callback=None, plugins_dir: Path = None):
         super().__init__(parent)
         self.settings = settings.copy()
         self.available_modules = available_modules or []  # List of (module_name, display_name) tuples
         self.module_checkboxes = {}  # Store module checkboxes
         self._save_callback = save_callback  # Called to persist settings to disk mid-dialog
+        self._plugins_dir = plugins_dir
         self.setWindowTitle("Settings")
         self.setMinimumWidth(600)
         self.setup_ui()
@@ -186,31 +187,24 @@ class SettingsDialog(QDialog):
 
         scroll_layout.addWidget(itar_group)
 
-        # Plugins directory group
-        plugins_group = QGroupBox("Plugins Directory (optional)")
+        # Plugins group
+        plugins_group = QGroupBox("Plugins")
         plugins_layout = QGridLayout(plugins_group)
 
-        plugins_layout.addWidget(QLabel("Plugins Directory:"), 0, 0)
-        self.plugins_dir_edit = QLineEdit(self.settings.get('plugins_dir', ''))
-        self.plugins_dir_edit.setPlaceholderText("Folder containing external plugin modules")
-        plugins_layout.addWidget(self.plugins_dir_edit, 0, 1)
-        plugins_btn = QPushButton("Browse...")
-        plugins_btn.clicked.connect(lambda: self.browse_dir(self.plugins_dir_edit))
-        plugins_layout.addWidget(plugins_btn, 0, 2)
-
-        plugins_info = QLabel("Drop a plugin module folder here to load it at startup (requires restart)")
-        plugins_info.setWordWrap(True)
-        plugins_info.setStyleSheet("color: gray; font-size: 9pt;")
-        plugins_layout.addWidget(plugins_info, 1, 0, 1, 3)
+        plugins_dir_label = QLabel(str(self._plugins_dir) if self._plugins_dir else "(not configured)")
+        plugins_dir_label.setStyleSheet("color: gray; font-size: 9pt;")
+        plugins_dir_label.setWordWrap(True)
+        plugins_layout.addWidget(QLabel("Plugins folder:"), 0, 0)
+        plugins_layout.addWidget(plugins_dir_label, 0, 1, 1, 2)
 
         # GitHub install row
-        plugins_layout.addWidget(QLabel("Install from GitHub:"), 2, 0)
+        plugins_layout.addWidget(QLabel("Install from GitHub:"), 1, 0)
         self.github_repo_edit = QLineEdit()
         self.github_repo_edit.setPlaceholderText("owner/repo  or  https://github.com/owner/repo")
-        plugins_layout.addWidget(self.github_repo_edit, 2, 1)
+        plugins_layout.addWidget(self.github_repo_edit, 1, 1)
         self.github_install_btn = QPushButton("Install")
         self.github_install_btn.clicked.connect(self._install_github_plugin)
-        plugins_layout.addWidget(self.github_install_btn, 2, 2)
+        plugins_layout.addWidget(self.github_install_btn, 1, 2)
 
         scroll_layout.addWidget(plugins_group)
 
@@ -422,18 +416,9 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Install Plugin", "Enter a GitHub repo (owner/repo or full URL).")
             return
 
-        plugins_dir_str = self.plugins_dir_edit.text().strip()
-        if not plugins_dir_str:
-            QMessageBox.warning(
-                self, "Install Plugin",
-                "Set a Plugins Directory first — the plugin will be extracted there."
-            )
+        if not self._plugins_dir:
+            QMessageBox.warning(self, "Install Plugin", "Plugins directory is not configured.")
             return
-
-        # Persist immediately so the value survives if the dialog is closed without Save.
-        self.settings['plugins_dir'] = plugins_dir_str
-        if self._save_callback:
-            self._save_callback({'plugins_dir': plugins_dir_str})
 
         # Normalise input to owner/repo
         repo_input = repo_input.rstrip('/')
@@ -451,7 +436,7 @@ class SettingsDialog(QDialog):
         owner, repo = parts[0], parts[1]
 
         self.github_install_btn.setEnabled(False)
-        worker = _PluginInstallWorker(owner, repo, Path(plugins_dir_str))
+        worker = _PluginInstallWorker(owner, repo, self._plugins_dir)
         worker.success.connect(lambda name, dest: self._on_plugin_install_success(name, dest, worker))
         worker.error.connect(lambda msg: self._on_plugin_install_error(msg, worker))
         self._install_worker = worker  # prevent GC while running
@@ -515,8 +500,5 @@ class SettingsDialog(QDialog):
 
         # Save remote server path
         self.settings['remote_server_path'] = self.remote_server_edit.text().strip()
-
-        # Save plugins directory
-        self.settings['plugins_dir'] = self.plugins_dir_edit.text().strip()
 
         self.accept()
