@@ -26,7 +26,7 @@ This is how the user explicitly asks you to check in on the project.
 ## Rule 1: Git Is Mandatory
 
 - If the project is not a git repository, run `git init` and create an initial commit before doing anything else.
-- Never work directly on `main`, `master`,`stable` . Always create a feature branch first then merge into `stable` and `PSM stable`.
+- Never work directly on `main`, `master`, or `stable`. Always create a feature branch first then merge into `stable`.
 - Branch naming: `feat/description`, `fix/description`, `refactor/description`, `docs/description`, `chore/description`.
 - If you are on `main` when you start, create and switch to a feature branch immediately.
 
@@ -53,14 +53,13 @@ Rules:
 - If a new feature is added or changed, update the top-level README.md before committing.
 - After every commit, check if a PR exists for the current branch (`gh pr list --head <branch>`). If none exists, open one immediately via `gh pr create`. Never leave a commit on a feature branch without an open PR.
 
-## Rule 3: Report Fixer Must Never Merge to `stable`
+## Rule 3: Report Fixer Is a Plugin — Not In This Repo
 
-**`modules/reporting/` (Report Fixer) is a PSM-only feature. It must never be merged into `stable`.**
+Report Fixer is a standalone plugin maintained at `H:\Jobdocs\jobdocs-report-fixer`. It is loaded at runtime from the `plugins/` directory alongside the installed executable.
 
-- `stable` is the primary production branch for general use. Report Fixer does not belong there.
-- Development happens on `PSM-stable`. When changes from `PSM-stable` are candidates for `stable`, always exclude `modules/reporting/` and its PSM-only dependencies (`pandas`, `openpyxl`) from the merge.
-- If Report Fixer files are detected in a diff or staged commit targeting `stable`, **stop immediately and warn the user** before taking any action.
-- This rule applies regardless of how the merge is initiated (manual, cherry-pick, or automated).
+- Do **not** add Report Fixer code to this repo (`modules/`, `psm_modules/`, or anywhere else).
+- `PSM-stable` is deprecated and must not be used or merged from.
+- `modules/reporting/` in this repo is a lightweight stub for experimental use only — it is not Report Fixer.
 
 ---
 
@@ -86,7 +85,7 @@ git tag v1.2.3
 git push origin v1.2.3
 ```
 
-**Note:** Only tag from `stable`. Do not push `v*` tags from `PSM-stable` — that branch carries Report Fixer (Rule 3) and must not produce a general release build.
+**Note:** Only tag from `stable`.
 
 **SignPath:** Apply at https://signpath.io/product/open-source. Once approved, uncomment the signing step in `build-release.yml` and add `SIGNPATH_API_TOKEN` and `SIGNPATH_ORG_ID` to GitHub Actions secrets.
 
