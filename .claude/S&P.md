@@ -3548,3 +3548,245 @@ Reviewing files that changed from the base of the PR and between 0f9227abe8f1912
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-14 — `PR #16: feat: plugins directory with GitHub install support` — review run 2
+
+
+
+<details>
+<summary>♻️ Duplicate comments (2)</summary><blockquote>
+
+<details>
+<summary>core/settings_dialog.py (2)</summary><blockquote>
+
+`97-99`: _⚠️ Potential issue_ | _🟠 Major_
+
+**Preserve the current plugin until the final swap succeeds.**
+
+Line 98 deletes the live plugin before Line 99 is guaranteed to succeed. If rename fails, users lose the working plugin.
+
+  
+
+<details>
+<summary>Proposed safer swap (with rollback)</summary>
+
+```diff
+                         tmp_dest = dest.with_name(dest.name + '.tmp')
++                        backup_dest = dest.with_name(dest.name + '.bak')
+                         try:
+                             if tmp_dest.exists():
+                                 shutil.rmtree(tmp_dest)
++                            if backup_dest.exists():
++                                shutil.rmtree(backup_dest, ignore_errors=True)
+                             shutil.copytree(src, tmp_dest)
+                             if dest.exists():
+-                                shutil.rmtree(dest)
++                                dest.rename(backup_dest)
+                             tmp_dest.rename(dest)
++                            if backup_dest.exists():
++                                shutil.rmtree(backup_dest, ignore_errors=True)
+                         except Exception:
++                            if tmp_dest.exists():
++                                shutil.rmtree(tmp_dest, ignore_errors=True)
++                            if backup_dest.exists() and not dest.exists():
++                                backup_dest.rename(dest)
+-                            if tmp_dest.exists():
+-                                shutil.rmtree(tmp_dest, ignore_errors=True)
+                             raise
+```
+</details>
+
+```shell
+#!/bin/bash
+# Verify current non-rollback swap flow in worker
+sed -n '90,110p' core/settings_dialog.py
+```
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@core/settings_dialog.py` around lines 97 - 99, The current swap deletes the
+live plugin via shutil.rmtree(dest) before tmp_dest.rename(dest) succeeds;
+change the flow to preserve/rollback by first renaming/moving the current dest
+to a backup name (e.g., dest_backup) instead of deleting it, then rename
+tmp_dest to dest, and on any failure of tmp_dest.rename(dest) attempt to restore
+by renaming dest_backup back to dest; only remove the backup after the new dest
+is successfully in place; update the logic around dest.exists(),
+shutil.rmtree(dest) and tmp_dest.rename(dest) accordingly and ensure exceptions
+during rename trigger the rollback rename of the backup.
+```
+
+</details>
+
+---
+
+`438-443`: _⚠️ Potential issue_ | _🟠 Major_
+
+**Block dialog edits/close while plugin install worker is running.**
+
+Only the Install button is disabled. Users can still Save/Cancel/close, which can race worker callbacks against disposed UI state.
+
+  
+
+<details>
+<summary>Proposed guard for in-flight install lifecycle</summary>
+
+```diff
+ class SettingsDialog(QDialog):
+@@
+     def __init__(self, settings: Dict[str, Any], parent=None, available_modules: List[tuple] = None,
+                  save_callback=None, plugins_dir: Path = None):
+@@
+         self._plugins_dir = plugins_dir
++        self._install_in_progress = False
+@@
+-        button_box = QDialogButtonBox(
++        self.button_box = QDialogButtonBox(
+             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+         )
+-        button_box.accepted.connect(self.save)
+-        button_box.rejected.connect(self.reject)
+-        main_layout.addWidget(button_box)
++        self.button_box.accepted.connect(self.save)
++        self.button_box.rejected.connect(self.reject)
++        main_layout.addWidget(self.button_box)
+@@
+         self.github_install_btn.setEnabled(False)
++        self._install_in_progress = True
++        self.github_repo_edit.setEnabled(False)
++        self.button_box.setEnabled(False)
+         worker = _PluginInstallWorker(owner, repo, self._plugins_dir)
+@@
+         self.github_install_btn.setEnabled(True)
++        self._install_in_progress = False
++        self.github_repo_edit.setEnabled(True)
++        self.button_box.setEnabled(True)
+@@
+         self.github_install_btn.setEnabled(True)
++        self._install_in_progress = False
++        self.github_repo_edit.setEnabled(True)
++        self.button_box.setEnabled(True)
+         QMessageBox.critical(self, "Install Plugin", message)
+         worker.deleteLater()
++
++    def reject(self):
++        if self._install_in_progress:
++            QMessageBox.information(self, "Install Plugin", "Please wait for install to finish.")
++            return
++        super().reject()
+```
+</details>
+
+```shell
+#!/bin/bash
+# Verify install-state handling and whether Save/Cancel/close are guarded
+rg -n -C2 "github_install_btn.setEnabled|button_box|def reject|_install_in_progress|worker.start" core/settings_dialog.py
+```
+
+
+Also applies to: 445-459
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@core/settings_dialog.py` around lines 438 - 443, The dialog allows
+Save/Cancel/close while a plugin install worker (created in the block that sets
+self.github_install_btn and self._install_worker and starts worker) is running,
+which can race with callbacks
+(_on_plugin_install_success/_on_plugin_install_error) against a disposed UI; add
+an in-flight guard: introduce a boolean like self._install_in_progress set True
+before worker.start() and False in both _on_plugin_install_success and
+_on_plugin_install_error, disable the dialog buttons (e.g. the button box, and
+block reject/accept/close) while _install_in_progress is True, and make
+reject/accept early-return when the flag is set so callbacks won't touch
+disposed widgets.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Duplicate comments:
+In `@core/settings_dialog.py`:
+- Around line 97-99: The current swap deletes the live plugin via
+shutil.rmtree(dest) before tmp_dest.rename(dest) succeeds; change the flow to
+preserve/rollback by first renaming/moving the current dest to a backup name
+(e.g., dest_backup) instead of deleting it, then rename tmp_dest to dest, and on
+any failure of tmp_dest.rename(dest) attempt to restore by renaming dest_backup
+back to dest; only remove the backup after the new dest is successfully in
+place; update the logic around dest.exists(), shutil.rmtree(dest) and
+tmp_dest.rename(dest) accordingly and ensure exceptions during rename trigger
+the rollback rename of the backup.
+- Around line 438-443: The dialog allows Save/Cancel/close while a plugin
+install worker (created in the block that sets self.github_install_btn and
+self._install_worker and starts worker) is running, which can race with
+callbacks (_on_plugin_install_success/_on_plugin_install_error) against a
+disposed UI; add an in-flight guard: introduce a boolean like
+self._install_in_progress set True before worker.start() and False in both
+_on_plugin_install_success and _on_plugin_install_error, disable the dialog
+buttons (e.g. the button box, and block reject/accept/close) while
+_install_in_progress is True, and make reject/accept early-return when the flag
+is set so callbacks won't touch disposed widgets.
+```
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `33c76dda-ae89-418c-b244-735b3c652f87`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between d5791453f964a1cfe6c38cfec135570d649d6c5e and 0890df4e3d4e0cc3ea16cffff2bf9eb28ff18f29.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `.claude/S&P.md` is excluded by `!.claude/S&P.md`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (2)</summary>
+
+* `core/settings_dialog.py`
+* `main.py`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
