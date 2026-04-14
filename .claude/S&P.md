@@ -3863,3 +3863,105 @@ Reviewing files that changed from the base of the PR and between c1067e4bd0a622c
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-14 — `PR #18: fix: bundle pandas/openpyxl for plugins and restore plugin installer` — review run 1
+
+**Actionable comments posted: 4**
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@main.py`:
+- Around line 50-51: The code currently assumes branches ('main','master') in
+the for loop that constructs zip_url, which will fail for repos with other
+default branches; change the logic to first query the repo metadata from
+GitHub's API (GET https://api.github.com/repos/{owner}/{repo}) and read the
+default_branch field, then build zip_url using that default_branch value; if the
+API call is rate-limited or fails, fall back to prompting the user for a branch
+name (or only then try the ('main','master') fallback). Update the code paths
+that construct zip_url (the loop using zip_url and any related download
+functions) to use the resolved branch variable instead of the hard-coded tuple.
+- Around line 72-85: The code currently picks the first directory with module.py
+(candidates list -> module_folder) which is ambiguous; change the logic to fail
+fast unless there is exactly one candidate: after building candidates (variable
+candidates), if len(candidates) == 0 emit the existing error, if len(candidates)
+> 1 emit an error listing the ambiguous candidate names (or count) and return,
+otherwise proceed setting module_folder = candidates[0] and computing dest,
+module_name, src as before; update any tests or messages to mention ambiguous
+plugin roots so callers know to disambiguate.
+- Around line 87-98: The current sequence removes the existing plugin (dest)
+before committing the new copy, risking data loss if tmp_dest.rename(dest)
+fails; change to a safe swap: after creating tmp_dest (tmp_dest =
+dest.with_name(dest.name + '.tmp')), do not delete dest—first move/rename the
+current dest to a backup (e.g., backup_dest = dest.with_name(dest.name +
+'.backup')) ensuring any preexisting backup is removed, then rename tmp_dest to
+dest, and only after successful rename remove the backup; on any exception,
+attempt to restore from backup (rename backup_dest back to dest) and clean up
+tmp_dest and backup_dest with ignore_errors=True. Ensure all operations
+reference tmp_dest, dest, src and handle exceptions to avoid leaving the system
+without a working plugin.
+- Around line 44-48: The plugins_dir.mkdir call in run executes before the
+worker's try block so a PermissionError will terminate the thread without
+invoking the worker's error handling; wrap the directory creation in the same
+error-handling as the worker (or add a local try/except around
+plugins_dir.mkdir) and on failure call the worker's error-emission path (e.g.,
+call self.error or the same error handler used inside run) passing the caught
+exception, then abort/return to avoid continuing; locate symbols run,
+self._plugins_dir, plugins_dir.mkdir and the worker's existing try/except to
+integrate the mkdir into that error flow.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `5485000d-3ec1-4426-9e5b-fcd82626e30e`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between ce304ec214964c6ba34efc2c08887f2aa3ca26eb and 4ff59fb26bb2512772bd11b08022001244156741.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (2)</summary>
+
+* `build_scripts/JobDocs.spec`
+* `main.py`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->

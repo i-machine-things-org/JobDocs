@@ -5,21 +5,143 @@ JobDocs - Modular Blueprint and Job Management System
 Main application entry point using the modular plugin architecture.
 """
 
+import io
+import shutil
 import sys
 import json
+import tempfile
+import urllib.error
+import urllib.request
+import zipfile
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QTabWidget, QMessageBox, QDialog
-)
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QTabWidget, QMessageBox, QDialog,
+    QInputDialog, QLineEdit
+)
 
 from core.module_loader import ModuleLoader
 from core.app_context import AppContext
 from shared.utils import get_config_dir, get_os_text
 from shared.remote_sync import RemoteSyncManager
+
+
+class _PluginInstallWorker(QThread):
+    """Background worker that downloads and extracts a GitHub plugin."""
+
+    success = pyqtSignal(str, str)  # module_name, dest_path
+    error = pyqtSignal(str)
+
+    def __init__(self, owner: str, repo: str, plugins_dir: Path):
+        super().__init__()
+        self._owner = owner
+        self._repo = repo
+        self._plugins_dir = plugins_dir
+
+    def run(self):
+        owner, repo = self._owner, self._repo
+        plugins_dir = self._plugins_dir
+
+        # Fix CR: wrap mkdir so PermissionError is surfaced via error signal
+        try:
+            plugins_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            self.error.emit(f"Could not create plugins directory:\n{plugins_dir}\n\n{e}")
+            return
+
+        # Fix CR: resolve default branch from GitHub API; fall back to main/master
+        branches_to_try: list = []
+        try:
+            api_url = f"https://api.github.com/repos/{owner}/{repo}"
+            req = urllib.request.Request(api_url, headers={"Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                meta = json.loads(resp.read())
+            branches_to_try = [meta.get("default_branch", "main")]
+        except Exception:
+            branches_to_try = ["main", "master"]
+
+        last_error = None
+        for branch in branches_to_try:
+            zip_url = f"https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
+            try:
+                with urllib.request.urlopen(zip_url, timeout=30) as resp:
+                    zip_data = resp.read()
+
+                with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
+                    top_dirs = {n.split('/')[0] for n in zf.namelist() if '/' in n}
+                    if len(top_dirs) != 1:
+                        self.error.emit("Unexpected ZIP structure — could not determine module root.")
+                        return
+                    zip_root = top_dirs.pop()
+
+                    with tempfile.TemporaryDirectory() as tmp:
+                        zf.extractall(tmp)
+                        src_root = Path(tmp) / zip_root
+
+                        if (src_root / 'module.py').exists():
+                            dest = plugins_dir / repo
+                            module_name = repo
+                            src = src_root
+                        else:
+                            candidates = [
+                                d for d in src_root.iterdir()
+                                if d.is_dir() and (d / 'module.py').exists()
+                            ]
+                            if not candidates:
+                                self.error.emit(
+                                    f"No module.py found in {owner}/{repo}. "
+                                    "Ensure the repo contains a JobDocs plugin module."
+                                )
+                                return
+                            # Fix CR: fail fast if multiple plugin roots are found
+                            if len(candidates) > 1:
+                                self.error.emit(
+                                    f"Found multiple plugin roots in {owner}/{repo}. "
+                                    "Ensure the repo contains exactly one JobDocs plugin module."
+                                )
+                                return
+                            module_folder = candidates[0]
+                            dest = plugins_dir / module_folder.name
+                            module_name = module_folder.name
+                            src = module_folder
+
+                        # Fix CR: backup-then-swap so the old plugin survives a failed rename
+                        tmp_dest = dest.with_name(dest.name + '.tmp')
+                        backup_dest = dest.with_name(dest.name + '.bak')
+                        try:
+                            if tmp_dest.exists():
+                                shutil.rmtree(tmp_dest)
+                            if backup_dest.exists():
+                                shutil.rmtree(backup_dest)
+                            shutil.copytree(src, tmp_dest)
+                            if dest.exists():
+                                dest.rename(backup_dest)
+                            tmp_dest.rename(dest)
+                            if backup_dest.exists():
+                                shutil.rmtree(backup_dest)
+                        except Exception:
+                            if tmp_dest.exists():
+                                shutil.rmtree(tmp_dest, ignore_errors=True)
+                            if backup_dest.exists() and not dest.exists():
+                                backup_dest.rename(dest)
+                            raise
+
+                self.success.emit(module_name, str(dest))
+                return
+
+            except urllib.error.HTTPError as e:
+                last_error = str(e)
+                continue
+            except Exception as e:
+                self.error.emit(f"Download failed:\n{e}")
+                return
+
+        self.error.emit(
+            f"Could not download {owner}/{repo} (tried: {', '.join(branches_to_try)}).\n{last_error}"
+        )
 
 
 class JobDocsMainWindow(QMainWindow):
@@ -297,6 +419,9 @@ class JobDocsMainWindow(QMainWindow):
         settings_action = file_menu.addAction("&Settings")  # pyright: ignore[reportOptionalMemberAccess]
         settings_action.triggered.connect(self.open_settings)  # pyright: ignore[reportOptionalMemberAccess]
 
+        install_plugin_action = file_menu.addAction("&Install Plugin...")  # pyright: ignore[reportOptionalMemberAccess]
+        install_plugin_action.triggered.connect(self.install_plugin)  # pyright: ignore[reportOptionalMemberAccess]
+
         file_menu.addSeparator()  # pyright: ignore[reportOptionalMemberAccess]
 
         exit_action = file_menu.addAction("E&xit")  # pyright: ignore[reportOptionalMemberAccess]
@@ -356,6 +481,49 @@ class JobDocsMainWindow(QMainWindow):
             from shared.widgets import DropZone
             DropZone.set_skip_image_attachments(self.settings.get('skip_image_attachments', True))
             QMessageBox.information(self, "Settings", "Settings saved. Please restart for all changes to take effect.")
+
+    def install_plugin(self):
+        """Prompt for a GitHub repo and install it as a plugin."""
+        repo_input, ok = QInputDialog.getText(
+            self, "Install Plugin",
+            "GitHub repo (owner/repo or https://github.com/owner/repo):",
+            QLineEdit.EchoMode.Normal
+        )
+        if not ok or not repo_input.strip():
+            return
+
+        repo_input = repo_input.strip().rstrip('/')
+        if repo_input.startswith('https://github.com/'):
+            repo_slug = repo_input[len('https://github.com/'):]
+        elif repo_input.startswith('github.com/'):
+            repo_slug = repo_input[len('github.com/'):]
+        else:
+            repo_slug = repo_input
+
+        parts = repo_slug.split('/')
+        if len(parts) < 2:
+            QMessageBox.warning(self, "Install Plugin", f"Could not parse repo from: {repo_input}")
+            return
+
+        owner, repo = parts[0], parts[1]
+        plugins_dir = self._get_plugins_dir()
+
+        worker = _PluginInstallWorker(owner, repo, plugins_dir)
+        worker.success.connect(lambda name, dest: self._on_plugin_install_success(name, dest, worker))
+        worker.error.connect(lambda msg: self._on_plugin_install_error(msg, worker))
+        self._install_worker = worker  # prevent GC while running
+        worker.start()
+
+    def _on_plugin_install_success(self, module_name: str, dest: str, worker: _PluginInstallWorker):
+        QMessageBox.information(
+            self, "Plugin Installed",
+            f"Plugin '{module_name}' installed to:\n{dest}\n\nRestart JobDocs to load it."
+        )
+        worker.deleteLater()
+
+    def _on_plugin_install_error(self, message: str, worker: _PluginInstallWorker):
+        QMessageBox.critical(self, "Install Plugin", message)
+        worker.deleteLater()
 
     def show_getting_started(self):
         """Show getting started guide"""

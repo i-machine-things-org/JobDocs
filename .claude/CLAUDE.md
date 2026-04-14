@@ -7,8 +7,8 @@ You are a senior software developer. These rules override your default behavior.
 Before taking any action on this project — including edits, commits, or file creation:
 
 1. Read `.claude/CLAUDE.md` and `.claude/S&P.md`.
-2. Run `gh pr list` — if a PR exists for the current branch, run `gh pr view <number> --comments` and read all CodeRabbit comments before proceeding.
-3. Do not make any edits until outstanding CR findings are addressed or acknowledged.
+2. Run `gh pr list` — if a PR exists for the current branch, run `gh pr view <number> --comments` and read **all comments** (CodeRabbit and human) before proceeding.
+3. Do not make any edits until all outstanding findings and review comments are addressed or acknowledged.
 
 No exceptions.
 
@@ -89,17 +89,17 @@ git push origin v1.2.3
 
 **SignPath:** Apply at https://signpath.io/product/open-source. Once approved, uncomment the signing step in `build-release.yml` and add `SIGNPATH_API_TOKEN` and `SIGNPATH_ORG_ID` to GitHub Actions secrets.
 
-## Rule 5: CodeRabbit Pull Request Reviews
+## Rule 5: Pull Request Reviews
 
 When a pull request is open or being prepared:
 
 - Always open PRs via `gh pr create` — never merge directly to `master` without a PR.
-- After CodeRabbit submits its review, read the review comments before making any further changes.
-- For each CodeRabbit finding:
+- After any review is submitted (CodeRabbit **or human**), read all comments before making any further changes.
+- For each finding, regardless of source:
   1. If it matches an existing `.claude/S&P.md` entry — fix it immediately and reference the S&P entry in the commit message.
   2. If it is a new pattern — fix it, then append it to `.claude/S&P.md` in the standard format before committing.
-- Do not dismiss or ignore CodeRabbit nitpicks — log them to `.claude/S&P.md` even if not immediately actionable.
-- Only merge a PR after all blocking CodeRabbit comments are resolved.
+- Do not dismiss or ignore nitpicks — log them to `.claude/S&P.md` even if not immediately actionable.
+- Only merge a PR after all blocking comments are resolved.
 
 ### S&P.md Entry Format
 

@@ -153,10 +153,21 @@ hiddenimports = [
 
     # stdlib modules used by dynamically-loaded plugins (not reachable via static analysis)
     'difflib',
-
-    # NOTE: modules.reporting, pandas, openpyxl are PSM-only (Rule 3).
-    # Include them only in a PSM-specific build spec, not here.
 ]
+
+# Third-party packages required by plugins (e.g. jobdocs-report-fixer uses pandas + openpyxl).
+#
+# Architectural note: because this is a onedir build, pure-Python plugin dependencies
+# could in principle live in a plugin's own deps/ subfolder (added to sys.path by the
+# plugin loader before exec_module). However, pandas contains compiled .pyd extensions
+# that must exactly match the Python version bundled by PyInstaller — they cannot be
+# shipped portably alongside a plugin. pandas must therefore be declared here so
+# PyInstaller includes the correct pre-compiled binaries in the bundle.
+# openpyxl is included here for the same reason as pandas (consistency and to avoid
+# a split deps model until a proper per-plugin deps/ system is implemented).
+hiddenimports += collect_submodules('pandas')
+hiddenimports += collect_submodules('openpyxl')
+datas += collect_data_files('pandas')
 
 # Find main.py
 main_py = spec_root / 'main.py'
