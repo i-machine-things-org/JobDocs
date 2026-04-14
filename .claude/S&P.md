@@ -3441,3 +3441,110 @@ Reviewing files that changed from the base of the PR and between 06a003d32c95a0c
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-14 — `PR #16: feat: plugins directory with GitHub install support` — review run 1
+
+**Actionable comments posted: 3**
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@core/settings_dialog.py`:
+- Around line 433-436: The current flow in settings_dialog.py blindly assumes
+self._save_callback({'plugins_dir': plugins_dir_str}) persisted the value;
+change the call-site in the code that sets self.settings['plugins_dir'] so it
+either catches an exception from the callback or checks a boolean success return
+(agree on one API), and if persistence failed (callback raised or returned
+False) abort before starting the plugin install/worker. Update the contract with
+the caller (main._partial_save_settings) so it either raises an IOError on
+failure or returns True/False, and in settings_dialog use that to stop the
+install worker when persistence did not succeed.
+- Around line 453-458: Disable all install-related controls when starting
+_PluginInstallWorker: besides calling self.github_install_btn.setEnabled(False),
+also disable self.plugins_dir_edit and any dialog action buttons (e.g.,
+Save/Cancel) or set a flag to block accept() and reject() while
+self._install_worker is active; re-enable those controls (or clear the blocking
+flag) in the _on_plugin_install_success and _on_plugin_install_error handlers
+where worker finishes, and ensure this same behavior is applied to the code
+paths around lines 460-474 that start the worker so the dialog cannot be
+edited/closed while installation is running.
+- Around line 90-103: The current swap removes the live plugin
+(shutil.rmtree(dest)) before ensuring the temp rename succeeded, which can leave
+no plugin if rename fails; change the sequence to perform an atomic replace of
+dest with the temp copy instead of deleting dest first: after
+shutil.copytree(src, tmp_dest) call tmp_dest.replace(dest) (or
+os.replace(tmp_dest, dest)) in place of tmp_dest.rename(dest), keep the existing
+exception handler to rmtree tmp_dest on failure, and remove the explicit
+shutil.rmtree(dest) call so the live plugin is only replaced when the atomic
+replace succeeds (refer to tmp_dest, dest, shutil.copytree, tmp_dest.rename in
+the diff).
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `4d2fe782-5341-4cf9-9edc-e4805c740200`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 0f9227abe8f1912de8831fb40bf0f32344d05427 and d5791453f964a1cfe6c38cfec135570d649d6c5e.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `.claude/S&P.md` is excluded by `!.claude/S&P.md`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (2)</summary>
+
+* `core/settings_dialog.py`
+* `main.py`
+
+</details>
+
+<details>
+<summary>🚧 Files skipped from review as they are similar to previous changes (1)</summary>
+
+* main.py
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
