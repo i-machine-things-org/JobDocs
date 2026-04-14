@@ -6,6 +6,7 @@ test_jobs.csv
 
 # Claude Code and development notes
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 .github-push-checklist.md
 docs/
 
