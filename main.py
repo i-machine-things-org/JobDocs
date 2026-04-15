@@ -22,7 +22,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QMessageBox, QDialog,
-    QInputDialog, QLineEdit
+    QInputDialog, QLineEdit, QProgressDialog
 )
 
 from core.module_loader import ModuleLoader
@@ -36,6 +36,7 @@ class _PluginInstallWorker(QThread):
 
     success = pyqtSignal(str, str, str)  # module_name, dest_path, dep_warning
     error = pyqtSignal(str)
+    status = pyqtSignal(str)  # progress message for the UI
 
     def __init__(self, owner: str, repo: str, plugins_dir: Path):
         super().__init__()
@@ -63,15 +64,24 @@ class _PluginInstallWorker(QThread):
             )
 
         try:
-            result = subprocess.run(
+            self.status.emit("Installing dependencies...")
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            proc = subprocess.Popen(
                 [sys.executable, '-m', 'pip', 'install',
                  '--no-warn-script-location', '-r', str(req_file)],
-                capture_output=True, text=True, timeout=300,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, creationflags=flags,
             )
-            if result.returncode == 0:
+            output_lines: list[str] = []
+            for line in proc.stdout:  # type: ignore[union-attr]
+                line = line.rstrip()
+                if line:
+                    output_lines.append(line)
+                    self.status.emit(line)
+            proc.wait(timeout=300)
+            if proc.returncode == 0:
                 return ''
-            err = (result.stderr or result.stdout).strip()
+            err = '\n'.join(output_lines[-20:])
             return (f"\n\nDependency installation failed.\n"
                     f"Run manually: \"{sys.executable}\" -m pip install -r \"{req_file}\"\n\nError: {err}")
         except Exception as exc:
@@ -90,6 +100,7 @@ class _PluginInstallWorker(QThread):
 
         # Fix CR: resolve default branch from GitHub API; fall back to main/master
         branches_to_try: list = []
+        self.status.emit(f"Connecting to GitHub ({owner}/{repo})...")
         try:
             api_url = f"https://api.github.com/repos/{owner}/{repo}"
             req = urllib.request.Request(api_url, headers={"Accept": "application/vnd.github+json"})
@@ -103,9 +114,11 @@ class _PluginInstallWorker(QThread):
         for branch in branches_to_try:
             zip_url = f"https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
             try:
+                self.status.emit(f"Downloading {owner}/{repo}...")
                 with urllib.request.urlopen(zip_url, timeout=30) as resp:
                     zip_data = resp.read()
 
+                self.status.emit("Extracting files...")
                 with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
                     top_dirs = {n.split('/')[0] for n in zf.namelist() if '/' in n}
                     if len(top_dirs) != 1:
@@ -571,13 +584,24 @@ class JobDocsMainWindow(QMainWindow):
         owner, repo = parts[0], parts[1]
         plugins_dir = self._get_plugins_dir()
 
+        progress = QProgressDialog("Connecting...", None, 0, 0, self)
+        progress.setWindowTitle("Installing Plugin")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setMinimumWidth(420)
+        progress.setCancelButton(None)
+        progress.setValue(0)
+        self._install_progress = progress
+
         worker = _PluginInstallWorker(owner, repo, plugins_dir)
+        worker.status.connect(progress.setLabelText)
         worker.success.connect(lambda name, dest, warn: self._on_plugin_install_success(name, dest, warn, worker))
         worker.error.connect(lambda msg: self._on_plugin_install_error(msg, worker))
         self._install_worker = worker  # prevent GC while running
         worker.start()
 
     def _on_plugin_install_success(self, module_name: str, dest: str, dep_warning: str, worker: _PluginInstallWorker):
+        self._install_progress.close()
         if dep_warning:
             msg = (f"Plugin '{module_name}' files copied to:\n{dest}\n\n"
                    f"The plugin may not load until dependencies are resolved.")
@@ -588,6 +612,7 @@ class JobDocsMainWindow(QMainWindow):
         worker.deleteLater()
 
     def _on_plugin_install_error(self, message: str, worker: _PluginInstallWorker):
+        self._install_progress.close()
         QMessageBox.critical(self, "Install Plugin", message)
         worker.deleteLater()
 

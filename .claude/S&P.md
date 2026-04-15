@@ -4944,3 +4944,163 @@ Reviewing files that changed from the base of the PR and between 7e62ebbabe8bca4
 1. **F-strings with no placeholders (Ruff F541)**
    - Flatpak return block used `f"..."` on two lines that contain no `{}` interpolation.
    - Fix applied: removed `f` prefixes; plain string literals.
+
+---
+
+## 2026-04-15 — `PR #22: fix: add ../app to embedded Python _pth so launcher works` — review run 1
+
+**Actionable comments posted: 1**
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@tests/test_utils.py`:
+- Line 18: Change the mutable class attribute EXTS from a list to an immutable
+tuple to fix the RUF012 warning: replace EXTS = ['.pdf', '.dwg', '.dxf'] with
+EXTS = ('.pdf', '.dwg', '.dxf') in tests/test_utils.py (symbol: EXTS) so the
+class attribute is no longer a mutable list.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `cd3123db-b941-44e3-8613-f93ed5b39814`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 1227395f7b0f58c57a241b0af435167ca54a9b8b and 9b944bf956ca932df4ced87403dddc03581f4c6c.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `windows/icon.ico` is excluded by `!**/*.ico`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (5)</summary>
+
+* `.github/workflows/build-release.yml`
+* `pytest.ini`
+* `requirements-dev.txt`
+* `tests/__init__.py`
+* `tests/test_utils.py`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-15 — `PR #22: fix: add ../app to embedded Python _pth so launcher works` — review run 2
+
+**Actionable comments posted: 1**
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@build_scripts/JobDocs.iss`:
+- Around line 50-53: The uninstall script claims to "keep installed plugins'
+data" but unconditionally deletes the "{app}\plugins" directory; update the
+logic in JobDocs.iss so removal of "{app}\plugins" is conditional on the user's
+uninstall choice (or remove the unconditional "Type: filesandordirs; Name:
+\"{app}\plugins\"" entry), ensuring that when the uninstall prompt chooses to
+keep plugins the plugins directory is not deleted; adjust the corresponding
+entries around the other similar entries (the block covering the plugin-related
+Type: filesandordirs lines) so the behavior matches the prompt and preserves
+embedded install plugin data referenced by main.py:399-423.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `61c2bbb1-35e4-40cd-b417-72f92019f80a`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 9b944bf956ca932df4ced87403dddc03581f4c6c and d90d5b41d7441044f7ac1ccc63945a9d735401f9.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (2)</summary>
+
+* `.claude/S&P.md` is excluded by `!.claude/S&P.md`
+* `windows/icon.ico` is excluded by `!**/*.ico`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `build_scripts/JobDocs.iss`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->

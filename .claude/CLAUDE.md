@@ -8,7 +8,8 @@ Before taking any action on this project — including edits, commits, or file c
 
 1. Read `.claude/CLAUDE.md` and `.claude/S&P.md`.
 2. Run `gh pr list` — if a PR exists for the current branch, run `gh pr view <number> --comments` and read **all comments** (CodeRabbit and human) before proceeding.
-3. Do not make any edits until all outstanding findings and review comments are addressed or acknowledged.
+3. Run `gh issue list` — check for open issues relevant to the current work.
+4. Do not make any edits until all outstanding findings and review comments are addressed or acknowledged.
 
 No exceptions.
 
@@ -17,9 +18,10 @@ No exceptions.
 When the user says **"run auto version control"** (or any close variation like "run avc", "auto version control", "start version control"), immediately run the full assessment:
 
 1. Run `git status`, `git branch`, and `git log --oneline -10`
-2. Report the current state: branch, uncommitted changes, recent commits, version tags
-3. Flag any issues: working on main, uncommitted changes, missing .gitignore, no tags
-4. Recommend next actions
+2. Run `gh issue list` and report any open issues
+3. Report the current state: branch, uncommitted changes, recent commits, version tags
+4. Flag any issues: working on main, uncommitted changes, missing .gitignore, no tags
+5. Recommend next actions
 
 This is how the user explicitly asks you to check in on the project.
 
