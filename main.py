@@ -6,7 +6,9 @@ Main application entry point using the modular plugin architecture.
 """
 
 import io
+import os
 import shutil
+import subprocess
 import sys
 import json
 import tempfile
@@ -32,7 +34,7 @@ from shared.remote_sync import RemoteSyncManager
 class _PluginInstallWorker(QThread):
     """Background worker that downloads and extracts a GitHub plugin."""
 
-    success = pyqtSignal(str, str)  # module_name, dest_path
+    success = pyqtSignal(str, str, str)  # module_name, dest_path, dep_warning
     error = pyqtSignal(str)
 
     def __init__(self, owner: str, repo: str, plugins_dir: Path):
@@ -40,6 +42,40 @@ class _PluginInstallWorker(QThread):
         self._owner = owner
         self._repo = repo
         self._plugins_dir = plugins_dir
+
+    def _install_deps(self, plugin_dir: Path) -> str:
+        """Install plugin requirements into the embedded Python's site-packages.
+
+        Uses sys.executable (the embedded runtime\\python.exe in a release build,
+        or the dev Python when running from source). Returns a non-empty warning
+        string on failure, or '' on success / no requirements.txt present.
+        """
+        req_file = plugin_dir / 'requirements.txt'
+        if not req_file.exists():
+            return ''
+
+        # On Flatpak, /app is read-only at runtime; pip installs will always fail.
+        # Manual install via sys.executable is also unsupported (same read-only runtime).
+        if os.getenv('FLATPAK_ID'):
+            return (
+                "\n\nDependency installation is not supported inside a Flatpak build.\n"
+                "Install the plugin's dependencies on the host system before use."
+            )
+
+        try:
+            result = subprocess.run(
+                [sys.executable, '-m', 'pip', 'install',
+                 '--no-warn-script-location', '-r', str(req_file)],
+                capture_output=True, text=True, timeout=300,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
+            )
+            if result.returncode == 0:
+                return ''
+            err = (result.stderr or result.stdout).strip()
+            return (f"\n\nDependency installation failed.\n"
+                    f"Run manually: \"{sys.executable}\" -m pip install -r \"{req_file}\"\n\nError: {err}")
+        except Exception as exc:
+            return f"\n\nDependency installation failed: {exc}"
 
     def run(self):
         owner, repo = self._owner, self._repo
@@ -129,7 +165,8 @@ class _PluginInstallWorker(QThread):
                                 backup_dest.rename(dest)
                             raise
 
-                self.success.emit(module_name, str(dest))
+                dep_warning = self._install_deps(dest)
+                self.success.emit(module_name, str(dest), dep_warning)
                 return
 
             except urllib.error.HTTPError as e:
@@ -341,7 +378,13 @@ class JobDocsMainWindow(QMainWindow):
 
     def _set_window_icon(self):
         """Set application window icon from bundled or filesystem icon."""
-        base = Path(sys._MEIPASS) if getattr(sys, 'frozen', False) else Path(__file__).parent
+        # PyInstaller frozen: data files land in sys._MEIPASS.
+        # Embedded Python: icon is staged into app/ alongside main.py.
+        # Dev: same directory as main.py.
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            base = Path(sys._MEIPASS)
+        else:
+            base = Path(__file__).resolve().parent
         candidates = [
             base / 'windows' / 'icon.ico',
             base / 'JobDocs.iconset' / 'icon_256x256.png',
@@ -354,10 +397,30 @@ class JobDocsMainWindow(QMainWindow):
     # ==================== Module Loading ====================
 
     def _get_plugins_dir(self) -> Path:
-        """Return the fixed plugins directory alongside the executable (or repo root in dev)."""
-        if getattr(sys, 'frozen', False):
-            return Path(sys.executable).parent / 'plugins'
-        return Path(__file__).parent / 'plugins'
+        """Return the plugins directory.
+
+        Embedded install layout:
+            {app}/app/main.py   ← __file__
+            {app}/runtime/      ← signals we're in an embedded install
+            {app}/plugins/      ← plugins live here
+
+        Dev / source layout:
+            repo/main.py
+            repo/plugins/       ← plugins live here
+
+        Flatpak: /app is read-only at runtime; plugins must live in the
+        per-user writable data dir so they survive across app updates.
+        """
+        flatpak_id = os.getenv('FLATPAK_ID')
+        if flatpak_id:
+            xdg_data = os.getenv('XDG_DATA_HOME') or os.path.join(
+                os.path.expanduser('~'), '.var', 'app', flatpak_id, 'data'
+            )
+            return Path(xdg_data) / 'plugins'
+        app_dir = Path(__file__).resolve().parent
+        if (app_dir.parent / 'runtime').is_dir():
+            return app_dir.parent / 'plugins'
+        return app_dir / 'plugins'
 
     def load_modules(self):
         """Load all modules using the module loader"""
@@ -509,16 +572,19 @@ class JobDocsMainWindow(QMainWindow):
         plugins_dir = self._get_plugins_dir()
 
         worker = _PluginInstallWorker(owner, repo, plugins_dir)
-        worker.success.connect(lambda name, dest: self._on_plugin_install_success(name, dest, worker))
+        worker.success.connect(lambda name, dest, warn: self._on_plugin_install_success(name, dest, warn, worker))
         worker.error.connect(lambda msg: self._on_plugin_install_error(msg, worker))
         self._install_worker = worker  # prevent GC while running
         worker.start()
 
-    def _on_plugin_install_success(self, module_name: str, dest: str, worker: _PluginInstallWorker):
-        QMessageBox.information(
-            self, "Plugin Installed",
-            f"Plugin '{module_name}' installed to:\n{dest}\n\nRestart JobDocs to load it."
-        )
+    def _on_plugin_install_success(self, module_name: str, dest: str, dep_warning: str, worker: _PluginInstallWorker):
+        if dep_warning:
+            msg = (f"Plugin '{module_name}' files copied to:\n{dest}\n\n"
+                   f"The plugin may not load until dependencies are resolved.")
+            QMessageBox.warning(self, "Plugin Installed", msg + dep_warning)
+        else:
+            msg = f"Plugin '{module_name}' installed to:\n{dest}\n\nRestart JobDocs to load it."
+            QMessageBox.information(self, "Plugin Installed", msg)
         worker.deleteLater()
 
     def _on_plugin_install_error(self, message: str, worker: _PluginInstallWorker):

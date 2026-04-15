@@ -24,7 +24,13 @@ jobs:
           echo "OK: $GITHUB_REF_NAME is descended from stable"
 
   # ---------------------------------------------------------------------------
-  # Windows — PyInstaller onedir build packaged by Inno Setup
+  # Windows — Embedded Python + source files packaged by Inno Setup
+  #
+  # Layout inside the installer:
+  #   {app}\JobDocs.exe        tiny C launcher (no console)
+  #   {app}\app\               Python source tree
+  #   {app}\runtime\           Python 3.12 embeddable + pre-installed deps
+  #   {app}\plugins\           empty; user populates via Install Plugin
   # ---------------------------------------------------------------------------
   build-windows:
     needs: verify-stable-ancestry
@@ -32,38 +38,97 @@ jobs:
     permissions:
       contents: read
 
+    env:
+      PY_VER: "3.12.9"
+      # SHA256 of python-3.12.9-embed-amd64.zip (verified via python.org sigstore)
+      # Update this value whenever PY_VER is bumped.
+      PY_EMBED_SHA256: "615861fb801e8b04c847598db4e1e46e4b046295017caa37cb5486dde72b5865"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python for bootstrapping
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
+      - name: Download Python embeddable
+        shell: pwsh
         run: |
-          pip install -r requirements.txt
-          pip install "pyinstaller>=6.0.0" "Pillow>=10.4.0,<12.0.0"
-
-      - name: Build executable
-        run: python -m PyInstaller build_scripts/JobDocs.spec --clean --noconfirm
-
-      - name: Verify build
-        run: |
-          if (!(Test-Path "dist/JobDocs/JobDocs.exe")) {
-            Write-Error "dist/JobDocs/JobDocs.exe not found — build failed"
+          $url = "https://www.python.org/ftp/python/$env:PY_VER/python-$env:PY_VER-embed-amd64.zip"
+          Invoke-WebRequest $url -OutFile python-embed.zip
+          $actual = (Get-FileHash python-embed.zip -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $env:PY_EMBED_SHA256) {
+            Write-Error "SHA256 mismatch for python-embed.zip`nExpected: $env:PY_EMBED_SHA256`nActual:   $actual"
             exit 1
           }
-          Write-Output "Build OK: $(Get-Item dist/JobDocs/JobDocs.exe | Select-Object -ExpandProperty Length) bytes"
+          Expand-Archive python-embed.zip -DestinationPath runtime
+
+      - name: Enable site-packages in embedded Python
         shell: pwsh
+        run: |
+          $pth = Get-Item runtime\python3*._pth
+          (Get-Content $pth) -replace '#import site', 'import site' | Set-Content $pth
+          New-Item -ItemType Directory -Path runtime\Lib\site-packages -Force | Out-Null
+
+      - name: Bootstrap pip into embedded Python
+        shell: pwsh
+        run: |
+          # Use the setup-python system pip (pinned version above) rather than
+          # downloading get-pip.py from the network, avoiding an unverified fetch.
+          # Pin pip version for reproducible builds — bump PIP_VER when upgrading.
+          python -m pip install --target runtime\Lib\site-packages --no-deps "pip==24.3.1"
+          runtime\python.exe -m pip --version
+
+      - name: Install app dependencies into embedded Python
+        run: runtime\python.exe -m pip install -r requirements.txt --no-warn-script-location
+        shell: pwsh
+
+      - name: Stage app source tree
+        shell: pwsh
+        run: |
+          $src_items = @('main.py','README.md','core','modules','shared',
+                         'JobDocs.iconset','sample_files','requirements.txt')
+          New-Item -ItemType Directory -Path app -Force | Out-Null
+          foreach ($item in $src_items) {
+            if (Test-Path $item) {
+              Copy-Item $item app\ -Recurse -Force
+            }
+          }
+
+      - name: Compile launcher (MinGW)
+        shell: bash
+        run: |
+          VER="${{ github.ref_name }}"
+          VER="${VER#v}"
+          IFS='.' read -r MAJOR MINOR PATCH rest <<< "$VER"
+          MAJOR=${MAJOR:-0}; MINOR=${MINOR:-0}; PATCH=${PATCH:-0}
+          windres launcher/launcher.rc -O coff -o launcher_res.o \
+            -D VERSION_MAJOR="$MAJOR" -D VERSION_MINOR="$MINOR" \
+            -D VERSION_PATCH="$PATCH" -D VERSION_BUILD=0
+          gcc -mwindows -O2 -o JobDocs.exe launcher/launcher.c launcher_res.o
+
+      - name: Verify build
+        shell: pwsh
+        run: |
+          if (!(Test-Path "JobDocs.exe")) {
+            Write-Error "JobDocs.exe not found — launcher build failed"; exit 1
+          }
+          if (!(Test-Path "runtime\python.exe")) {
+            Write-Error "runtime\python.exe not found — embed setup failed"; exit 1
+          }
+          if (!(Test-Path "app\main.py")) {
+            Write-Error "app\main.py not found — staging failed"; exit 1
+          }
+          Write-Output "Launcher: $(Get-Item JobDocs.exe | Select-Object -ExpandProperty Length) bytes"
+          Write-Output "Runtime Python: $(runtime\python.exe --version)"
 
       # -----------------------------------------------------------------------
       # SignPath code signing — uncomment once SignPath Foundation is approved
       # Apply at: https://signpath.io/product/open-source
-      # Sign dist/JobDocs/JobDocs.exe before iscc packages it.
       # -----------------------------------------------------------------------
-      # - name: Sign executable
+      # - name: Sign launcher
       #   uses: signpath/github-action-submit-signing-request@v1
       #   with:
       #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -75,17 +140,17 @@ jobs:
       #     output-artifact-name: JobDocs-signed
 
       - name: Ensure Inno Setup is available
+        shell: pwsh
         run: |
           if (!(Get-Command iscc -ErrorAction SilentlyContinue)) {
             choco install innosetup --confirm --no-progress
           }
-        shell: pwsh
 
       - name: Build Windows installer
+        shell: pwsh
         run: |
           $env:RELEASE_VERSION = "${{ github.ref_name }}"
           iscc build_scripts\JobDocs.iss
-        shell: pwsh
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4

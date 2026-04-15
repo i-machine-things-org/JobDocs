@@ -13,7 +13,6 @@ Usage:
 Generated executable will be in the dist/ directory (or custom path if specified).
 """
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 import os
 from pathlib import Path
 
@@ -153,21 +152,18 @@ hiddenimports = [
 
     # stdlib modules used by dynamically-loaded plugins (not reachable via static analysis)
     'difflib',
+
+    # pip internal API — used by the plugin installer to install plugin deps at
+    # runtime without requiring a separate Python installation on the user's machine.
+    'pip',
+    'pip._internal.cli.main',
 ]
 
-# Third-party packages required by plugins (e.g. jobdocs-report-fixer uses pandas + openpyxl).
-#
-# Architectural note: because this is a onedir build, pure-Python plugin dependencies
-# could in principle live in a plugin's own deps/ subfolder (added to sys.path by the
-# plugin loader before exec_module). However, pandas contains compiled .pyd extensions
-# that must exactly match the Python version bundled by PyInstaller — they cannot be
-# shipped portably alongside a plugin. pandas must therefore be declared here so
-# PyInstaller includes the correct pre-compiled binaries in the bundle.
-# openpyxl is included here for the same reason as pandas (consistency and to avoid
-# a split deps model until a proper per-plugin deps/ system is implemented).
-hiddenimports += collect_submodules('pandas')
-hiddenimports += collect_submodules('openpyxl')
-datas += collect_data_files('pandas')
+# Plugin dependencies are NOT bundled here.
+# When a plugin is installed, main.py shells out to:
+#   python -m pip install -r <plugin>/requirements.txt
+# which installs deps into the running Python environment (embedded runtime\
+# site-packages in a release build, the dev venv when running from source).
 
 # Find main.py
 main_py = spec_root / 'main.py'
@@ -191,6 +187,12 @@ a = Analysis(
         'PIL',
         'IPython',
         'jupyter',
+
+        # PyMuPDF's pymupdf.table optionally imports pandas for table detection;
+        # we only use fitz for page rendering so exclude it to keep plugin deps
+        # out of the main bundle (plugins install their own deps/ at runtime).
+        'pandas',
+        'openpyxl',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

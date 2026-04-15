@@ -3965,3 +3965,982 @@ Reviewing files that changed from the base of the PR and between ce304ec214964c6
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-14 — `PR #19: fix: isolate plugin deps into plugin-local deps/ directory` — review run 1
+
+**Actionable comments posted: 4**
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@main.py`:
+- Around line 55-57: The current creation of deps_dir and subsequent pip install
+into that path (variable deps_dir) can leave stale/partial packages; change the
+flow to create a fresh temporary directory (e.g., temp_deps_dir), run pip
+install --target into that temp directory, verify success, then atomically
+replace/move temp_deps_dir to deps_dir (remove or backup existing deps_dir only
+after successful install) to avoid overlaying and leftover files—apply the same
+pattern for the other install sites referenced around the blocks using deps_dir
+(lines noted 72-77 and 91-92) so installs are always performed into a clean temp
+folder and swapped into place on success.
+- Around line 103-106: The returned error message omits the --target flag so
+users run pip globally; update the string construction that returns the manual
+recovery command to include the plugin-local target by adding --target
+"{deps_dir}" (use the existing deps_dir variable alongside req_file and
+last_err) so the suggested command is pip install --target "{deps_dir}" -r
+"{req_file}" and preserve the existing error text fallback (last_err or 'no
+usable Python found on PATH').
+- Around line 61-67: When sys.frozen is true the code currently appends system
+Python names into candidates before ever trying the embedded pip, causing wheels
+to be chosen for the system ABI; change the candidates construction so that when
+getattr(sys, 'frozen', False) is True you try the bundled pip API
+(pip._internal) first and only then extend with ['python','python3','py'] as a
+last resort—i.e., ensure the candidates list contains a pip._internal attempt
+first in frozen mode and falls back to the system Python names otherwise.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `564b50cc-67cd-49b3-b031-57621bf81fa5`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 09700c52e8b62d3c6ea0ded20e7f767f2741e370 and f00a384bba3632eca3a8fda3be7bb02ee247a6d7.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (4)</summary>
+
+* `.gitignore`
+* `build_scripts/JobDocs.spec`
+* `core/module_loader.py`
+* `main.py`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-14 — `main.py` (plugin dep installer — PR #19 findings)
+
+**Review:** CodeRabbit flagged three actionable issues in `_install_deps`.
+**Result:** All three fixed in commit `dad24fb`.
+
+### Findings
+
+1. **Atomic install via temp directory**
+   - Pip into `deps.tmp/` first, then backup-then-swap into `deps/` on success.
+   - Prevents stale/partial packages if install fails mid-way.
+   - Fix applied: backup-then-swap pattern identical to plugin install in `run()`.
+
+2. **Manual recovery command missing `--target`**
+   - Error message said `pip install -r req_file`, which installs globally.
+   - Fix applied: changed to `pip install --target "{deps_dir}" -r "{req_file}"`.
+
+3. **Frozen mode: try bundled pip before system Python**
+   - System Python may have a different ABI than the bundled Python, causing binary wheels to be incompatible.
+   - Fix applied: in frozen mode, attempt `pip._internal.cli.main` first; fall back to `python`/`py` on PATH only after that fails.
+
+---
+
+## 2026-04-14 — `PR #20: build: replace PyInstaller with embedded Python for Windows` — review run 1
+
+**Actionable comments posted: 4**
+
+<details>
+<summary>🧹 Nitpick comments (3)</summary><blockquote>
+
+<details>
+<summary>.gitignore (1)</summary><blockquote>
+
+`54-54`: **Consider anchoring `AddonPackages/` to repo root.**
+
+If this is only meant for the root-level dev symlink, use `/AddonPackages/` to avoid unintentionally ignoring same-named nested directories.  
+
+<details>
+<summary>Diff suggestion</summary>
+
+```diff
+-AddonPackages/
++/AddonPackages/
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In @.gitignore at line 54, The .gitignore entry "AddonPackages/" should be
+anchored to the repository root to avoid ignoring same-named nested directories;
+replace "AddonPackages/" with "/AddonPackages/" (i.e., update the AddonPackages/
+pattern to start with a leading slash) so it only ignores the root-level dev
+symlink.
+```
+
+</details>
+
+</blockquote></details>
+<details>
+<summary>build_scripts/JobDocs.spec (1)</summary><blockquote>
+
+`156-166`: **Refresh this note to match the current plugin install model.**
+
+This block still describes the removed `deps/` + `sys.path` flow, but `main.py` now shells out to `python -m pip install -r ...` into the active environment. Leaving the old description here will send the next person debugging packaging down the wrong path.
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@build_scripts/JobDocs.spec` around lines 156 - 166, Update the comment block
+that currently references the removed "deps/" folder and "sys.path" manipulation
+to reflect the new plugin install model: replace the description about plugins
+managing deps in a deps/ subfolder and the module loader prepending sys.path
+with a note that main.py now shells out to "python -m pip install -r
+<requirements.txt>" into the active environment (i.e., installs into the running
+Python environment), and remove or reword any instructions that suggest using
+pip --target deps/ or modifying sys.path so future debuggers are directed to
+check main.py's shell-out install behavior instead.
+```
+
+</details>
+
+</blockquote></details>
+<details>
+<summary>launcher/launcher.rc (1)</summary><blockquote>
+
+`11-12`: **Drive the EXE version metadata from the build, not a literal.**
+
+The installer version already comes from `RELEASE_VERSION`, but the launcher resource is pinned to `0.6.0.0`. The next tag will ship an EXE whose file properties disagree with the installer and release asset name unless this is updated by hand. 
+
+
+Also applies to: 25-30
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@launcher/launcher.rc` around lines 11 - 12, The FILEVERSION and
+PRODUCTVERSION entries in launcher.rc are hard-coded to 0,6,0,0; change
+launcher.rc to derive these values from the build/release variables (e.g.,
+RELEASE_VERSION or build-time VERSION macros) instead of literals so the EXE
+metadata matches the installer and release tag—replace the numeric literals used
+in FILEVERSION and PRODUCTVERSION (and the corresponding version strings around
+lines 25-30) with preprocessor-expanded tokens or injected variables (e.g.,
+VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, VERSION_BUILD or a single
+RELEASE_VERSION split into components) so the resource gets populated at build
+time.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In @.github/workflows/build-release.yml:
+- Around line 48-65: The workflow currently downloads the Python embeddable ZIP
+and a floating get-pip.py without verification; update the three steps
+("Download Python embeddable", "Enable site-packages in embedded Python",
+"Bootstrap pip into embedded Python") to validate payloads before use by pinning
+expected hashes and failing on mismatch: add variables for the expected SHA256
+for the embeddable ZIP and for get-pip.py, after Invoke-WebRequest compute
+Get-FileHash on the downloaded files and compare to the pinned values (fail/exit
+when they differ), or alternatively vendor the get-pip.py into the repo and
+reference it instead of fetching, and only then run Expand-Archive and
+runtime\python.exe get-pip.py; ensure the workflow treats any checksum mismatch
+as a hard error so release artifacts never use unverified remote payloads.
+- Around line 71-80: The staging step omits README.md so show_readme() (which
+expects README.md next to main.py) will fail in the packaged app; update the
+$src_items array in the "Stage app source tree" PowerShell step to include
+'README.md' alongside 'main.py','core','modules','shared', etc., so README.md is
+copied into the app directory during the build.
+
+In `@launcher/launcher.c`:
+- Around line 51-66: CreateProcessW is currently called but its BOOL return
+value isn't checked, so failures are swallowed and CloseHandle is
+unconditionally called on possibly invalid handles; update the code around
+CreateProcessW to capture its return (e.g., BOOL created = CreateProcessW(...)),
+if created == FALSE call GetLastError(), format or include that error code/text
+and show a user-visible error (e.g., MessageBoxW with a descriptive message
+referencing python/cmdline/exe_path) and return non-zero (e.g., return 1); only
+call CloseHandle on pi.hProcess and pi.hThread when they are valid
+(non-NULL/INVALID_HANDLE_VALUE) to avoid closing invalid handles. Ensure you
+reference CreateProcessW, pi, si, python, cmdline, and exe_path when
+implementing the checks and message.
+
+In `@main.py`:
+- Around line 45-69: The packaged Flatpak build writes plugins under a read-only
+/app so pip installs from _install_deps will fail; update either
+_get_plugins_dir or _install_deps to avoid attempting installs into /app: detect
+Flatpak (e.g., via os.getenv('FLATPAK_ID') or by checking if plugin_dir is under
+'/app' or not writable) and then (a) return a per-user writable path (use
+XDG_DATA_HOME or "~/.var/app/<FLATPAK_ID>/plugins") from _get_plugins_dir, or
+(b) in _install_deps short-circuit and return a clear non-empty warning string
+when plugin_dir is not writable/read-only so pip is not invoked. Reference the
+_get_plugins_dir and _install_deps functions when making the change.
+
+---
+
+Nitpick comments:
+In @.gitignore:
+- Line 54: The .gitignore entry "AddonPackages/" should be anchored to the
+repository root to avoid ignoring same-named nested directories; replace
+"AddonPackages/" with "/AddonPackages/" (i.e., update the AddonPackages/ pattern
+to start with a leading slash) so it only ignores the root-level dev symlink.
+
+In `@build_scripts/JobDocs.spec`:
+- Around line 156-166: Update the comment block that currently references the
+removed "deps/" folder and "sys.path" manipulation to reflect the new plugin
+install model: replace the description about plugins managing deps in a deps/
+subfolder and the module loader prepending sys.path with a note that main.py now
+shells out to "python -m pip install -r <requirements.txt>" into the active
+environment (i.e., installs into the running Python environment), and remove or
+reword any instructions that suggest using pip --target deps/ or modifying
+sys.path so future debuggers are directed to check main.py's shell-out install
+behavior instead.
+
+In `@launcher/launcher.rc`:
+- Around line 11-12: The FILEVERSION and PRODUCTVERSION entries in launcher.rc
+are hard-coded to 0,6,0,0; change launcher.rc to derive these values from the
+build/release variables (e.g., RELEASE_VERSION or build-time VERSION macros)
+instead of literals so the EXE metadata matches the installer and release
+tag—replace the numeric literals used in FILEVERSION and PRODUCTVERSION (and the
+corresponding version strings around lines 25-30) with preprocessor-expanded
+tokens or injected variables (e.g., VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH,
+VERSION_BUILD or a single RELEASE_VERSION split into components) so the resource
+gets populated at build time.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `0a409c05-78dd-4c0c-b826-fd7a77d7ea94`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 09700c52e8b62d3c6ea0ded20e7f767f2741e370 and 0497fc59fac356810658f46cc56a54a059f686f6.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `.claude/S&P.md` is excluded by `!.claude/S&P.md`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (7)</summary>
+
+* `.github/workflows/build-release.yml`
+* `.gitignore`
+* `build_scripts/JobDocs.iss`
+* `build_scripts/JobDocs.spec`
+* `launcher/launcher.c`
+* `launcher/launcher.rc`
+* `main.py`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+## 2026-04-15 — multiple files (PR #20 — embedded Python build findings)
+
+**Review:** CodeRabbit flagged 4 actionable issues and 3 nitpicks across the embedded-Python build PR.
+**Result:** All 7 fixed in this session.
+
+### Findings
+
+1. **No hash verification on downloaded Python embeddable**
+   - `build-release.yml` downloaded `python-$PY_VER-embed-amd64.zip` without verifying integrity.
+   - Fix applied: pinned `PY_EMBED_SHA256` env var (from python.org sigstore); added `Get-FileHash` check before `Expand-Archive`; fails fast on mismatch.
+
+2. **get-pip.py fetched from network without verification**
+   - Downloading `get-pip.py` from `bootstrap.pypa.io` at build time is an unverified external fetch.
+   - Fix applied: replaced with `python -m pip install --target runtime\Lib\site-packages pip` using the system Python already installed on `windows-latest`, eliminating the external download entirely.
+
+3. **README.md missing from staged app source tree**
+   - `show_readme()` resolves `README.md` relative to `__file__`; it was absent from the `$src_items` copy list so Help → User Guide would fail in packaged builds.
+   - Fix applied: added `'README.md'` to `$src_items` in the Stage app source tree step.
+
+4. **`CreateProcessW` return value not checked in launcher.c**
+   - Failures were silently swallowed; `CloseHandle` was called unconditionally on possibly-invalid handles.
+   - Fix applied: captured BOOL return; on failure calls `GetLastError()`, shows `MessageBoxW` with Python path, script path, and error code, then returns 1. `CloseHandle` is now only reached on success.
+
+5. **Flatpak `/app` is read-only at runtime — `_install_deps` would always fail**
+   - `_install_deps` calls `pip install` using `sys.executable`, which on Flatpak points to a location under read-only `/app`.
+   - Fix applied: added `os.getenv('FLATPAK_ID')` check; returns a clear skip message with manual install command instead of invoking pip.
+
+6. **`AddonPackages/` in .gitignore not anchored to repo root**
+   - Unanchored pattern would silently ignore same-named nested directories.
+   - Fix applied: changed to `/AddonPackages/`.
+
+7. **`launcher.rc` version hardcoded to `0.6.0.0`**
+   - EXE file properties would disagree with the installer/release tag after a version bump.
+   - Fix applied: added preprocessor macros (`VERSION_MAJOR/MINOR/PATCH/BUILD`) with fallback defaults; updated `FILEVERSION`, `PRODUCTVERSION`, and string values to use `VER_STRING` macro; `build-release.yml` Compile Launcher step now parses `github.ref_name` and passes `-D VERSION_*` to windres.
+
+8. **Stale comment in `JobDocs.spec` described removed `deps/`+`sys.path` plugin model**
+   - Comment referenced the old `pip install --target deps/` flow that no longer exists.
+   - Fix applied: reworded to describe current model (pip install into running Python environment).
+
+---
+
+## 2026-04-15 — `PR #20: build: replace PyInstaller with embedded Python for Windows` — review run 1
+
+
+
+<details>
+<summary>♻️ Duplicate comments (2)</summary><blockquote>
+
+<details>
+<summary>main.py (1)</summary><blockquote>
+
+`399-414`: _⚠️ Potential issue_ | _🟠 Major_
+
+**Flatpak still resolves plugins into the bundled app tree.**
+
+This only distinguishes the embedded-Windows layout from source layout. The Linux release is still a Flatpak, so `_get_plugins_dir()` will resolve next to the frozen bundle, and `_PluginInstallWorker` then tries to create/copy plugin files there before `_install_deps()` runs. In Flatpak, the app bundle under `/app` is read-only, while per-user data belongs under `$XDG_DATA_HOME` / `~/.var/app/$FLATPAK_ID/data`, so plugin install remains broken on Linux. Return a per-user writable path when `FLATPAK_ID` is set, or disable plugin installation in that mode. ([docs.flatpak.org](https://docs.flatpak.org/zh-cn/latest/sandbox-permissions.html?utm_source=openai))
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@main.py` around lines 399 - 414, The _get_plugins_dir function currently only
+switches between embedded and source layouts and can resolve to the read-only
+Flatpak bundle; update _get_plugins_dir to detect Flatpak by checking the
+FLATPAK_ID environment variable and return a writable per-user plugins path
+(prefer XDG_DATA_HOME/plugins or fallback to
+~/.var/app/{FLATPAK_ID}/data/plugins) when FLATPAK_ID is set, or alternatively
+return None/raise so _PluginInstallWorker/_install_deps know to skip plugin
+installation in Flatpak mode; ensure references to _PluginInstallWorker and
+_install_deps handle the new None/skip behavior if you choose that route.
+```
+
+</details>
+
+</blockquote></details>
+<details>
+<summary>.github/workflows/build-release.yml (1)</summary><blockquote>
+
+`35-76`: _⚠️ Potential issue_ | _🟠 Major_
+
+**Pin the pip bootstrap input.**
+
+`python -m pip install --target ... pip` still pulls whatever stable `pip` release PyPI serves on build day, and the `python` binary itself comes from the mutable `windows-latest` image. That makes the Windows installer drift over time even when the repo hasn’t changed. Please bootstrap from a pinned wheel or at least a pinned `pip==...` plus hash, and use a specific runner/interpreter for that download step. GitHub notes that `-latest` images migrate over time and recommends `actions/setup-python` for consistent behavior; pip installs stable releases by default when no version is specified. ([github.com](https://github.com/actions/runner-images?utm_source=openai))
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In @.github/workflows/build-release.yml around lines 35 - 76, The bootstrap step
+in the build-windows job currently runs "python -m pip install --target
+runtime\Lib\site-packages --no-deps pip" without a pinned pip version or hash
+and relies on the mutable windows-latest image; change the "Bootstrap pip into
+embedded Python" step so it installs a specific pip release (e.g. pip==23.2.1)
+with a pinned hash or installs from a vendored wheel file instead of an unpinned
+PyPI install, and ensure the runner/interpreter is fixed by adding or using
+actions/setup-python to pin the Python runtime before running
+runtime\python.exe; update the commands referenced (the install invocation and
+the runtime\python.exe -m pip --version check) to reflect the pinned artifact
+and verify its checksum.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Duplicate comments:
+In @.github/workflows/build-release.yml:
+- Around line 35-76: The bootstrap step in the build-windows job currently runs
+"python -m pip install --target runtime\Lib\site-packages --no-deps pip" without
+a pinned pip version or hash and relies on the mutable windows-latest image;
+change the "Bootstrap pip into embedded Python" step so it installs a specific
+pip release (e.g. pip==23.2.1) with a pinned hash or installs from a vendored
+wheel file instead of an unpinned PyPI install, and ensure the
+runner/interpreter is fixed by adding or using actions/setup-python to pin the
+Python runtime before running runtime\python.exe; update the commands referenced
+(the install invocation and the runtime\python.exe -m pip --version check) to
+reflect the pinned artifact and verify its checksum.
+
+In `@main.py`:
+- Around line 399-414: The _get_plugins_dir function currently only switches
+between embedded and source layouts and can resolve to the read-only Flatpak
+bundle; update _get_plugins_dir to detect Flatpak by checking the FLATPAK_ID
+environment variable and return a writable per-user plugins path (prefer
+XDG_DATA_HOME/plugins or fallback to ~/.var/app/{FLATPAK_ID}/data/plugins) when
+FLATPAK_ID is set, or alternatively return None/raise so
+_PluginInstallWorker/_install_deps know to skip plugin installation in Flatpak
+mode; ensure references to _PluginInstallWorker and _install_deps handle the new
+None/skip behavior if you choose that route.
+```
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `c3f34243-fac6-441b-9efe-a9835341f695`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 0497fc59fac356810658f46cc56a54a059f686f6 and 1c57a11293dbb3c97308bfde1dbe07726654b5fb.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `.claude/S&P.md` is excluded by `!.claude/S&P.md`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (6)</summary>
+
+* `.github/workflows/build-release.yml`
+* `.gitignore`
+* `build_scripts/JobDocs.spec`
+* `launcher/launcher.c`
+* `launcher/launcher.rc`
+* `main.py`
+
+</details>
+
+<details>
+<summary>✅ Files skipped from review due to trivial changes (2)</summary>
+
+* .gitignore
+* launcher/launcher.rc
+
+</details>
+
+<details>
+<summary>🚧 Files skipped from review as they are similar to previous changes (1)</summary>
+
+* build_scripts/JobDocs.spec
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-15 — `main.py` + `build-release.yml` (PR #20 duplicate findings — Flatpak plugins dir & pip pinning)
+
+**Review:** CodeRabbit flagged 2 issues as duplicate comments (carried forward from first review pass, not fully resolved by `1c57a11`).
+**Result:** Both fixed.
+
+### Findings
+
+1. **`_get_plugins_dir()` resolves into read-only Flatpak bundle**
+   - On Flatpak, `__file__` is under `/app` which is read-only at runtime.
+   - `_get_plugins_dir()` would return `/app/plugins`, causing plugin install to fail silently.
+   - Fix applied: check `FLATPAK_ID` env var; if set, return `$XDG_DATA_HOME/plugins` (or `~/.var/app/{FLATPAK_ID}/data/plugins` as fallback).
+
+2. **pip bootstrap in `build-release.yml` uses unpinned version with mutable system Python**
+   - `python -m pip install ... pip` pulls whatever pip PyPI serves on build day.
+   - System `python` comes from the mutable `windows-latest` image.
+   - Fix applied: added `actions/setup-python@v5` step (pinned to `python-version: '3.12'`); pinned pip to `pip==24.3.1` in the install command.
+
+---
+
+## 2026-04-15 — `PR #20: build: replace PyInstaller with embedded Python for Windows` — review run 2
+
+**Actionable comments posted: 2**
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@main.py`:
+- Around line 580-585: The success message in _on_plugin_install_success
+incorrectly promises the plugin will load even when dep_warning is set; update
+the messaging so that when dep_warning is truthy (requirements skipped/failed)
+the dialog text says the plugin files were copied but the plugin may not load
+until dependencies are resolved and include the dep_warning details (use
+QMessageBox.warning with msg + dep_warning), while when dep_warning is falsy
+keep the original "Restart JobDocs to load it." wording (use
+QMessageBox.information); reference function _on_plugin_install_success and
+variables module_name, dest, dep_warning to locate and change the conditional
+message text accordingly.
+- Around line 57-76: The two user-facing instructions advising "pip install -r
+\"{req_file}\"" should be changed to recommend invoking pip with the current
+interpreter to avoid PATH/venv confusion; update the Flatpak message and the
+failure message to instruct users to run the installer via sys.executable (e.g.
+use the interpreter-qualified form: <sys.executable> -m pip install -r
+"{req_file}") so the guidance is accurate; locate the strings near the Flatpak
+branch (uses os.getenv('FLATPAK_ID') and req_file) and the subprocess
+error-handling block (uses subprocess.run, result.returncode, and err) and
+replace the bare "pip install -r ..." instructions with the
+interpreter-qualified form using sys.executable.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `531f725e-fb26-4374-a1a5-b6a39b9ab6b7`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 1c57a11293dbb3c97308bfde1dbe07726654b5fb and 3168a7d190279d965f118367178a6ea8b9b17017.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `.claude/S&P.md` is excluded by `!.claude/S&P.md`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (2)</summary>
+
+* `.github/workflows/build-release.yml`
+* `main.py`
+
+</details>
+
+<details>
+<summary>🚧 Files skipped from review as they are similar to previous changes (1)</summary>
+
+* .github/workflows/build-release.yml
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-15 — `main.py` (PR #20 review run 2 — pip instructions & dep-warning message)
+
+**Review:** CodeRabbit flagged 2 actionable issues in `_install_deps` and `_on_plugin_install_success`.
+**Result:** Both fixed.
+
+### Findings
+
+1. **Manual pip recovery commands use bare `pip` instead of `sys.executable`**
+   - Both the Flatpak skip message and the subprocess failure message advised `pip install -r ...`, which resolves to whatever `pip` is first on PATH and may target the wrong interpreter/venv.
+   - Fix applied: changed to `{sys.executable} -m pip install -r "{req_file}"` in both strings.
+
+2. **`_on_plugin_install_success` promises "Restart to load it" even when deps failed**
+   - When `dep_warning` is set, the base message still said "Restart JobDocs to load it." — misleading because the plugin may not actually load without its dependencies.
+   - Fix applied: when `dep_warning` is truthy, base message now reads "files copied… may not load until dependencies are resolved" (QMessageBox.warning); only the success path keeps "Restart JobDocs to load it." (QMessageBox.information).
+
+---
+
+## 2026-04-15 — `PR #20: build: replace PyInstaller with embedded Python for Windows` — review run 3
+
+**Actionable comments posted: 2**
+
+<details>
+<summary>♻️ Duplicate comments (1)</summary><blockquote>
+
+<details>
+<summary>main.py (1)</summary><blockquote>
+
+`57-63`: _⚠️ Potential issue_ | _🟠 Major_
+
+**Flatpak still surfaces a recovery command that targets the read-only runtime.**
+
+This branch correctly skips auto-install on Flatpak, but the returned `sys.executable -m pip ...` advice still points users at the same sandboxed interpreter you just deemed unwritable. For dependency-backed plugins, that leaves no working recovery path. Either remove the manual command here and state that manual dependency install is unsupported in Flatpak builds, or switch Flatpak to a supported user-writable install target.
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@main.py` around lines 57 - 63, The Flatpak branch currently returns a
+recovery command using sys.executable which points to the read-only runtime;
+update the returned message in the FLATPAK_ID branch to avoid suggesting the
+unwritable runtime. Replace the manual command that uses sys.executable -m pip
+install -r "{req_file}" with either (a) a clear statement that manual dependency
+installation is unsupported inside Flatpak builds (remove the pip command), or
+(b) a supported user-writable alternative such as recommending the host/system
+Python or a user-install target (e.g., "python -m pip install --user -r
+\"{req_file}\"" or instructing to install on the host), and ensure the message
+references req_file but not the sandboxed sys.executable.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@main.py`:
+- Around line 62-63: The printed "Install manually" recovery command uses
+sys.executable without quotes, which breaks on paths containing spaces; update
+both occurrences where the string is constructed (the f-string that includes
+sys.executable and req_file) to wrap sys.executable in quotes (e.g.,
+f'"{sys.executable}" -m pip install -r "{req_file}"') so the copy-paste command
+is safe on Windows; ensure you change both places referenced in the diff (the
+two f-strings that include sys.executable and req_file).
+- Around line 47-50: The docstring in main.py containing "Install plugin
+requirements into the embedded Python's site-packages." includes the sequence
+runtime\python.exe which produces an invalid escape; update that docstring (the
+triple-quoted string starting with "Install plugin requirements...") to either
+escape the backslash as runtime\\python.exe or convert the docstring to a raw
+string (e.g., r"""...""") so the backslash is treated literally.
+
+---
+
+Duplicate comments:
+In `@main.py`:
+- Around line 57-63: The Flatpak branch currently returns a recovery command
+using sys.executable which points to the read-only runtime; update the returned
+message in the FLATPAK_ID branch to avoid suggesting the unwritable runtime.
+Replace the manual command that uses sys.executable -m pip install -r
+"{req_file}" with either (a) a clear statement that manual dependency
+installation is unsupported inside Flatpak builds (remove the pip command), or
+(b) a supported user-writable alternative such as recommending the host/system
+Python or a user-install target (e.g., "python -m pip install --user -r
+\"{req_file}\"" or instructing to install on the host), and ensure the message
+references req_file but not the sandboxed sys.executable.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `b45528b0-9c0e-423e-aec9-9aed4edd0b98`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 3168a7d190279d965f118367178a6ea8b9b17017 and 7e62ebbabe8bca488cef703a55a2b26858329033.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `.claude/S&P.md` is excluded by `!.claude/S&P.md`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `main.py`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-15 — `main.py` (PR #20 review run 3 — Flatpak recovery command & quoting)
+
+**Review:** CodeRabbit flagged 2 actionable issues (1 duplicate + 1 new inline) and 1 nitpick in `_install_deps`.
+**Result:** All 3 fixed.
+
+### Findings
+
+1. **Flatpak recovery command points at read-only `sys.executable`**
+   - After using `sys.executable` in the Flatpak skip message, CodeRabbit noted that `sys.executable` IS the sandboxed read-only runtime — so the manual command was also unworkable.
+   - Fix applied: removed the pip command entirely; message now states "dependency installation is not supported inside a Flatpak build."
+
+2. **`sys.executable` not quoted in failure recovery command**
+   - Paths containing spaces (e.g. `C:\Program Files\...`) would break the copy-paste command.
+   - Fix applied: wrapped as `"{sys.executable}"` in the failure message f-string.
+
+3. **Docstring contains invalid escape `runtime\python.exe`**
+   - Bare backslash in a regular (non-raw) docstring is an invalid escape sequence.
+   - Fix applied: escaped as `runtime\python.exe`.
+
+---
+
+## 2026-04-15 — `PR #20: build: replace PyInstaller with embedded Python for Windows` — review run 4
+
+
+
+<details>
+<summary>🧹 Nitpick comments (1)</summary><blockquote>
+
+<details>
+<summary>main.py (1)</summary><blockquote>
+
+`60-63`: **Remove extraneous `f` prefixes from strings without placeholders.**
+
+Lines 61 and 62 are f-strings but contain no interpolation placeholders. This is flagged by Ruff (F541).
+
+
+<details>
+<summary>Suggested fix</summary>
+
+```diff
+         if os.getenv('FLATPAK_ID'):
+             return (
+-                f"\n\nDependency installation is not supported inside a Flatpak build.\n"
+-                f"Install the plugin's dependencies on the host system before use."
++                "\n\nDependency installation is not supported inside a Flatpak build.\n"
++                "Install the plugin's dependencies on the host system before use."
+             )
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@main.py` around lines 60 - 63, The returned multiline string uses unnecessary
+f-strings (no interpolation) which triggers Ruff F541; remove the leading f
+prefixes from the two string literals in the return expression (the strings
+beginning with "Dependency installation is not supported inside a Flatpak
+build." and "Install the plugin's dependencies on the host system before use.")
+so they are plain string literals instead of f-strings.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Nitpick comments:
+In `@main.py`:
+- Around line 60-63: The returned multiline string uses unnecessary f-strings
+(no interpolation) which triggers Ruff F541; remove the leading f prefixes from
+the two string literals in the return expression (the strings beginning with
+"Dependency installation is not supported inside a Flatpak build." and "Install
+the plugin's dependencies on the host system before use.") so they are plain
+string literals instead of f-strings.
+```
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `e1a7e1e5-a2d9-4ecc-a984-81119a45eb2e`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 7e62ebbabe8bca488cef703a55a2b26858329033 and 1c2ff7c951b829c8963cab8faf1f6fa4e0f2bedb.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `.claude/S&P.md` is excluded by `!.claude/S&P.md`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (1)</summary>
+
+* `main.py`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-15 — `main.py` (PR #20 review run 4 — unnecessary f-strings)
+
+**Review:** 1 nitpick (Ruff F541).
+**Result:** Fixed.
+
+### Findings
+
+1. **F-strings with no placeholders (Ruff F541)**
+   - Flatpak return block used `f"..."` on two lines that contain no `{}` interpolation.
+   - Fix applied: removed `f` prefixes; plain string literals.

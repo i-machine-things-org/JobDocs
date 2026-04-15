@@ -3,7 +3,8 @@ itar/
 not itar/
 sample_files/
 test_jobs.csv
-test_dist/
+test_dist*/
+build[0-9]*/
 
 # Claude Code and development notes
 .claude/settings.local.json
@@ -47,6 +48,10 @@ Thumbs.db
 *.sqlite
 test_output/
 old/
+
+# Shared addon packages dir (managed at runtime via pip, not checked in)
+# Lives in %LOCALAPPDATA%\JobDocs\AddonPackages\ — dev symlink if present
+/AddonPackages/
 
 # Flatpak — staged binary and icon (copied from build_dist/ by CI, not source files)
 linux/flatpak/JobDocs
