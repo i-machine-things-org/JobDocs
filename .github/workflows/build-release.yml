@@ -11,6 +11,12 @@ on:
         required: false
         default: 'v0.0.0-test'
 
+# Opt into Node.js 24 for all actions until upstream releases Node.js 24-native
+# versions of checkout/setup-python/upload-artifact/download-artifact/cache.
+# Remove this once all actions are updated (deadline: 2026-06-02).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   verify-stable-ancestry:
     runs-on: ubuntu-latest
