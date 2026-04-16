@@ -249,6 +249,13 @@
              </widget>
             </item>
             <item>
+             <widget class="QPushButton" name="print_btn">
+              <property name="text">
+               <string>Print Selected</string>
+              </property>
+             </widget>
+            </item>
+            <item>
              <spacer name="horizontalSpacer">
               <property name="orientation">
                <enum>Qt::Orientation::Horizontal</enum>
@@ -642,6 +649,13 @@
                  <widget class="QPushButton" name="clear_add_btn">
                   <property name="text">
                    <string>Clear All</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="print_add_btn">
+                  <property name="text">
+                   <string>Print Selected</string>
                   </property>
                  </widget>
                 </item>

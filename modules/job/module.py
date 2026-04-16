@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 from typing import List, Type
 from PyQt6.QtWidgets import (
-    QWidget, QMessageBox, QTreeWidgetItem, QButtonGroup, QCheckBox
+    QWidget, QMessageBox, QTreeWidgetItem, QButtonGroup, QCheckBox, QAbstractItemView
 )
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
@@ -21,7 +21,7 @@ from PyQt6 import uic
 from datetime import datetime
 
 from core.base_module import BaseModule
-from shared.widgets import DropZone, JobSearchDialog, DrawingSearchDialog, FilePreviewWidget, attach_file_preview
+from shared.widgets import DropZone, JobSearchDialog, DrawingSearchDialog, FilePreviewWidget, attach_file_preview, print_files_with_dialog
 from shared.utils import (
     is_blueprint_file, parse_job_numbers, create_file_link,
     sanitize_filename, open_folder, get_next_number
@@ -156,6 +156,7 @@ class JobModule(BaseModule):
         self.drawings_edit = widget.drawings_edit
         self.itar_check = widget.itar_check
         self.job_files_list = widget.job_files_list
+        self.job_files_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
         # Replace DropZone placeholder for Create tab
         placeholder = widget.job_drop_zone
@@ -174,6 +175,7 @@ class JobModule(BaseModule):
         # Connect Create New tab signals
         self.job_drop_zone.files_dropped.connect(lambda files: self.handle_job_files(files))
         widget.remove_btn.clicked.connect(self.remove_job_file)
+        widget.print_btn.clicked.connect(self.print_job_files)
         widget.copy_from_btn.clicked.connect(self.show_copy_from_dialog)
         widget.link_drawings_btn.clicked.connect(self.show_link_drawings_dialog)
         widget.create_btn.clicked.connect(self.create_job)
@@ -189,6 +191,7 @@ class JobModule(BaseModule):
         self.job_tree = widget.job_tree
         self.selected_job_label = widget.selected_job_label
         self.add_files_list = widget.add_files_list
+        self.add_files_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.add_status_label = widget.add_status_label
 
         # Store radio button references
@@ -239,6 +242,7 @@ class JobModule(BaseModule):
         self.add_drop_zone.files_dropped.connect(lambda files: self.handle_add_files(files))
         widget.remove_add_btn.clicked.connect(self.remove_add_file)
         widget.clear_add_btn.clicked.connect(self.clear_add_files)
+        widget.print_add_btn.clicked.connect(self.print_add_files)
         widget.add_files_btn.clicked.connect(self.add_files_to_job)
 
         return widget
@@ -305,6 +309,13 @@ class JobModule(BaseModule):
         if row >= 0:
             self.job_files_list.takeItem(row)
             del self.job_files[row]
+
+    def print_job_files(self):
+        """Print all selected files in the Create New tab file list."""
+        rows = sorted({i.row() for i in self.job_files_list.selectedIndexes()})
+        paths = [self.job_files[r] for r in rows if 0 <= r < len(self.job_files)]
+        if paths:
+            print_files_with_dialog(paths, self._widget, self.app_context)
 
     # ==================== Create New Tab: Job Creation ====================
 
@@ -757,6 +768,13 @@ class JobModule(BaseModule):
         if row >= 0:
             self.add_files_list.takeItem(row)
             del self.add_files[row]
+
+    def print_add_files(self):
+        """Print all selected files in the Add to Existing tab file list."""
+        rows = sorted({i.row() for i in self.add_files_list.selectedIndexes()})
+        paths = [self.add_files[r] for r in rows if 0 <= r < len(self.add_files)]
+        if paths:
+            print_files_with_dialog(paths, self._widget, self.app_context)
 
     def clear_add_files(self):
         """Clear all files from add files list"""

@@ -5104,3 +5104,574 @@ Reviewing files that changed from the base of the PR and between 9b944bf956ca932
 </details>
 
 <!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+---
+
+## 2026-04-16 — `PR #24: feat: batch print drawings from job/quote/search` — review run 1
+
+
+
+<details>
+<summary>🧹 Nitpick comments (3)</summary><blockquote>
+
+<details>
+<summary>shared/utils.py (2)</summary><blockquote>
+
+`189-189`: **Redundant import.**
+
+`subprocess` is now imported at module level (line 11), making this local import unnecessary.
+
+
+<details>
+<summary>🧹 Remove redundant import</summary>
+
+```diff
+ def open_folder(path: str) -> Tuple[bool, Optional[str]]:
+     """
+     Open a folder in the OS file browser.
+ 
+     Args:
+         path: Path to the folder to open
+ 
+     Returns:
+         Tuple of (success, error_message)
+     """
+-    import subprocess
+     try:
+         if platform.system() == "Windows":
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@shared/utils.py` at line 189, There is a redundant local "import subprocess"
+that duplicates the module-level import; remove the local import statement so
+the code uses the existing top-level subprocess import (search for the local
+"import subprocess" occurrence in shared/utils.py and delete it, leaving any
+functions or code that reference subprocess unchanged).
+```
+
+</details>
+
+---
+
+`206-214`: **Silent failures when printing files.**
+
+The function silently skips non-files and doesn't report errors if `os.startfile()` or `lp` fails. Users won't know if printing failed (e.g., `lp` not installed on Linux, permission denied, or unsupported file type).
+
+Consider returning status information or raising exceptions for critical failures.
+
+
+<details>
+<summary>♻️ Suggested improvement with basic error handling</summary>
+
+```diff
+-def print_files(paths: List[str]) -> None:
+-    """Send each file to the OS print handler (opens the system print dialog)."""
+-    for path in paths:
+-        if not os.path.isfile(path):
+-            continue
+-        if platform.system() == 'Windows':
+-            os.startfile(path, 'print')  # type: ignore[attr-defined]
+-        else:
+-            subprocess.Popen(['lp', path])
++def print_files(paths: List[str]) -> Tuple[int, List[str]]:
++    """Send each file to the OS print handler (opens the system print dialog).
++    
++    Returns:
++        Tuple of (success_count, list of error messages)
++    """
++    success = 0
++    errors = []
++    for path in paths:
++        if not os.path.isfile(path):
++            errors.append(f"Not a file: {path}")
++            continue
++        try:
++            if platform.system() == 'Windows':
++                os.startfile(path, 'print')  # type: ignore[attr-defined]
++            else:
++                subprocess.Popen(['lp', path])
++            success += 1
++        except FileNotFoundError:
++            errors.append(f"Print command not found (is 'lp' installed?)")
++        except OSError as e:
++            errors.append(f"Failed to print {path}: {e}")
++    return success, errors
+```
+</details>
+
+Note: The static analysis warnings (S603, S607) about subprocess security are low-risk here since paths originate from user-selected files that pass `os.path.isfile()` validation, but consider using `shutil.which('lp')` to verify availability before attempting to print on non-Windows systems.
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@shared/utils.py` around lines 206 - 214, The print_files function currently
+swallows non-files and printing errors; update print_files to validate
+availability of the print backend and report failures by returning per-path
+status or raising on critical errors: inside print_files, for each path
+(function print_files), if not os.path.isfile(path) record a failure status (or
+raise if that should be fatal); on Windows wrap os.startfile(path, 'print') in a
+try/except and capture/return the exception information; on non-Windows first
+check shutil.which('lp') and if missing return an informative failure for every
+path, otherwise call subprocess.Popen(['lp', path]) but capture exceptions (and
+subprocess errors) and return or raise the error; ensure the function signature
+and callers are adjusted to accept a mapping/list of results (e.g., path ->
+success/error) or document which exceptions are raised.
+```
+
+</details>
+
+</blockquote></details>
+<details>
+<summary>modules/search/module.py (1)</summary><blockquote>
+
+`759-764`: **Minor UX consideration: Context menu visibility depends on clicked item.**
+
+The "Print Selected" action only appears when right-clicking on a file item (line 759: `if is_file:`). If a user has multiple files selected but right-clicks on a folder row, the print option won't appear.
+
+This is a minor edge case and the current behavior is acceptable, but you could consider showing "Print Selected" whenever there's at least one file in the selection.
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@modules/search/module.py` around lines 759 - 764, The context menu currently
+adds "Print Selected" only when the clicked row is a file (controlled by
+is_file); change this to show the action whenever the current selection contains
+at least one file. Inside the context-menu construction (the block that checks
+is_file and adds print_action), replace the is_file-only check with a
+selection-based check that inspects the view/model selection (use the same
+selection APIs you already use elsewhere in this class) to determine if any
+selected item is a file, and if so call menu.addAction("Print Selected") and
+connect it to _print_selected_folder_files; keep the existing "Blueprints Path"
+logic and lambda to _blueprints_path_action(path) unchanged.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Nitpick comments:
+In `@modules/search/module.py`:
+- Around line 759-764: The context menu currently adds "Print Selected" only
+when the clicked row is a file (controlled by is_file); change this to show the
+action whenever the current selection contains at least one file. Inside the
+context-menu construction (the block that checks is_file and adds print_action),
+replace the is_file-only check with a selection-based check that inspects the
+view/model selection (use the same selection APIs you already use elsewhere in
+this class) to determine if any selected item is a file, and if so call
+menu.addAction("Print Selected") and connect it to _print_selected_folder_files;
+keep the existing "Blueprints Path" logic and lambda to
+_blueprints_path_action(path) unchanged.
+
+In `@shared/utils.py`:
+- Line 189: There is a redundant local "import subprocess" that duplicates the
+module-level import; remove the local import statement so the code uses the
+existing top-level subprocess import (search for the local "import subprocess"
+occurrence in shared/utils.py and delete it, leaving any functions or code that
+reference subprocess unchanged).
+- Around line 206-214: The print_files function currently swallows non-files and
+printing errors; update print_files to validate availability of the print
+backend and report failures by returning per-path status or raising on critical
+errors: inside print_files, for each path (function print_files), if not
+os.path.isfile(path) record a failure status (or raise if that should be fatal);
+on Windows wrap os.startfile(path, 'print') in a try/except and capture/return
+the exception information; on non-Windows first check shutil.which('lp') and if
+missing return an informative failure for every path, otherwise call
+subprocess.Popen(['lp', path]) but capture exceptions (and subprocess errors)
+and return or raise the error; ensure the function signature and callers are
+adjusted to accept a mapping/list of results (e.g., path -> success/error) or
+document which exceptions are raised.
+```
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `cb1eaf8e-bef8-4c5d-ab08-127c7fc2b616`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 31d95fdc9858f9d0986f681c14cb7a3766eea4d3 and 7221b1e56b43f6e1f7f36c24e12d20cfa31c7d47.
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (6)</summary>
+
+* `modules/job/module.py`
+* `modules/job/ui/job_tab.ui`
+* `modules/quote/module.py`
+* `modules/quote/ui/quote_tab.ui`
+* `modules/search/module.py`
+* `shared/utils.py`
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->
+
+## 2026-04-16 — `shared/utils.py`, `shared/widgets.py` (PR #24 — batch print)
+
+**Review:** CodeRabbit flagged redundant local `import subprocess` inside `open_folder()` and S603/S607 subprocess security warnings for bare `['lp', path]` call without verifying `lp` availability.
+**Result:** Removed redundant local import; guarded `lp` calls with `shutil.which('lp')` in both `utils.py` and `widgets.py`.
+
+### Findings
+
+1. **Redundant local import**
+   - `import subprocess` inside `open_folder()` duplicated the module-level import added when `print_files` was introduced
+   - Removed the local import
+
+2. **S607 — subprocess called without full path verification**
+   - `subprocess.Popen(['lp', path])` could fail silently on systems without `lp`
+   - Fixed: `lp = shutil.which('lp'); if lp: Popen([lp, path])`
+
+---
+
+## 2026-04-16 — `PR #24: feat: batch print drawings from job/quote/search` — review run 2
+
+**Actionable comments posted: 2**
+
+<details>
+<summary>🧹 Nitpick comments (4)</summary><blockquote>
+
+<details>
+<summary>shared/widgets.py (3)</summary><blockquote>
+
+`1380-1393`: **Type hints reference undefined names at module scope.**
+
+The string-based type hints (`'QPainter'`, `'QImage'`, `'QRectF'`) won't cause runtime errors, but static type checkers (mypy, pyright) won't resolve them. Consider using a `TYPE_CHECKING` import block:
+
+<details>
+<summary>🔧 Proposed fix</summary>
+
+Add near the top of the file with other imports:
+```python
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PyQt6.QtGui import QPainter, QImage
+    from PyQt6.QtCore import QRectF
+```
+
+Then the function signature can use the actual types without strings:
+```diff
+-def _draw_image_fitted(painter: 'QPainter', img: 'QImage', page_rect: 'QRectF') -> None:  # type: ignore[name-defined]
++def _draw_image_fitted(painter: QPainter, img: QImage, page_rect: QRectF) -> None:
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@shared/widgets.py` around lines 1380 - 1393, The function _draw_image_fitted
+uses string-based type hints ('QPainter', 'QImage', 'QRectF') which static type
+checkers won't resolve; update the module to import actual types only for type
+checking by adding "from typing import TYPE_CHECKING" and inside an "if
+TYPE_CHECKING:" block import QPainter and QImage from PyQt6.QtGui and QRectF
+from PyQt6.QtCore, then change the _draw_image_fitted signature to use the real
+types (QPainter, QImage, QRectF) instead of strings so mypy/pyright can resolve
+them while avoiding runtime imports.
+```
+
+</details>
+
+---
+
+`1464-1471`: **Fallback print silently fails on non-Windows if `lp` is unavailable.**
+
+When `lp` is not found via `shutil.which`, non-renderable files are silently skipped with no user feedback. Consider logging a warning or collecting failed paths to report to the user:
+
+<details>
+<summary>🛡️ Proposed improvement</summary>
+
+```diff
+     for path in fallback:
+         if platform.system() == 'Windows':
+             os.startfile(path, 'print')  # type: ignore[attr-defined]
+         else:
+             import subprocess as _sp
+             lp = shutil.which('lp')
+             if lp:
+                 _sp.Popen([lp, path])
++            else:
++                # Consider logging or collecting these for user notification
++                print(f"[print_files_with_dialog] lp not found, cannot print: {path}", flush=True)
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@shared/widgets.py` around lines 1464 - 1471, The fallback printing loop
+silently skips non-Windows paths when 'lp' is absent; update the loop that
+iterates over fallback (the branch using platform.system(), os.startfile,
+shutil.which('lp') and _sp.Popen) to record any paths that cannot be printed
+(e.g., collect into a failed_paths list) and emit a warning after the loop
+(using the module logger or logging.warning) that includes those failed paths so
+users get feedback when 'lp' is unavailable; ensure the Windows branch
+(os.startfile) remains unchanged and only non-Windows missing-'lp' cases are
+reported.
+```
+
+</details>
+
+---
+
+`1428-1462`: **Consider wrapping QPainter in try/finally to ensure `end()` is called.**
+
+If an unexpected exception occurs during rendering (e.g., QImage creation fails), `painter.end()` won't be called, which can leave the printer in an inconsistent state.
+
+<details>
+<summary>🛡️ Proposed fix</summary>
+
+```diff
+         painter = QPainter(printer)
+-        page_rect = QRectF(painter.viewport())
+-        first = True
+-
+-        for path in renderable:
+-            # ... rendering logic ...
+-
+-        painter.end()
++        try:
++            page_rect = QRectF(painter.viewport())
++            first = True
++
++            for path in renderable:
++                # ... rendering logic ...
++        finally:
++            painter.end()
+```
+</details>
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@shared/widgets.py` around lines 1428 - 1462, The QPainter 'painter' created
+for 'printer' must be closed in a finally block so painter.end() always runs;
+wrap the main rendering loop (the code iterating over 'renderable' that calls
+QPainter(printer), QImage(...), _draw_image_fitted and fitz.open) in try/finally
+and call painter.end() from the finally clause, and also ensure any opened
+fitz.Document (doc) is closed on error (either by using a with/context manager
+or closing doc in a nested finally) so neither the printer nor PDF handles are
+left open.
+```
+
+</details>
+
+</blockquote></details>
+<details>
+<summary>core/app_context.py (1)</summary><blockquote>
+
+`87-98`: **Consider adding type hints for the print provider API.**
+
+The provider parameter and return type are untyped. For better IDE support and documentation, consider adding type hints. If you want to keep it flexible for plugins, `Any` or a `Protocol` would work:
+
+```python
+from typing import Protocol
+
+class PrintProvider(Protocol):
+    def add_files_to_list(self, paths: list) -> None: ...
+```
+
+Then: `def register_print_provider(self, provider: PrintProvider | None) -> None`
+
+This is optional but improves discoverability of the expected interface.
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+In `@core/app_context.py` around lines 87 - 98, Add explicit typing for the print
+provider interface: define a PrintProvider Protocol (or use typing.Any) that
+declares add_files_to_list(self, paths: list) -> None, import it from typing,
+then update register_print_provider signature to accept provider: PrintProvider
+| None -> None and update get_print_provider to return Optional[PrintProvider]
+(or PrintProvider | None); update any internal references expecting
+_print_provider to reflect the new type.
+```
+
+</details>
+
+</blockquote></details>
+
+</blockquote></details>
+
+<details>
+<summary>🤖 Prompt for all review comments with AI agents</summary>
+
+```
+Verify each finding against the current code and only fix it if needed.
+
+Inline comments:
+In `@shared/utils.py`:
+- Around line 205-216: Remove the unused print_files function from
+shared/utils.py: delete the entire def print_files(paths: List[str]) block and
+any related unused imports (os, platform, shutil, subprocess) if they become
+unused elsewhere; callers already use print_files_with_dialog in
+shared/widgets.py so no call sites need updating. If you prefer to keep it
+instead, add explicit error feedback/logging when the OS print handler fails
+(e.g., log when shutil.which('lp') returns None or when subprocess fails) so
+callers are not silently ignored. Ensure tests/imports still pass after removal.
+
+In `@shared/widgets.py`:
+- Around line 1435-1452: The fitz document opened with fitz.open(path) in the
+rendering block can leak if an exception happens before doc.close(); modify the
+rendering code around fitz.open(path) and doc.close() (the doc variable and the
+loop over doc.page_count) to ensure the document is always closed — either use a
+context manager (with fitz.open(path) as doc: ...) or wrap the existing logic in
+try/finally and call doc.close() in finally; keep the same rendering logic
+inside the managed block and preserve the ImportError fallback behavior.
+
+---
+
+Nitpick comments:
+In `@core/app_context.py`:
+- Around line 87-98: Add explicit typing for the print provider interface:
+define a PrintProvider Protocol (or use typing.Any) that declares
+add_files_to_list(self, paths: list) -> None, import it from typing, then update
+register_print_provider signature to accept provider: PrintProvider | None ->
+None and update get_print_provider to return Optional[PrintProvider] (or
+PrintProvider | None); update any internal references expecting _print_provider
+to reflect the new type.
+
+In `@shared/widgets.py`:
+- Around line 1380-1393: The function _draw_image_fitted uses string-based type
+hints ('QPainter', 'QImage', 'QRectF') which static type checkers won't resolve;
+update the module to import actual types only for type checking by adding "from
+typing import TYPE_CHECKING" and inside an "if TYPE_CHECKING:" block import
+QPainter and QImage from PyQt6.QtGui and QRectF from PyQt6.QtCore, then change
+the _draw_image_fitted signature to use the real types (QPainter, QImage,
+QRectF) instead of strings so mypy/pyright can resolve them while avoiding
+runtime imports.
+- Around line 1464-1471: The fallback printing loop silently skips non-Windows
+paths when 'lp' is absent; update the loop that iterates over fallback (the
+branch using platform.system(), os.startfile, shutil.which('lp') and _sp.Popen)
+to record any paths that cannot be printed (e.g., collect into a failed_paths
+list) and emit a warning after the loop (using the module logger or
+logging.warning) that includes those failed paths so users get feedback when
+'lp' is unavailable; ensure the Windows branch (os.startfile) remains unchanged
+and only non-Windows missing-'lp' cases are reported.
+- Around line 1428-1462: The QPainter 'painter' created for 'printer' must be
+closed in a finally block so painter.end() always runs; wrap the main rendering
+loop (the code iterating over 'renderable' that calls QPainter(printer),
+QImage(...), _draw_image_fitted and fitz.open) in try/finally and call
+painter.end() from the finally clause, and also ensure any opened fitz.Document
+(doc) is closed on error (either by using a with/context manager or closing doc
+in a nested finally) so neither the printer nor PDF handles are left open.
+```
+
+</details>
+
+<details>
+<summary>🪄 Autofix (Beta)</summary>
+
+Fix all unresolved CodeRabbit comments on this PR:
+
+- [ ] <!-- {"checkboxId": "4b0d0e0a-96d7-4f10-b296-3a18ea78f0b9"} --> Push a commit to this branch (recommended)
+- [ ] <!-- {"checkboxId": "ff5b1114-7d8c-49e6-8ac1-43f82af23a33"} --> Create a new PR with the fixes
+
+</details>
+
+---
+
+<details>
+<summary>ℹ️ Review info</summary>
+
+<details>
+<summary>⚙️ Run configuration</summary>
+
+**Configuration used**: Path: .coderabbit.yaml
+
+**Review profile**: CHILL
+
+**Plan**: Pro
+
+**Run ID**: `dde37edf-a7de-446b-a4c2-1a63b4595740`
+
+</details>
+
+<details>
+<summary>📥 Commits</summary>
+
+Reviewing files that changed from the base of the PR and between 7221b1e56b43f6e1f7f36c24e12d20cfa31c7d47 and 82176287af7b86b8cbbfc035ddbdb01fea9aefdd.
+
+</details>
+
+<details>
+<summary>⛔ Files ignored due to path filters (1)</summary>
+
+* `.claude/S&P.md` is excluded by `!.claude/S&P.md`
+
+</details>
+
+<details>
+<summary>📒 Files selected for processing (6)</summary>
+
+* `core/app_context.py`
+* `modules/job/module.py`
+* `modules/quote/module.py`
+* `modules/search/module.py`
+* `shared/utils.py`
+* `shared/widgets.py`
+
+</details>
+
+<details>
+<summary>🚧 Files skipped from review as they are similar to previous changes (3)</summary>
+
+* modules/search/module.py
+* modules/quote/module.py
+* modules/job/module.py
+
+</details>
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit for review status -->

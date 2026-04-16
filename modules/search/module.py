@@ -24,6 +24,7 @@ from PyQt6 import uic
 
 from core.base_module import BaseModule
 from shared.utils import open_folder
+from shared.widgets import print_files_with_dialog
 
 
 def _is_hidden_file(full_path: str, name: str) -> bool:
@@ -360,6 +361,7 @@ class SearchModule(BaseModule):
         folder_layout.setContentsMargins(5, 5, 5, 5)
         self.folder_contents_list = QListWidget()
         self.folder_contents_list.setAlternatingRowColors(True)
+        self.folder_contents_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
 
         self.file_preview = FilePreviewWidget()
         self.file_preview.setMinimumHeight(80)
@@ -757,10 +759,22 @@ class SearchModule(BaseModule):
 
         if is_file:
             menu.addSeparator()
+            print_action = menu.addAction("Print Selected")
+            print_action.triggered.connect(self._print_selected_folder_files)
             bp_action = menu.addAction("Blueprints Path")
             bp_action.triggered.connect(lambda: self._blueprints_path_action(path))
 
         menu.exec(self.folder_contents_list.viewport().mapToGlobal(pos))
+
+    def _print_selected_folder_files(self):
+        """Print all selected files from the folder contents list."""
+        paths = [
+            item.data(Qt.ItemDataRole.UserRole)
+            for item in self.folder_contents_list.selectedItems()
+            if os.path.isfile(item.data(Qt.ItemDataRole.UserRole) or '')
+        ]
+        if paths:
+            print_files_with_dialog(paths, self._widget, self.app_context)
 
     def _get_customer_bp_info(self):
         """Return (customer_name, blueprints_dir) for the currently selected search result."""

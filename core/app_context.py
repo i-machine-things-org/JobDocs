@@ -62,6 +62,7 @@ class AppContext:
         self._get_customer_list = get_customer_list_callback
         self._add_to_history = add_to_history_callback
         self._main_window = main_window
+        self._print_provider = None
 
     @property
     def settings(self) -> Dict[str, Any]:
@@ -82,6 +83,19 @@ class AppContext:
     def main_window(self) -> Optional[Any]:
         """Get reference to main window (use sparingly)"""
         return self._main_window
+
+    def register_print_provider(self, provider) -> None:
+        """Register a plugin as the active print provider.
+
+        The provider must implement add_files_to_list(paths: list).
+        If a provider is registered, print_files_with_dialog() delegates to it
+        instead of using the built-in QPrintDialog.
+        """
+        self._print_provider = provider
+
+    def get_print_provider(self):
+        """Return the registered print provider, or None."""
+        return self._print_provider
 
     def save_settings(self):
         """Save application settings to disk"""

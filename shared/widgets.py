@@ -1377,6 +1377,111 @@ class FilePreviewWidget(QWidget):
         raise AssertionError("unreachable")
 
 
+def _draw_image_fitted(painter: 'QPainter', img: 'QImage', page_rect: 'QRectF') -> None:  # type: ignore[name-defined]
+    """Draw img centred and scaled to fit page_rect preserving aspect ratio."""
+    from PyQt6.QtCore import QRectF as _QRectF
+    img_ratio = img.width() / max(img.height(), 1)
+    page_ratio = page_rect.width() / max(page_rect.height(), 1)
+    if img_ratio > page_ratio:
+        w = page_rect.width()
+        h = w / img_ratio
+    else:
+        h = page_rect.height()
+        w = h * img_ratio
+    x = (page_rect.width() - w) / 2
+    y = (page_rect.height() - h) / 2
+    painter.drawImage(_QRectF(x, y, w, h), img)
+
+
+def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
+    """Show a print dialog then render and print each file.
+
+    If a print provider is registered via app_context.register_print_provider()
+    (e.g. the HoneyBatchr plugin), files are sent there instead.
+
+    Otherwise: PDF files are rendered via PyMuPDF (fitz); common image formats
+    are loaded directly; other types (DWG, DXF, etc.) fall back to the OS print
+    handler (os.startfile on Windows, lp on macOS/Linux).
+    """
+    if app_context is not None:
+        provider = app_context.get_print_provider()
+        if provider is not None:
+            provider.add_files_to_list(paths)
+            return
+    import platform
+    from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
+    from PyQt6.QtGui import QPainter, QImage
+    from PyQt6.QtCore import QRectF
+
+    _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp'}
+    _RENDERABLE = _IMAGE_EXTS | {'.pdf'}
+
+    renderable = [p for p in paths if os.path.isfile(p) and Path(p).suffix.lower() in _RENDERABLE]
+    fallback   = [p for p in paths if os.path.isfile(p) and Path(p).suffix.lower() not in _RENDERABLE]
+
+    if renderable:
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        dlg = QPrintDialog(printer, parent)
+        if dlg.exec() != QPrintDialog.DialogCode.Accepted:
+            return  # cancelled — skip fallback too
+
+        painter = QPainter(printer)
+        page_rect = QRectF(painter.viewport())
+        first = True
+
+        for path in renderable:
+            ext = Path(path).suffix.lower()
+            if ext == '.pdf':
+                try:
+                    import fitz  # pymupdf
+                    doc = fitz.open(path)
+                    for page_num in range(doc.page_count):
+                        if not first:
+                            printer.newPage()
+                            page_rect = QRectF(painter.viewport())
+                        first = False
+                        pg = doc[page_num]
+                        zoom = 200 / 72  # render at 200 DPI
+                        pix = pg.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+                        samples = bytes(pix.samples)
+                        img = QImage(samples, pix.width, pix.height,
+                                     pix.stride, QImage.Format.Format_RGB888).copy()
+                        _draw_image_fitted(painter, img, page_rect)
+                    doc.close()
+                except ImportError:
+                    fallback.append(path)
+            else:
+                if not first:
+                    printer.newPage()
+                    page_rect = QRectF(painter.viewport())
+                first = False
+                img = QImage(path)
+                if not img.isNull():
+                    _draw_image_fitted(painter, img, page_rect)
+
+        painter.end()
+
+    import subprocess as _sp
+    lp = shutil.which('lp') if platform.system() != 'Windows' else None
+    unprinted: list[str] = []
+
+    for path in fallback:
+        if platform.system() == 'Windows':
+            os.startfile(path, 'print')  # type: ignore[attr-defined]
+        elif lp:
+            _sp.Popen([lp, path])
+        else:
+            unprinted.append(os.path.basename(path))
+
+    if unprinted:
+        from PyQt6.QtWidgets import QMessageBox
+        names = '\n'.join(f'  • {n}' for n in unprinted)
+        QMessageBox.warning(
+            parent, "Print",
+            f"The following file(s) could not be printed — 'lp' was not found on this system:\n\n{names}"
+        )
+
+
 def attach_file_preview(
     files_list,
     parent_layout,

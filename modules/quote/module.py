@@ -13,14 +13,14 @@ import shutil
 from pathlib import Path
 from typing import List
 from PyQt6.QtWidgets import (
-    QWidget, QMessageBox, QFileDialog, QTreeWidgetItem, QButtonGroup, QCheckBox
+    QWidget, QMessageBox, QFileDialog, QTreeWidgetItem, QButtonGroup, QCheckBox, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6 import uic
 from datetime import datetime
 
 from core.base_module import BaseModule
-from shared.widgets import DropZone, JobSearchDialog, DrawingSearchDialog, FilePreviewWidget, attach_file_preview
+from shared.widgets import DropZone, JobSearchDialog, DrawingSearchDialog, FilePreviewWidget, attach_file_preview, print_files_with_dialog
 from shared.utils import (
     is_blueprint_file, parse_job_numbers, create_file_link, sanitize_filename,
     open_folder, get_next_number
@@ -151,6 +151,7 @@ class QuoteModule(BaseModule):
         self.quote_drawings_edit = widget.quote_drawings_edit
         self.quote_itar_check = widget.quote_itar_check
         self.quote_files_list = widget.quote_files_list
+        self.quote_files_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
         # Replace QFrame placeholder with actual DropZone widget
         placeholder = widget.quote_drop_zone
@@ -169,6 +170,7 @@ class QuoteModule(BaseModule):
         # Connect Create New tab signals
         self.quote_drop_zone.files_dropped.connect(lambda files: self.add_quote_files(files))
         widget.remove_btn.clicked.connect(self.remove_quote_file)
+        widget.print_btn.clicked.connect(self.print_quote_files)
         widget.copy_from_btn.clicked.connect(self.show_copy_from_dialog)
         widget.link_drawings_btn.clicked.connect(self.show_link_drawings_dialog)
         widget.create_btn.clicked.connect(self.create_quote)
@@ -184,6 +186,7 @@ class QuoteModule(BaseModule):
         self.quote_tree = widget.quote_tree
         self.selected_quote_label = widget.selected_quote_label
         self.add_files_list = widget.add_files_list
+        self.add_files_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.add_status_label = widget.add_status_label
 
         # Store radio button references
@@ -234,6 +237,7 @@ class QuoteModule(BaseModule):
         self.add_drop_zone.files_dropped.connect(lambda files: self.handle_add_files(files))
         widget.remove_add_btn.clicked.connect(self.remove_add_file)
         widget.clear_add_btn.clicked.connect(self.clear_add_files)
+        widget.print_add_btn.clicked.connect(self.print_add_files)
         widget.add_files_btn.clicked.connect(self.add_files_to_quote)
 
         return widget
@@ -309,6 +313,13 @@ class QuoteModule(BaseModule):
             # Update preview for the new selection (or clear if list is now empty)
             new_row = self.quote_files_list.currentRow()
             self._on_quote_file_selected(new_row)
+
+    def print_quote_files(self):
+        """Print all selected files in the Create New tab file list."""
+        rows = sorted({i.row() for i in self.quote_files_list.selectedIndexes()})
+        paths = [self.quote_files[r] for r in rows if 0 <= r < len(self.quote_files)]
+        if paths:
+            print_files_with_dialog(paths, self._widget, self.app_context)
 
     def _on_quote_file_selected(self, row: int):
         if self.quote_preview is None:
@@ -714,6 +725,13 @@ class QuoteModule(BaseModule):
         if row >= 0:
             self.add_files_list.takeItem(row)
             del self.add_files[row]
+
+    def print_add_files(self):
+        """Print all selected files in the Add to Existing tab file list."""
+        rows = sorted({i.row() for i in self.add_files_list.selectedIndexes()})
+        paths = [self.add_files[r] for r in rows if 0 <= r < len(self.add_files)]
+        if paths:
+            print_files_with_dialog(paths, self._widget, self.app_context)
 
     def clear_add_files(self):
         """Clear all files from add files list"""
