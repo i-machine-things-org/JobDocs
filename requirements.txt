@@ -4,7 +4,7 @@
 PyQt6>=6.5.0
 
 # PDF preview in file list (Quote module)
-pymupdf>=1.24.0,<1.25.0  # Pin to tested range; verify compatibility before upgrading
+pymupdf>=1.26.0,<1.28.0  # Pin to tested range; verify compatibility before upgrading
 
 # For building executables (optional)
 # pyinstaller>=6.0.0

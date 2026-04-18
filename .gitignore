@@ -24,7 +24,6 @@ dist/
 build/
 build_dist/
 *.spec
-!build_scripts/JobDocs.spec
 
 # Virtual environments
 venv/
@@ -52,7 +51,8 @@ old/
 # Lives in %LOCALAPPDATA%\JobDocs\AddonPackages\ — dev symlink if present
 /AddonPackages/
 
-# Flatpak — staged binary and icon (copied from build_dist/ by CI, not source files)
+# Flatpak — files staged by CI before flatpak-builder runs (not source files)
+linux/flatpak/src/
 linux/flatpak/JobDocs
 linux/flatpak/icon_256x256.png
 

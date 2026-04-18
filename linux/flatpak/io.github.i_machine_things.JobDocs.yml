@@ -22,12 +22,11 @@ finish-args:
 modules:
   - name: JobDocs
     buildsystem: simple
-    # The PyInstaller binary and support files are staged into this directory
+    # Source tree + pre-downloaded wheels are staged into linux/flatpak/src/
     # by the CI workflow before flatpak-builder is invoked.
     sources:
-      # PyInstaller onedir tree — staged by CI as linux/flatpak/JobDocs_dir/
       - type: dir
-        path: JobDocs_dir
+        path: src
       - type: file
         path: io.github.i_machine_things.JobDocs.desktop
       - type: file
@@ -35,19 +34,22 @@ modules:
       - type: file
         path: icon_256x256.png
     build-commands:
-      # Install the PyInstaller onedir tree to /app/lib/JobDocs
+      # Install Python dependencies from pre-downloaded wheels (no network needed)
+      - pip3 install --prefix=/app --no-index --find-links wheels/ -r requirements.txt
+      # Install app source
       - install -d /app/lib/JobDocs
-      - cp -r . /app/lib/JobDocs/
-      - chmod 755 /app/lib/JobDocs/JobDocs
-      # Symlink launcher into /app/bin so Flatpak command: JobDocs resolves it
+      - cp -r main.py core modules shared /app/lib/JobDocs/
+      - sh -c '[ -d sample_files ] && cp -r sample_files /app/lib/JobDocs/ || true'
+      # Launcher script
       - install -d /app/bin
-      - ln -s /app/lib/JobDocs/JobDocs /app/bin/JobDocs
+      - printf '#!/bin/sh\nexec python3 /app/lib/JobDocs/main.py "$@"\n' > /app/bin/JobDocs
+      - chmod 755 /app/bin/JobDocs
       # Desktop entry
       - install -Dm644 io.github.i_machine_things.JobDocs.desktop
           /app/share/applications/io.github.i_machine_things.JobDocs.desktop
       # AppStream metadata
       - install -Dm644 io.github.i_machine_things.JobDocs.metainfo.xml
           /app/share/metainfo/io.github.i_machine_things.JobDocs.metainfo.xml
-      # Application icon (256×256 used for the Flatpak bundle icon)
+      # Application icon
       - install -Dm644 icon_256x256.png
           /app/share/icons/hicolor/256x256/apps/io.github.i_machine_things.JobDocs.png

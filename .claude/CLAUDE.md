@@ -36,9 +36,9 @@ This is how the user explicitly asks you to check in on the project.
 ## Rule 1: Git Is Mandatory
 
 - If the project is not a git repository, run `git init` and create an initial commit before doing anything else.
-- Never work directly on `main`, `master`, or `stable`. Always create a feature branch first then merge into `stable`.
+- Never work directly on `master`. Always create a feature branch first then merge into `master`.
 - Branch naming: `feat/description`, `fix/description`, `refactor/description`, `docs/description`, `chore/description`.
-- If you are on `main` when you start, create and switch to a feature branch immediately.
+- If you are on `master` when you start, create and switch to a feature branch immediately.
 
 ## Rule 2: Conventional Commits
 
@@ -84,9 +84,9 @@ Tag releases using `vMAJOR.MINOR.PATCH`:
 
 ### Release Workflow
 
-Pushing a `v*` tag to `stable` automatically triggers `.github/workflows/build-release.yml`, which:
+Pushing a `v*` tag to `master` automatically triggers `.github/workflows/build-release.yml`, which:
 1. **Windows** — downloads the Python embeddable runtime, compiles the C launcher (`launcher/launcher.c`) via MinGW, and packages everything into a Windows installer via Inno Setup (`build_scripts/JobDocs.iss`)
-2. **Linux** — builds a PyInstaller binary using `build_scripts/JobDocs.spec` and wraps it in a Flatpak bundle
+2. **Linux** — stages Python source + pre-downloaded wheels and packages them as a Flatpak bundle
 3. Signs the Windows executable via SignPath (once approved — currently commented out pending application)
 4. Creates a GitHub Release and attaches both platform artifacts as release assets
 
@@ -96,7 +96,7 @@ git tag v1.2.3
 git push origin v1.2.3
 ```
 
-**Note:** Only tag from `stable`.
+**Note:** Only tag from `master`.
 
 **SignPath:** Apply at https://signpath.io/product/open-source. Once approved, uncomment the signing step in `build-release.yml` and add `SIGNPATH_API_TOKEN` and `SIGNPATH_ORG_ID` to GitHub Actions secrets.
 

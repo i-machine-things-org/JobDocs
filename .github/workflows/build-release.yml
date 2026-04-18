@@ -18,7 +18,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
-  verify-stable-ancestry:
+  verify-master-ancestry:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -26,14 +26,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify tag is descended from stable
+      - name: Verify tag is descended from master
         run: |
-          git fetch origin stable
-          if ! git merge-base --is-ancestor origin/stable "$GITHUB_SHA"; then
-            echo "ERROR: Tag $GITHUB_REF_NAME is not descended from stable. Only tag from stable."
+          git fetch origin master
+          if ! git merge-base --is-ancestor origin/master "$GITHUB_SHA"; then
+            echo "ERROR: Tag $GITHUB_REF_NAME is not descended from master. Only tag from master."
             exit 1
           fi
-          echo "OK: $GITHUB_REF_NAME is descended from stable"
+          echo "OK: $GITHUB_REF_NAME is descended from master"
 
   # ---------------------------------------------------------------------------
   # Windows — Embedded Python + source files packaged by Inno Setup
@@ -45,7 +45,7 @@ jobs:
   #   {app}\plugins\           empty; user populates via Install Plugin
   # ---------------------------------------------------------------------------
   build-windows:
-    needs: verify-stable-ancestry
+    needs: verify-master-ancestry
     runs-on: windows-latest
     permissions:
       contents: read
@@ -180,10 +180,10 @@ jobs:
           path: installer_out/JobDocs-${{ env.RELEASE_VERSION }}-windows-setup.exe
 
   # ---------------------------------------------------------------------------
-  # Linux — PyInstaller binary wrapped in a Flatpak bundle
+  # Linux — Python source packaged as a Flatpak bundle
   # ---------------------------------------------------------------------------
   build-flatpak:
-    needs: verify-stable-ancestry
+    needs: verify-master-ancestry
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -196,19 +196,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Install Python dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install "pyinstaller>=6.0.0"
-
-      - name: Build PyInstaller binary
-        run: python -m PyInstaller build_scripts/JobDocs.spec --clean --noconfirm
-
-      - name: Verify binary
-        run: |
-          test -f dist/JobDocs/JobDocs || { echo "dist/JobDocs/JobDocs not found — build failed"; exit 1; }
-          echo "Build OK: $(du -h dist/JobDocs/JobDocs | cut -f1)"
 
       - name: Install Flatpak tools
         run: |
@@ -232,9 +219,13 @@ jobs:
             org.freedesktop.Platform//24.08 \
             org.freedesktop.Sdk//24.08
 
-      - name: Stage files for Flatpak manifest
+      - name: Stage source files and download wheels
         run: |
-          cp -r dist/JobDocs linux/flatpak/JobDocs_dir
+          mkdir -p linux/flatpak/src
+          for item in main.py core modules shared sample_files requirements.txt; do
+            [ -e "$item" ] && cp -r "$item" linux/flatpak/src/
+          done
+          pip download --only-binary :all: -d linux/flatpak/src/wheels/ -r requirements.txt
           cp JobDocs.iconset/icon_256x256.png linux/flatpak/icon_256x256.png
 
       - name: Inject version into metainfo
@@ -255,7 +246,6 @@ jobs:
             linux/flatpak/io.github.i_machine_things.JobDocs.yml
           flatpak build-bundle \
             --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
-            --default-branch=stable \
             flatpak-repo \
             JobDocs-linux.flatpak \
             io.github.i_machine_things.JobDocs
