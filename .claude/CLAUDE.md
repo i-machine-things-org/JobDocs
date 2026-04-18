@@ -77,9 +77,10 @@ Tag releases using `vMAJOR.MINOR.PATCH`:
 ### Release Workflow
 
 Pushing a `v*` tag to `stable` automatically triggers `.github/workflows/build-release.yml`, which:
-1. Builds `JobDocs.exe` via PyInstaller on a Windows runner using `build_scripts/JobDocs.spec`
-2. Signs the executable via SignPath (once approved — currently commented out pending application)
-3. Creates a GitHub Release and attaches `JobDocs.exe` as a release asset
+1. **Windows** — downloads the Python embeddable runtime, compiles the C launcher (`launcher/launcher.c`) via MinGW, and packages everything into a Windows installer via Inno Setup (`build_scripts/JobDocs.iss`)
+2. **Linux** — builds a PyInstaller binary using `build_scripts/JobDocs.spec` and wraps it in a Flatpak bundle
+3. Signs the Windows executable via SignPath (once approved — currently commented out pending application)
+4. Creates a GitHub Release and attaches both platform artifacts as release assets
 
 **To cut a release:**
 ```bash
