@@ -1578,11 +1578,18 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
                 _render_to(_print_printer, 200)
                 preview.accept()
 
+            # Hook the toolbar Print button to use our high-res render path.
+            # Qt assigns QKeySequence.StandardKey.Print on Windows/macOS; on
+            # Linux the action has no shortcut but carries the object name
+            # "qt_print_preview_print" or plain text "Print".
             _hooked = False
             for _act in preview.findChildren(QAction):
-                if _act.shortcut().matches(
+                _shortcut_match = _act.shortcut().matches(
                     QKeySequence(QKeySequence.StandardKey.Print)
-                ) == QKeySequence.SequenceMatch.ExactMatch:
+                ) == QKeySequence.SequenceMatch.ExactMatch
+                _name_match = "print" in (_act.objectName() or "").lower()
+                _text_match = "print" in (_act.text() or "").lower()
+                if _shortcut_match or _name_match or _text_match:
                     try:
                         _act.triggered.disconnect()
                     except TypeError:
@@ -1591,20 +1598,15 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
                     _hooked = True
                     break
             if not _hooked:
+                # Could not find the toolbar Print action — show the preview
+                # anyway. The default QPrintPreviewDialog print button will
+                # print to the PDF preview printer at 96 DPI rather than the
+                # high-res path, but it still works.
                 logger.warning(
                     "print_files_with_dialog: could not locate Print toolbar "
-                    "action in QPrintPreviewDialog; toolbar Print will use the "
-                    "PDF preview printer instead of a real printer."
+                    "action in QPrintPreviewDialog; using default print path."
                 )
-                from PyQt6.QtWidgets import QMessageBox
-                QMessageBox.warning(
-                    parent, "Print",
-                    "Print preview could not initialize the printer action. "
-                    "Please try printing these files with the system handler."
-                )
-                fallback.extend(renderable)
-                cancelled = True
-            elif preview.exec() != QPrintPreviewDialog.DialogCode.Accepted:
+            if preview.exec() != QPrintPreviewDialog.DialogCode.Accepted:
                 cancelled = True
 
     if cancelled:
