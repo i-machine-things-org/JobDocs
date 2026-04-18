@@ -237,6 +237,14 @@ jobs:
           cp -r dist/JobDocs linux/flatpak/JobDocs_dir
           cp JobDocs.iconset/icon_256x256.png linux/flatpak/icon_256x256.png
 
+      - name: Inject version into metainfo
+        run: |
+          VERSION="${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}"
+          VERSION="${VERSION#v}"
+          DATE="$(date -u +%Y-%m-%d)"
+          sed -i "s/@VERSION@/${VERSION}/g; s/@DATE@/${DATE}/g" \
+            linux/flatpak/io.github.i_machine_things.JobDocs.metainfo.xml
+
       - name: Build Flatpak
         run: |
           flatpak-builder \
@@ -247,6 +255,7 @@ jobs:
             linux/flatpak/io.github.i_machine_things.JobDocs.yml
           flatpak build-bundle \
             --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
+            --default-branch=stable \
             flatpak-repo \
             JobDocs-linux.flatpak \
             io.github.i_machine_things.JobDocs
