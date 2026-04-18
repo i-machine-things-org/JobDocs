@@ -10,7 +10,6 @@ build[0-9]*/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .github-push-checklist.md
-docs/
 
 # Python
 __pycache__/

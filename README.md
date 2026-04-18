@@ -2,6 +2,18 @@
 
 A modular tool for managing blueprint files and customer job directories with support for file linking, ITAR compliance, and comprehensive job tracking.
 
+## Screenshots
+
+| Quote | Job |
+|---|---|
+| ![Quote tab](docs/screenshots/quote_create_new.png) | ![Job tab](docs/screenshots/job_create_new.png) |
+
+| Search | Import Blueprints |
+|---|---|
+| ![Search tab](docs/screenshots/search.png) | ![Import Blueprints tab](docs/screenshots/import_blueprints.png) |
+
+![Setup wizard](docs/screenshots/setup_wizard.png)
+
 ## Features
 
 - **Modular Plugin Architecture** - Extensible system with drop-in modules
@@ -66,6 +78,8 @@ python main.py
 ```
 
 ### First Time Setup
+
+On first launch a setup wizard walks you through configuration in a few steps. You can re-run it anytime from the Setup tab.
 
 1. Go to **File → Settings**
 2. Configure your directories:
