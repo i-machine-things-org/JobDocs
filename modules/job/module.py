@@ -523,7 +523,15 @@ class JobModule(BaseModule):
 
     def auto_generate_job_number(self):
         """Auto-generate the next job number"""
-        next_number = get_next_number(self.app_context.history, 'job', start_number=10000)
+        scan_dirs = [
+            self.app_context.get_setting('customer_files_dir', ''),
+            self.app_context.get_setting('itar_customer_files_dir', ''),
+            self.app_context.get_setting('blueprints_dir', ''),
+            self.app_context.get_setting('itar_blueprints_dir', ''),
+        ]
+        next_number = get_next_number(
+            self.app_context.history, 'job', start_number=10000, scan_dirs=scan_dirs
+        )
         self.job_number_edit.setText(next_number)
         self.log_message(f"Auto-generated job number: {next_number}")
 
