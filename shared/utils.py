@@ -221,7 +221,7 @@ def print_files(paths: List[str]) -> None:
 
 
 def get_next_number(history: Dict[str, Any], entry_type: str, start_number: int = 10000,
-                    scan_dirs: list | None = None) -> str:
+                    scan_dirs: list | None = None, quote_folder: str = 'Quotes') -> str:
     """
     Get the next sequential number for jobs or quotes.
 
@@ -232,9 +232,10 @@ def get_next_number(history: Dict[str, Any], entry_type: str, start_number: int 
                scanned for leading numbers (e.g. customer-files and blueprints
                dirs).  Two levels are walked: base→customer→folder so that
                quote folders nested inside a Quotes sub-directory are found.
+    quote_folder: name of the quotes sub-directory (matches quote_folder_path
+                  setting, defaults to 'Quotes').
     """
-    import re as _re
-    _leading_num = _re.compile(r'^[A-Za-z]?(\d+)')
+    _leading_num = re.compile(r'^[A-Za-z]?(\d+)')
 
     max_number = start_number - 1
 
@@ -260,10 +261,8 @@ def get_next_number(history: Dict[str, Any], entry_type: str, start_number: int 
             continue
 
     # --- file system ---
-    # Jobs live at base/customer/<job_folder>; skip the Quotes sub-directory.
-    # Quotes live at base/customer/Quotes/<quote_folder>.
-    _QUOTES_DIR = 'Quotes'
-
+    # Jobs live at base/customer/<job_folder>; skip the quotes sub-directory.
+    # Quotes live at base/customer/<quote_folder>/<quote_folder_entry>.
     if scan_dirs:
         def _check(name: str) -> None:
             nonlocal max_number
@@ -283,13 +282,13 @@ def get_next_number(history: Dict[str, Any], entry_type: str, start_number: int 
                         continue
                     try:
                         if entry_type == 'quote':
-                            quotes_path = os.path.join(customer_path, _QUOTES_DIR)
+                            quotes_path = os.path.join(customer_path, quote_folder)
                             if os.path.isdir(quotes_path):
                                 for name in os.listdir(quotes_path):
                                     _check(name)
                         else:
                             for name in os.listdir(customer_path):
-                                if name.lower() != _QUOTES_DIR.lower():
+                                if name.lower() != quote_folder.lower():
                                     _check(name)
                     except OSError:
                         continue
