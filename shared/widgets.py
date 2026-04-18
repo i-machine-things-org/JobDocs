@@ -1599,16 +1599,14 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
                     _hooked = True
                     break
             if not _hooked:
-                # Could not find the toolbar Print action — show the preview
-                # anyway. The default QPrintPreviewDialog print button will
-                # print to the PDF preview printer at 96 DPI rather than the
-                # high-res path, but it still works.
                 logger.warning(
                     "print_files_with_dialog: could not locate Print toolbar "
-                    "action in QPrintPreviewDialog; using default print path."
+                    "action in QPrintPreviewDialog; printing directly at high resolution."
                 )
-            if preview.exec() != QPrintPreviewDialog.DialogCode.Accepted:
-                cancelled = True
+                _do_print()
+            else:
+                if preview.exec() != QPrintPreviewDialog.DialogCode.Accepted:
+                    cancelled = True
 
     if cancelled:
         return
