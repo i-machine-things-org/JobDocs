@@ -38,6 +38,7 @@ class SettingsDialog(QDialog):
         self._save_callback = save_callback  # Called to persist settings to disk mid-dialog
         self.setWindowTitle("Settings")
         self.setMinimumWidth(600)
+        self.resize(630, 500)
         self.setup_ui()
 
     # ------------------------------------------------------------------
