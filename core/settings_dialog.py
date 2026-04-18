@@ -28,9 +28,11 @@ class SettingsDialog(QDialog):
 
     def __init__(self, settings: Dict[str, Any], parent=None,
                  available_modules: Optional[List[tuple]] = None,
-                 save_callback: Optional[Callable[..., Any]] = None):
+                 save_callback: Optional[Callable[..., Any]] = None,
+                 active_keys: Optional[set] = None):
         super().__init__(parent)
         self.settings = settings.copy()
+        self._active_keys = active_keys  # keys present in DEFAULT_SETTINGS; None means show all
         self.available_modules = available_modules or []  # List of (module_name, display_name) tuples
         self.module_checkboxes = {}  # Store module checkboxes
         self._save_callback = save_callback  # Called to persist settings to disk mid-dialog
@@ -256,10 +258,12 @@ class SettingsDialog(QDialog):
         )
         advanced_content_layout.addWidget(self.job_structure_edit)
 
-        advanced_content_layout.addWidget(QLabel(""))
-
-        advanced_content_layout.addWidget(QLabel("Quote Folder Path:"))
+        _quote_label = QLabel("Quote Folder Path:")
         self.quote_folder_edit = QLineEdit(self.settings.get('quote_folder_path', 'Quotes'))
+        _quote_visible = self._active_keys is None or 'quote_folder_path' in self._active_keys
+        _quote_label.setVisible(_quote_visible)
+        self.quote_folder_edit.setVisible(_quote_visible)
+        advanced_content_layout.addWidget(_quote_label)
         advanced_content_layout.addWidget(self.quote_folder_edit)
 
         advanced_content_layout.addWidget(QLabel(""))
@@ -268,11 +272,11 @@ class SettingsDialog(QDialog):
         self.legacy_mode_check.setChecked(self.settings.get('legacy_mode', True))
         advanced_content_layout.addWidget(self.legacy_mode_check)
 
-        advanced_content_layout.addWidget(QLabel(""))
-
         self.experimental_check = QCheckBox("Enable experimental features (Reporting)")
         self.experimental_check.setChecked(self.settings.get('experimental_features', False))
         self.experimental_check.setToolTip("Enables experimental features. Requires restart.")
+        _exp_visible = self._active_keys is None or 'experimental_features' in self._active_keys
+        self.experimental_check.setVisible(_exp_visible)
         advanced_content_layout.addWidget(self.experimental_check)
 
         advanced_layout.addWidget(self.advanced_content)
@@ -317,7 +321,8 @@ class SettingsDialog(QDialog):
         self.settings['blueprint_extensions'] = extensions
 
         self.settings['job_folder_structure'] = self.job_structure_edit.text().strip()
-        self.settings['quote_folder_path'] = self.quote_folder_edit.text().strip()
+        if self.quote_folder_edit.isVisible():
+            self.settings['quote_folder_path'] = self.quote_folder_edit.text().strip()
         self.settings['legacy_mode'] = self.legacy_mode_check.isChecked()
         self.settings['allow_duplicate_jobs'] = self.allow_duplicates_check.isChecked()
         self.settings['skip_image_attachments'] = self.skip_images_check.isChecked()
@@ -325,7 +330,8 @@ class SettingsDialog(QDialog):
         idx = self.default_tab_combo.currentIndex()
         if 0 <= idx < len(self._tab_display_names):
             self.settings['default_tab'] = self._tab_display_names[idx]
-        self.settings['experimental_features'] = self.experimental_check.isChecked()
+        if self.experimental_check.isVisible():
+            self.settings['experimental_features'] = self.experimental_check.isChecked()
 
         # Save disabled modules
         disabled_modules = []
