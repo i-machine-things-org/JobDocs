@@ -13,6 +13,14 @@ Before taking any action on this project — including edits, commits, or file c
 
 No exceptions.
 
+### S&P.md is for programming notes only
+
+`.claude/S&P.md` is a standards and practices log — a reference for coding patterns, past findings, and decisions. It is **not** the source of truth for PR review status.
+
+- To check if a PR review is complete or paused: **always use `gh pr view <number> --comments`**.
+- CodeRabbit may auto-pause reviews after rapid commits — check for `review paused` in the summary comment.
+- If paused, trigger a new run with: `gh pr comment <number> --body "@coderabbitai review"`
+
 ## Trigger Prompt
 
 When the user says **"run auto version control"** (or any close variation like "run avc", "auto version control", "start version control"), immediately run the full assessment:

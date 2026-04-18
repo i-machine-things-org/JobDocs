@@ -14,10 +14,13 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap
 from pathlib import Path
 import atexit
+import logging
 import os
 import shutil
 import struct
 import tempfile
+
+logger = logging.getLogger(__name__)
 
 
 # Single atexit handler for all DropZone temp directories — avoids accumulating
@@ -94,10 +97,22 @@ class DropZone(QFrame):
         """Return True if this drag is from the classic Outlook desktop app."""
         return 'application/x-qt-windows-mime;value="RenPrivateMessages"' in mime_data.formats()
 
+    @staticmethod
+    def _is_new_outlook(mime_data) -> bool:
+        """Return True if this drag originates from New Outlook / Outlook Web (WebView2)."""
+        try:
+            taint = bytes(mime_data.data(
+                'application/x-qt-windows-mime;value="chromium/x-renderer-taint"'
+            ))
+            return bool(taint and b'outlook' in taint.lower())
+        except Exception:
+            return False
+
     def dragEnterEvent(self, event: QDragEnterEvent):
         mime = event.mimeData()
         print(f"[DropZone] dragEnter formats: {mime.formats()}", flush=True)
-        if mime.hasUrls() or self._outlook_descriptor_format(mime) or self._is_classic_outlook(mime):
+        if (mime.hasUrls() or self._outlook_descriptor_format(mime)
+                or self._is_classic_outlook(mime) or self._is_new_outlook(mime)):
             event.acceptProposedAction()
             self.setStyleSheet("""
                 DropZone {
@@ -162,22 +177,21 @@ class DropZone(QFrame):
 
         descriptor_fmt = self._outlook_descriptor_format(mime)
 
-        # Detect drag from Outlook Web (browser-based O365).
-        # Chrome withholds FileGroupDescriptorW from non-Shell drop targets, so Qt's
-        # MIME abstraction gets nothing.  We parse the Chromium custom MIME payload
-        # to get the Exchange item ID and retrieve the email via MAPI instead.
-        taint_data = b''
-        try:
-            taint_data = bytes(mime.data('application/x-qt-windows-mime;value="chromium/x-renderer-taint"'))
-        except Exception:
-            pass
-        is_outlook_web = bool(taint_data and b'outlook.office.com' in taint_data)
-
+        # Detect drag source
+        is_outlook_web = DropZone._is_new_outlook(mime)
         is_classic_outlook = DropZone._is_classic_outlook(mime) and not is_outlook_web
 
+        files: list = []
         if is_outlook_web:
             files = DropZone._handle_outlook_web_drop(mime)
-            if not files:
+            if not files and mime.hasUrls():
+                # Attachment drag from New Outlook: the Chromium taint is present
+                # but the MIME payload has no mail-row key (it's a file attachment,
+                # not an email row). Fall through to the CF_HDROP URL handler below.
+                print('[DropZone] New Outlook web-drop returned empty — '
+                      'falling back to hasUrls() for attachment drag', flush=True)
+                is_outlook_web = False
+            elif not files:
                 from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(
                     self, 'Email Not Retrieved',
@@ -187,7 +201,7 @@ class DropZone(QFrame):
                     'Alternatively, save the email to disk (File → Save As) and '
                     'drop the file here.'
                 )
-        elif is_classic_outlook:
+        if not is_outlook_web and not files and is_classic_outlook:
             files = DropZone._handle_classic_outlook_drop(mime)
             if not files:
                 from PyQt6.QtWidgets import QMessageBox
@@ -198,7 +212,7 @@ class DropZone(QFrame):
                     'Alternatively, save the email to disk (File → Save As) and '
                     'drop the file here.'
                 )
-        elif mime.hasUrls():
+        if not files and not is_classic_outlook and mime.hasUrls():
             files = []
             for url in mime.urls():
                 local = url.toLocalFile()
@@ -215,10 +229,8 @@ class DropZone(QFrame):
                 else:
                     # Non-local URL (blob:, https:, etc.) — log and skip for now
                     print(f"[DropZone]   Skipping non-local URL: {url.toString()}", flush=True)
-        elif descriptor_fmt:
+        if not files and descriptor_fmt:
             files = DropZone._handle_outlook_drop(mime, descriptor_fmt)
-        else:
-            files = []
 
         print(f"[DropZone] emitting {len(files)} file(s)", flush=True)
         for f in files:
@@ -1409,7 +1421,7 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
             provider.add_files_to_list(paths)
             return
     import platform
-    from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
+    from PyQt6.QtPrintSupport import QPrinter
     from PyQt6.QtGui import QPainter, QImage
     from PyQt6.QtCore import QRectF
 
@@ -1419,47 +1431,184 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
     renderable = [p for p in paths if os.path.isfile(p) and Path(p).suffix.lower() in _RENDERABLE]
     fallback   = [p for p in paths if os.path.isfile(p) and Path(p).suffix.lower() not in _RENDERABLE]
 
+    cancelled = False
+    failed_pre_render: list[str] = []
+    failed_print_render: list[str] = []
     if renderable:
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        dlg = QPrintDialog(printer, parent)
-        if dlg.exec() != QPrintDialog.DialogCode.Accepted:
-            return  # cancelled — skip fallback too
+        # Pre-check fitz so the paintRequested closure doesn't import on every call
+        try:
+            import fitz as _fitz  # pymupdf
+        except ImportError:
+            _fitz = None
+            # PDFs can't be previewed — move them to OS fallback
+            for _p in list(renderable):
+                if Path(_p).suffix.lower() == '.pdf':
+                    fallback.append(_p)
+                    renderable.remove(_p)
 
-        painter = QPainter(printer)
-        page_rect = QRectF(painter.viewport())
-        first = True
+        if renderable:
+            # preview_printer: PDF-format virtual printer — no system printer
+            # connection, no I/O, no timeouts.  QPrintPreviewDialog uses it only
+            # to record QPicture data; the output file is never written.
+            # print_printer: HighResolution native printer, only created and
+            # configured by QPrintDialog when the user actually clicks Print.
+            preview_printer = QPrinter()
+            preview_printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+            preview_printer.setResolution(96)
 
-        for path in renderable:
-            ext = Path(path).suffix.lower()
-            if ext == '.pdf':
+            # Pre-cache at 48 DPI. Each A4 page is ~397×561 px — small enough
+            # that QPicture serialisation and overview-mode replay are instant.
+            # The actual print job re-renders from fitz at 200 DPI.
+            _PREVIEW_DPI = 48
+            preview_cache: list[QImage] = []
+            renderable_for_print: list[str] = []
+            for path in renderable:
+                ext = Path(path).suffix.lower()
+                if ext == '.pdf' and _fitz is not None:
+                    try:
+                        doc = _fitz.open(path)
+                        try:
+                            _page_imgs: list[QImage] = []
+                            for page_num in range(doc.page_count):
+                                pg = doc[page_num]
+                                pix = pg.get_pixmap(
+                                    matrix=_fitz.Matrix(
+                                        _PREVIEW_DPI / 72, _PREVIEW_DPI / 72
+                                    ),
+                                    alpha=False,
+                                )
+                                samples = bytes(pix.samples)
+                                _page_imgs.append(
+                                    QImage(
+                                        samples, pix.width, pix.height,
+                                        pix.stride, QImage.Format.Format_RGB888,
+                                    ).copy()
+                                )
+                            preview_cache.extend(_page_imgs)
+                            renderable_for_print.append(path)
+                        finally:
+                            doc.close()
+                    except Exception:
+                        logger.warning(
+                            "print_files_with_dialog: failed to pre-render PDF %s",
+                            path, exc_info=True,
+                        )
+                        failed_pre_render.append(os.path.basename(path))
+                else:
+                    img = QImage(path)
+                    if not img.isNull():
+                        preview_cache.append(img)
+                        renderable_for_print.append(path)
+
+            def _render_to(pr: 'QPrinter', dpi: float) -> None:
+                """Render renderable files to pr at the given DPI."""
+                _pa = QPainter(pr)
                 try:
-                    import fitz  # pymupdf
-                    doc = fitz.open(path)
-                    for page_num in range(doc.page_count):
-                        if not first:
-                            printer.newPage()
-                            page_rect = QRectF(painter.viewport())
-                        first = False
-                        pg = doc[page_num]
-                        zoom = 200 / 72  # render at 200 DPI
-                        pix = pg.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
-                        samples = bytes(pix.samples)
-                        img = QImage(samples, pix.width, pix.height,
-                                     pix.stride, QImage.Format.Format_RGB888).copy()
-                        _draw_image_fitted(painter, img, page_rect)
-                    doc.close()
-                except ImportError:
-                    fallback.append(path)
-            else:
-                if not first:
-                    printer.newPage()
-                    page_rect = QRectF(painter.viewport())
-                first = False
-                img = QImage(path)
-                if not img.isNull():
-                    _draw_image_fitted(painter, img, page_rect)
+                    _pr = QRectF(_pa.viewport())
+                    _first = True
+                    for path in renderable_for_print:
+                        ext = Path(path).suffix.lower()
+                        if ext == '.pdf' and _fitz is not None:
+                            try:
+                                doc = _fitz.open(path)
+                                try:
+                                    for page_num in range(doc.page_count):
+                                        if not _first:
+                                            pr.newPage()
+                                            _pr = QRectF(_pa.viewport())
+                                        _first = False
+                                        pg = doc[page_num]
+                                        pix = pg.get_pixmap(
+                                            matrix=_fitz.Matrix(dpi / 72, dpi / 72),
+                                            alpha=False,
+                                        )
+                                        samples = bytes(pix.samples)
+                                        img = QImage(
+                                            samples, pix.width, pix.height,
+                                            pix.stride, QImage.Format.Format_RGB888,
+                                        ).copy()
+                                        _draw_image_fitted(_pa, img, _pr)
+                                finally:
+                                    doc.close()
+                            except Exception:
+                                logger.warning(
+                                    "print_files_with_dialog: failed to render"
+                                    " PDF %s at %.0f DPI",
+                                    path, dpi, exc_info=True,
+                                )
+                                failed_print_render.append(os.path.basename(path))
+                        else:
+                            img = QImage(path)
+                            if img.isNull():
+                                continue
+                            if not _first:
+                                pr.newPage()
+                                _pr = QRectF(_pa.viewport())
+                            _first = False
+                            _draw_image_fitted(_pa, img, _pr)
+                finally:
+                    _pa.end()
 
-        painter.end()
+            def do_render(pr: 'QPrinter') -> None:  # type: ignore[name-defined]
+                # Preview only — blit 48 DPI cache into the 96 DPI preview printer
+                _pa = QPainter(pr)
+                try:
+                    _pr = QRectF(_pa.viewport())
+                    for i, img in enumerate(preview_cache):
+                        if i > 0:
+                            pr.newPage()
+                            _pr = QRectF(_pa.viewport())
+                        _draw_image_fitted(_pa, img, _pr)
+                finally:
+                    _pa.end()
+
+            from PyQt6.QtPrintSupport import QPrintPreviewDialog, QPrintDialog
+            from PyQt6.QtGui import QKeySequence, QAction
+
+            preview = QPrintPreviewDialog(preview_printer, parent)
+            preview.paintRequested.connect(do_render)
+
+            # Intercept the built-in Print toolbar button so we can render at
+            # 200 DPI on a native HighResolution printer, not the PDF preview printer.
+            def _do_print() -> None:
+                _print_printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+                _pdlg = QPrintDialog(_print_printer, preview)
+                if _pdlg.exec() != QPrintDialog.DialogCode.Accepted:
+                    return
+                _render_to(_print_printer, 200)
+                preview.accept()
+
+            _hooked = False
+            for _act in preview.findChildren(QAction):
+                if _act.shortcut().matches(
+                    QKeySequence(QKeySequence.StandardKey.Print)
+                ) == QKeySequence.SequenceMatch.ExactMatch:
+                    try:
+                        _act.triggered.disconnect()
+                    except TypeError:
+                        pass
+                    _act.triggered.connect(_do_print)
+                    _hooked = True
+                    break
+            if not _hooked:
+                logger.warning(
+                    "print_files_with_dialog: could not locate Print toolbar "
+                    "action in QPrintPreviewDialog; toolbar Print will use the "
+                    "PDF preview printer instead of a real printer."
+                )
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    parent, "Print",
+                    "Print preview could not initialize the printer action. "
+                    "Please try printing these files with the system handler."
+                )
+                fallback.extend(renderable)
+                cancelled = True
+            elif preview.exec() != QPrintPreviewDialog.DialogCode.Accepted:
+                cancelled = True
+
+    if cancelled:
+        return
 
     import subprocess as _sp
     lp = shutil.which('lp') if platform.system() != 'Windows' else None
@@ -1467,19 +1616,28 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
 
     for path in fallback:
         if platform.system() == 'Windows':
-            os.startfile(path, 'print')  # type: ignore[attr-defined]
+            try:
+                os.startfile(path, 'print')  # type: ignore[attr-defined]
+            except OSError:
+                unprinted.append(os.path.basename(path))
         elif lp:
             _sp.Popen([lp, path])
         else:
             unprinted.append(os.path.basename(path))
 
+    sections = []
     if unprinted:
-        from PyQt6.QtWidgets import QMessageBox
         names = '\n'.join(f'  • {n}' for n in unprinted)
-        QMessageBox.warning(
-            parent, "Print",
-            f"The following file(s) could not be printed — 'lp' was not found on this system:\n\n{names}"
-        )
+        sections.append(f"Could not be printed (no print handler registered):\n{names}")
+    if failed_pre_render:
+        names = '\n'.join(f'  • {n}' for n in failed_pre_render)
+        sections.append(f"Could not be loaded for preview and were skipped:\n{names}")
+    if failed_print_render:
+        names = '\n'.join(f'  • {n}' for n in sorted(set(failed_print_render)))
+        sections.append(f"Could not be rendered for printing:\n{names}")
+    if sections:
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.warning(parent, "Print", "\n\n".join(sections))
 
 
 def attach_file_preview(

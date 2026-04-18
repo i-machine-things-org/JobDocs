@@ -19,7 +19,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Append CodeRabbit review to .claude/S&P.md
+      - name: Append short CodeRabbit note to .claude/S&P.md
         env:
           REVIEW_BODY: ${{ github.event.review.body }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -29,21 +29,33 @@ jobs:
           DATE=$(echo "$REVIEW_DATE" | cut -c1-10)
           PR_REF="PR #${PR_NUMBER}: ${PR_TITLE}"
 
-          # Compute the next unique run number to avoid MD024 duplicate-heading violations.
-          # Extract the highest existing "review run N" suffix for this date+PR, then increment.
-          MAX_RUN=$(grep "^## ${DATE}.*#${PR_NUMBER}:.*review run" ".claude/S&P.md" 2>/dev/null \
+          MAX_RUN=$(grep "^## ${DATE}.*#${PR_NUMBER}:.*run" ".claude/S&P.md" 2>/dev/null \
             | grep -oE '[0-9]+$' | sort -n | tail -1)
           RUN_NUM=$(( ${MAX_RUN:-0} + 1 ))
-          HEADING="## ${DATE} — \`${PR_REF}\` — review run ${RUN_NUM}"
 
-          {
-            echo ""
-            echo "---"
-            echo ""
-            echo "${HEADING}"
-            echo ""
-            echo "${REVIEW_BODY}"
-          } >> ".claude/S&P.md"
+          # Extract just the actionable/nitpick summary line and finding titles
+          SUMMARY=$(echo "$REVIEW_BODY" | python3 -c "
+import sys, re
+body = sys.stdin.read()
+# Pull the top-level summary line
+m = re.search(r'\*\*Actionable comments posted: (\d+)\*\*', body)
+actionable = m.group(1) if m else '?'
+m2 = re.search(r'Nitpick comments \((\d+)\)', body)
+nitpicks = m2.group(1) if m2 else '0'
+
+# Pull finding titles (bold lines with line refs)
+titles = re.findall(r'\*\*(.{10,80}?)\*\*', body)
+# Filter to likely finding titles (contain a verb or colon, skip nav/meta)
+skip = {'Duplicate comments','Nitpick comments','Actionable comments','Suggested','Proposed','Actions performed'}
+findings = [t for t in titles if not any(s in t for s in skip) and len(t) > 15][:6]
+
+print(f'Actionable: {actionable}  Nitpicks: {nitpicks}')
+for f in findings:
+    print(f'- {f}')
+")
+
+          printf '\n---\n\n## %s — `%s` — run %d\n\n%s\n' \
+            "$DATE" "$PR_REF" "$RUN_NUM" "$SUMMARY" >> ".claude/S&P.md"
 
       - name: Commit S&P.md update
         run: |
