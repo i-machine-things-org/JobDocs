@@ -15,6 +15,7 @@ Generated executable will be in the dist/ directory (or custom path if specified
 
 import os
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_all
 
 # ============================================================================
 # BUILD CONFIGURATION
@@ -88,8 +89,12 @@ if sample_dir.exists():
         if sample_file.is_file():
             sample_files.append((str(sample_file), 'sample_files'))
 
+# pymupdf >= 1.24.0 restructured: real package is 'pymupdf', 'fitz' is a shim.
+# collect_all captures the binary extensions (.so) that hiddenimports alone misses.
+_pymupdf_datas, _pymupdf_binaries, _pymupdf_hidden = collect_all('pymupdf')
+
 # Collect all data files
-datas = ui_files + icon_files + sample_files
+datas = ui_files + icon_files + sample_files + _pymupdf_datas
 
 # Add README and LICENSE
 readme_file = spec_root / 'README.md'
@@ -147,8 +152,11 @@ hiddenimports = [
     # Shared modules
     'shared.remote_sync',
 
-    # PDF preview (imported inside function body — PyInstaller won't auto-detect)
+    # PDF preview (imported inside function body — PyInstaller won't auto-detect).
+    # Both names needed: 'pymupdf' is the real package; 'fitz' is a compatibility shim.
     'fitz',
+    'pymupdf',
+] + _pymupdf_hidden + [
 
     # stdlib modules used by dynamically-loaded plugins (not reachable via static analysis)
     'difflib',
@@ -174,7 +182,7 @@ if not main_py.exists():
 a = Analysis(
     [str(main_py)],
     pathex=[str(main_py.parent)],  # Add parent directory to Python path
-    binaries=[],
+    binaries=_pymupdf_binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
