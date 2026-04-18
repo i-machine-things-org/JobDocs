@@ -1998,4 +1998,12 @@ Actionable: ?  Nitpicks: 3
 - Harden tag lookup for repos with mixed/no tags.
 - Graceful degradation is reasonable; consider a one-time user hint.
 - Prefer objectName/shortcut over the broad text substring match.
+
+---
+
+## 2026-04-18 — `PR #34: fix: auto job/quote numbers scan CF and BP dirs for existing numbers` — run 1
+
+Actionable: 2  Nitpicks: 2
+- Clarify the version computation step in the example.
+- Specify the expected action when checking thresholds.
 - Configuration used
