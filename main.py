@@ -208,18 +208,18 @@ class JobDocsMainWindow(QMainWindow):
         'allow_duplicate_jobs': False,
         'ui_style': 'Fusion',
         'job_folder_structure': '{customer}/job documents/{job_folder}',
-        'quote_folder_path': 'Quotes',
+#        'quote_folder_path': 'Quotes',
         'legacy_mode': True,
         'default_tab': 0,
 #        'experimental_features': False,
         'disabled_modules': [],  # List of disabled module names
-        'db_type': 'mssql',
+#        'db_type': 'mssql',
 #        'db_host': 'localhost',
 #        'db_port': 1433,
 #        'db_name': '',
 #        'db_username': '',
 #        'db_password': '',
-        'remote_server_path': '',  # Network path or URL for remote settings sync
+#        'remote_server_path': '',  # Network path or URL for remote settings sync
         'report_template_path': '',  # Path to Excel template for Report Fixer
         'suppress_bp_link_notification': False,  # Suppress "linked to blueprints" confirmation dialog
         'skip_image_attachments': False,
