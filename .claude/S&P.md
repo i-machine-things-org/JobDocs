@@ -2007,3 +2007,11 @@ Actionable: 2  Nitpicks: 2
 - Clarify the version computation step in the example.
 - Specify the expected action when checking thresholds.
 - Configuration used
+
+---
+
+## 2026-04-18 — `PR #35: feat: automated weekly code audit posts findings as GitHub issues` — run 1
+
+Actionable: 3  Nitpicks: 1
+- Consider a summary-issue mode to avoid issue-tracker noise.
+- Configuration used
