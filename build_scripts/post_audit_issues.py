@@ -5,6 +5,7 @@ Parse flake8 and bandit output and create GitHub issues for new findings.
 Deduplicates against existing open issues tagged 'automated-audit' so
 re-running the workflow never creates duplicate issues.
 """
+import hashlib
 import json
 import os
 import re
@@ -16,33 +17,66 @@ _existing_titles: set | None = None
 
 
 def _fetch_existing_titles() -> set:
+    """Fetch titles of all open automated-audit issues. Aborts on failure."""
     global _existing_titles
     if _existing_titles is not None:
         return _existing_titles
-    result = subprocess.run(
-        ['gh', 'issue', 'list',
-         '--label', LABEL,
-         '--state', 'open',
-         '--json', 'title',
-         '--limit', '500'],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        print(f'WARNING: could not fetch existing issues: {result.stderr}', file=sys.stderr)
-        _existing_titles = set()
-    else:
-        _existing_titles = {i['title'] for i in json.loads(result.stdout or '[]')}
+
+    # Paginate: gh issue list max is 1000 per call; loop until exhausted.
+    titles: set = set()
+    skip = 0
+    page_size = 100
+    while True:
+        result = subprocess.run(
+            ['gh', 'issue', 'list',
+             '--label', LABEL,
+             '--state', 'open',
+             '--json', 'title',
+             '--limit', str(page_size),
+             '--skip', str(skip)],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            print(f'ERROR: could not fetch existing issues: {result.stderr}', file=sys.stderr)
+            sys.exit(1)
+        page = json.loads(result.stdout or '[]')
+        for i in page:
+            titles.add(i['title'])
+        if len(page) < page_size:
+            break
+        skip += page_size
+
+    _existing_titles = titles
     return _existing_titles
 
 
 def _ensure_label() -> None:
-    subprocess.run(
-        ['gh', 'label', 'create', LABEL,
-         '--color', 'e4e669',
-         '--description', 'Opened automatically by the weekly code audit',
-         '--force'],
-        capture_output=True,
-    )
+    """Create all labels used by this script idempotently."""
+    labels = [
+        (LABEL,      'e4e669', 'Opened automatically by the weekly code audit'),
+        ('bug',      'd73a4a', 'Something is not working'),
+        ('security', 'e11d48', 'Security vulnerability or concern'),
+    ]
+    for name, color, desc in labels:
+        subprocess.run(
+            ['gh', 'label', 'create', name,
+             '--color', color,
+             '--description', desc,
+             '--force'],
+            capture_output=True,
+        )
+
+
+def _fingerprint(tool: str, code: str, filepath: str, lineno: str | int, msg: str) -> str:
+    """Short deterministic hash that survives message truncation."""
+    key = f'{tool}:{code}:{filepath}:{lineno}:{msg}'
+    return hashlib.sha1(key.encode()).hexdigest()[:8]
+
+
+def _make_title(tool: str, code: str, msg: str, fname: str, lineno: str | int,
+                fp: str) -> str:
+    snippet = msg[:72]
+    return f'[Audit] {tool} {code}: {snippet} in {fname}:{lineno} [{fp}]'
 
 
 def _create_issue(title: str, body: str, extra_label: str) -> None:
@@ -80,7 +114,8 @@ def _parse_flake8(path: str) -> list:
                 continue
             filepath, lineno, col, code, msg = m.groups()
             fname = os.path.basename(filepath)
-            title = f'[Audit] flake8 {code}: {msg[:80]} in {fname}:{lineno}'
+            fp = _fingerprint('flake8', code, filepath, lineno, msg)
+            title = _make_title('flake8', code, msg, fname, lineno, fp)
             body = (
                 f'**Tool:** flake8  \n'
                 f'**File:** `{filepath}:{lineno}:{col}`  \n'
@@ -115,7 +150,8 @@ def _parse_bandit(path: str) -> list:
         filepath = result.get('filename', '')
         lineno = result.get('line_number', 0)
         fname = os.path.basename(filepath)
-        title = f'[Audit] bandit {test_id}: {msg[:80]} in {fname}:{lineno}'
+        fp = _fingerprint('bandit', test_id, filepath, lineno, msg)
+        title = _make_title('bandit', test_id, msg, fname, lineno, fp)
         body = (
             f'**Tool:** bandit  \n'
             f'**File:** `{filepath}:{lineno}`  \n'
