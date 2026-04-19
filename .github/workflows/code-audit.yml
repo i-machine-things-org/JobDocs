@@ -45,4 +45,4 @@ jobs:
       - name: Post findings as GitHub issues
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python build_scripts/post_audit_issues.py
+        run: python tools/post_audit_issues.py
