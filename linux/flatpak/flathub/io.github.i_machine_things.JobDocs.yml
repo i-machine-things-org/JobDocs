@@ -1,0 +1,57 @@
+app-id: io.github.i_machine_things.JobDocs
+runtime: org.kde.Platform
+runtime-version: '6.10'
+sdk: org.kde.Sdk
+base: com.riverbankcomputing.PyQt.BaseApp
+base-version: '6.10'
+command: JobDocs
+
+finish-args:
+  # Display — prefer Wayland, fall back to X11
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # GPU acceleration for Qt rendering
+  - --device=dri
+  # JobDocs lets users configure job and blueprint directories anywhere on
+  # their system, including network-mounted drives (SMB/NFS). There is no
+  # fixed storage location — the root directory is chosen by the user during
+  # first-run setup and can be changed at any time in Settings.
+  # Portal-based directory access is planned for a future release.
+  - --filesystem=home
+
+cleanup-commands:
+  - /app/cleanup-BaseApp.sh
+
+modules:
+  - python3-pymupdf.json
+
+  - name: JobDocs
+    buildsystem: simple
+    sources:
+      - type: archive
+        url: https://github.com/i-machine-things/JobDocs/archive/refs/tags/v0.9.0-rc3.tar.gz
+        sha256: c7760b2ade80af0b0ed73c9ad7b31e2f0c46b0139f345cea2292314da260d2df
+      - type: file
+        path: io.github.i_machine_things.JobDocs.desktop
+      - type: file
+        path: io.github.i_machine_things.JobDocs.metainfo.xml
+      - type: file
+        path: icon_256x256.png
+    build-commands:
+      # Install app source
+      - install -d /app/lib/JobDocs
+      - cp -r main.py core modules shared /app/lib/JobDocs/
+      # Launcher script
+      - install -d /app/bin
+      - printf '#!/bin/sh\nexec python3 /app/lib/JobDocs/main.py "$@"\n' > /app/bin/JobDocs
+      - chmod 755 /app/bin/JobDocs
+      # Desktop entry
+      - install -Dm644 io.github.i_machine_things.JobDocs.desktop
+          /app/share/applications/io.github.i_machine_things.JobDocs.desktop
+      # AppStream metadata
+      - install -Dm644 io.github.i_machine_things.JobDocs.metainfo.xml
+          /app/share/metainfo/io.github.i_machine_things.JobDocs.metainfo.xml
+      # Application icon
+      - install -Dm644 icon_256x256.png
+          /app/share/icons/hicolor/256x256/apps/io.github.i_machine_things.JobDocs.png

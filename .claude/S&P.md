@@ -2023,3 +2023,10 @@ Actionable: 3  Nitpicks: 1
 Actionable: ?  Nitpicks: 1
 - Consider using `frozenset` for consistency.
 - Configuration used
+
+---
+
+## 2026-04-19 — `PR #215: feat: add Flathub submission manifest` — run 1
+
+Actionable: 2  Nitpicks: 0
+- Configuration used

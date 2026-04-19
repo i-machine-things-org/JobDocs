@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.i_machine_things.JobDocs</id>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>JobDocs</name>
+  <summary>Manage blueprint files and customer job directories</summary>
+
+  <description>
+    <p>
+      JobDocs is a modular desktop tool for managing blueprint files and customer
+      job directories. It supports file linking, ITAR compliance workflows, and
+      comprehensive job tracking.
+    </p>
+    <ul>
+      <li>Auto-generate sequential job and quote numbers</li>
+      <li>Single and bulk job creation (CSV import)</li>
+      <li>Blueprint file management with hard-link deduplication</li>
+      <li>ITAR-controlled project separation</li>
+      <li>Advanced search by customer, job number, description, or drawing number</li>
+      <li>History tracking for recent jobs and customers</li>
+    </ul>
+  </description>
+
+  <developer id="io.github.i_machine_things">
+    <name>i-machine-things</name>
+  </developer>
+
+  <url type="homepage">https://github.com/i-machine-things/JobDocs</url>
+  <url type="bugtracker">https://github.com/i-machine-things/JobDocs/issues</url>
+
+  <launchable type="desktop-id">io.github.i_machine_things.JobDocs.desktop</launchable>
+
+  <provides>
+    <binary>JobDocs</binary>
+  </provides>
+
+  <categories>
+    <category>Office</category>
+    <category>Utility</category>
+  </categories>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Create a new job</caption>
+      <image>https://raw.githubusercontent.com/i-machine-things/JobDocs/master/docs/screenshots/job_create_new.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Create a new quote</caption>
+      <image>https://raw.githubusercontent.com/i-machine-things/JobDocs/master/docs/screenshots/quote_create_new.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Import blueprints</caption>
+      <image>https://raw.githubusercontent.com/i-machine-things/JobDocs/master/docs/screenshots/import_blueprints.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Search jobs and quotes</caption>
+      <image>https://raw.githubusercontent.com/i-machine-things/JobDocs/master/docs/screenshots/search.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Setup wizard</caption>
+      <image>https://raw.githubusercontent.com/i-machine-things/JobDocs/master/docs/screenshots/setup_wizard.png</image>
+    </screenshot>
+  </screenshots>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>
