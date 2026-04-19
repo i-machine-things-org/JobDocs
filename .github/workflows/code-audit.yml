@@ -1,0 +1,48 @@
+name: Automated Code Audit
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Every Monday at 06:00 UTC
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install audit tools
+        run: pip install flake8 bandit
+
+      - name: Run flake8 (errors and undefined names only)
+        run: |
+          flake8 \
+            --max-line-length=120 \
+            --select=E,F \
+            --exclude=.git,__pycache__,build_scripts,linux \
+            . > flake8_results.txt 2>&1 || true
+
+      - name: Run bandit (medium/high severity only)
+        run: |
+          bandit -r . \
+            --exclude ./.git,./build_scripts,./linux \
+            --severity-level medium \
+            -f json -o bandit_results.json -q || true
+
+      - name: Post findings as GitHub issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python build_scripts/post_audit_issues.py
