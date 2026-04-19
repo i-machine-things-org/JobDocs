@@ -364,18 +364,18 @@ class SearchModule(BaseModule):
         self.folder_contents_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
 
         self.file_preview = FilePreviewWidget()
-        self.file_preview.setMinimumHeight(150)
+        self.file_preview.setMinimumHeight(80)
 
         contents_splitter = QSplitter(Qt.Orientation.Vertical)
         contents_splitter.addWidget(self.folder_contents_list)
         contents_splitter.addWidget(self.file_preview)
-        contents_splitter.setSizes([150, 300])
+        contents_splitter.setSizes([200, 180])
 
         folder_layout.addWidget(contents_splitter)
         folder_group.setLayout(folder_layout)
         splitter.addWidget(folder_group)
 
-        splitter.setSizes([380, 340])
+        splitter.setSizes([400, 280])
         results_layout.insertWidget(0, splitter)
         results_layout.setStretchFactor(splitter, 1)
 
