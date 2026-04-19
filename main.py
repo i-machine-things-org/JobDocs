@@ -104,7 +104,7 @@ class _PluginInstallWorker(QThread):
         try:
             api_url = f"https://api.github.com/repos/{owner}/{repo}"
             req = urllib.request.Request(api_url, headers={"Accept": "application/vnd.github+json"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:  # nosec B310
                 meta = json.loads(resp.read())
             branches_to_try = [meta.get("default_branch", "main")]
         except Exception:
@@ -115,7 +115,7 @@ class _PluginInstallWorker(QThread):
             zip_url = f"https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
             try:
                 self.status.emit(f"Downloading {owner}/{repo}...")
-                with urllib.request.urlopen(zip_url, timeout=30) as resp:
+                with urllib.request.urlopen(zip_url, timeout=30) as resp:  # nosec B310
                     zip_data = resp.read()
 
                 self.status.emit("Extracting files...")
