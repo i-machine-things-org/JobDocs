@@ -10,6 +10,7 @@ finish-args:
   # Display — prefer Wayland, fall back to X11
   - --socket=wayland
   - --socket=fallback-x11
+  - --socket=cups
   - --share=network
   - --share=ipc
   # GPU acceleration for Qt rendering
