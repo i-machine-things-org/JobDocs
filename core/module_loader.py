@@ -198,9 +198,9 @@ class ModuleLoader:
         module_class = None
         for name in dir(module):
             obj = getattr(module, name)
-            if (isinstance(obj, type) and
-                issubclass(obj, BaseModule) and
-                obj is not BaseModule):
+            if (isinstance(obj, type)
+                    and issubclass(obj, BaseModule)
+                    and obj is not BaseModule):
                 module_class = obj
                 break
 

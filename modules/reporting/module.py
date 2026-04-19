@@ -10,7 +10,7 @@ import csv
 from pathlib import Path
 from datetime import datetime
 from PyQt6.QtWidgets import (
-    QWidget, QMessageBox, QTableWidgetItem, QFileDialog, QHeaderView, QAbstractItemView
+    QWidget, QTableWidgetItem, QFileDialog, QHeaderView, QAbstractItemView
 )
 from PyQt6 import uic
 

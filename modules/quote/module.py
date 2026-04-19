@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 from typing import List
 from PyQt6.QtWidgets import (
-    QWidget, QTreeWidgetItem, QButtonGroup, QCheckBox, QAbstractItemView
+    QWidget, QTreeWidgetItem, QButtonGroup, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6 import uic
