@@ -1461,6 +1461,22 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
             preview_printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
             preview_printer.setResolution(96)
 
+            # In Flatpak the sandbox may not inherit LC_PAPER/PAPERSIZE from
+            # the host, causing Qt to default to A4. Read the host env and
+            # apply Letter explicitly when the system says so.
+            _papersize = os.environ.get('PAPERSIZE', '').lower()
+            if not _papersize:
+                try:
+                    import subprocess as _sp
+                    _papersize = _sp.check_output(
+                        ['paperconf'], text=True, timeout=1
+                    ).strip().lower()
+                except Exception:
+                    pass
+            if _papersize in ('letter', 'na_letter', 'usletter'):
+                from PyQt6.QtGui import QPageSize
+                preview_printer.setPageSize(QPageSize(QPageSize.PageSizeId.Letter))
+
             # Pre-cache at 48 DPI. Each A4 page is ~397×561 px — small enough
             # that QPicture serialisation and overview-mode replay are instant.
             # The actual print job re-renders from fitz at 200 DPI.
