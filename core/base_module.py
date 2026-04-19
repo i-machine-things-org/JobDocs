@@ -6,7 +6,6 @@ This enables dynamic loading and ensures consistent behavior across modules.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
 from PyQt6.QtWidgets import QWidget
 
 

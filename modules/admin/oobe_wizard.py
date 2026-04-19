@@ -4,11 +4,10 @@ OOBE (Out-Of-Box Experience) Wizard for JobDocs
 First-time setup wizard to configure essential settings.
 """
 
-from pathlib import Path
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QCheckBox, QFileDialog, QMessageBox, QStackedWidget,
-    QWidget, QRadioButton, QButtonGroup, QGroupBox, QTextEdit
+    QWidget, QRadioButton, QButtonGroup, QGroupBox
 )
 from PyQt6.QtCore import Qt
 
@@ -212,7 +211,8 @@ class OOBEWizard(QDialog):
             warning_box.setStyleSheet("QGroupBox { border: 2px solid #ffc107; border-radius: 8px; padding: 10px; }")
 
             warning_text = QLabel(
-                "These folder locations are already set. Only change them if you moved your files to a new location.\n\n"
+                "These folder locations are already set. "
+                "Only change them if you moved your files to a new location.\n\n"
                 f"Current Blueprints: {existing_bp}\n"
                 f"Current Customer Files: {existing_cf}"
             )
@@ -305,14 +305,18 @@ class OOBEWizard(QDialog):
             "You can choose whether to save disk space by linking files, or make complete copies."
         )
         explanation.setWordWrap(True)
-        explanation.setStyleSheet("color: #444; background-color: #f0f8ff; padding: 10px; border-radius: 5px; margin-bottom: 10px;")
+        explanation.setStyleSheet(
+            "color: #444; background-color: #f0f8ff; padding: 10px; border-radius: 5px; margin-bottom: 10px;"
+        )
         layout.addWidget(explanation)
 
         self.link_type_group = QButtonGroup()
 
         # Hard link (recommended) - with visual styling
         hard_option = QGroupBox()
-        hard_option.setStyleSheet("QGroupBox { border: 2px solid #0078d4; border-radius: 8px; padding: 10px; margin: 5px; }")
+        hard_option.setStyleSheet(
+            "QGroupBox { border: 2px solid #0078d4; border-radius: 8px; padding: 10px; margin: 5px; }"
+        )
         hard_layout = QVBoxLayout(hard_option)
 
         hard_radio = QRadioButton("✓ Smart Linking (Recommended)")
@@ -335,7 +339,9 @@ class OOBEWizard(QDialog):
 
         # Copy - simpler option
         copy_option = QGroupBox()
-        copy_option.setStyleSheet("QGroupBox { border: 1px solid #ccc; border-radius: 8px; padding: 10px; margin: 5px; }")
+        copy_option.setStyleSheet(
+            "QGroupBox { border: 1px solid #ccc; border-radius: 8px; padding: 10px; margin: 5px; }"
+        )
         copy_layout = QVBoxLayout(copy_option)
 
         copy_radio = QRadioButton("Make Complete Copies")
@@ -357,7 +363,9 @@ class OOBEWizard(QDialog):
 
         # Symbolic link - advanced option (collapsed by default)
         symbolic_option = QGroupBox()
-        symbolic_option.setStyleSheet("QGroupBox { border: 1px solid #ccc; border-radius: 8px; padding: 10px; margin: 5px; }")
+        symbolic_option.setStyleSheet(
+            "QGroupBox { border: 1px solid #ccc; border-radius: 8px; padding: 10px; margin: 5px; }"
+        )
         symbolic_layout = QVBoxLayout(symbolic_option)
 
         symbolic_radio = QRadioButton("Shortcuts (Advanced)")
@@ -553,7 +561,9 @@ class OOBEWizard(QDialog):
         final_note = QLabel(
             "Click 'Finish' to start using JobDocs!"
         )
-        final_note.setStyleSheet("color: #0078d4; font-weight: bold; font-size: 13px; text-align: center; margin-top: 10px;")
+        final_note.setStyleSheet(
+            "color: #0078d4; font-weight: bold; font-size: 13px; text-align: center; margin-top: 10px;"
+        )
         final_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(final_note)
 

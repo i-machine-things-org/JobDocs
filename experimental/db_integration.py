@@ -345,9 +345,9 @@ if __name__ == "__main__":
     stats = reporter.get_job_statistics()
     print(f"Statistics: {stats}")
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TO IMPLEMENT:")
-    print("="*60)
+    print("=" * 60)
     print("1. Install database driver:")
     print("   - MSSQL: pip install pyodbc")
     print("   - MySQL: pip install pymysql")

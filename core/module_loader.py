@@ -10,13 +10,13 @@ import importlib.util
 import logging
 import types
 from pathlib import Path
-from typing import List, Dict, Any, Type
+from typing import List, Dict, Type
 import sys
 
 logger = logging.getLogger(__name__)
 
-from core.base_module import BaseModule
-from core.app_context import AppContext
+from core.base_module import BaseModule  # noqa: E402
+from core.app_context import AppContext  # noqa: E402
 
 
 class ModuleLoader:
@@ -82,9 +82,12 @@ class ModuleLoader:
                 try:
                     for item in self.plugins_dir.iterdir():
                         try:
-                            if (item.is_dir() and not item.name.startswith('_')
-                                    and item.name not in deprecated_modules
-                                    and item.name not in all_modules):
+                            if (
+                                item.is_dir()
+                                and not item.name.startswith('_')
+                                and item.name not in deprecated_modules
+                                and item.name not in all_modules
+                            ):
                                 if (item / 'module.py').exists():
                                     all_modules.append(item.name)
                                     self._plugin_module_dirs[item.name] = self.plugins_dir
@@ -273,7 +276,7 @@ class ModuleLoader:
         if errors:
             app_context.show_error(
                 "Module Loading Errors",
-                f"Some modules failed to load:\n\n" + "\n".join(errors)
+                "Some modules failed to load:\n\n" + "\n".join(errors)
             )
 
         return self.loaded_modules

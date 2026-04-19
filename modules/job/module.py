@@ -11,9 +11,9 @@ import os
 import sys
 import shutil
 from pathlib import Path
-from typing import List, Type
+from typing import List
 from PyQt6.QtWidgets import (
-    QWidget, QMessageBox, QTreeWidgetItem, QButtonGroup, QCheckBox, QAbstractItemView
+    QWidget, QTreeWidgetItem, QButtonGroup, QCheckBox, QAbstractItemView
 )
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
@@ -21,7 +21,10 @@ from PyQt6 import uic
 from datetime import datetime
 
 from core.base_module import BaseModule
-from shared.widgets import DropZone, JobSearchDialog, DrawingSearchDialog, FilePreviewWidget, attach_file_preview, print_files_with_dialog
+from shared.widgets import (
+    DropZone, JobSearchDialog, DrawingSearchDialog, FilePreviewWidget,
+    attach_file_preview, print_files_with_dialog
+)
 from shared.utils import (
     is_blueprint_file, parse_job_numbers, create_file_link,
     sanitize_filename, open_folder, get_next_number
@@ -58,7 +61,11 @@ class JobTreeWorker(QThread):
                 if self.show_all_customers:
                     customers = [d for d in os.listdir(cf_dir) if os.path.isdir(os.path.join(cf_dir, d))]
                 else:
-                    customers = [self.selected_customer] if os.path.isdir(os.path.join(cf_dir, self.selected_customer)) else []
+                    customers = (
+                        [self.selected_customer]
+                        if os.path.isdir(os.path.join(cf_dir, self.selected_customer))
+                        else []
+                    )
 
                 for customer in sorted(customers):
                     if self._is_cancelled:
@@ -119,7 +126,6 @@ class JobModule(BaseModule):
         self.add_drop_zone = None
         self.add_filter_group = None
         self.dest_button_group = None
-
 
         # Preview panels
         self.job_preview: FilePreviewWidget | None = None
@@ -387,8 +393,9 @@ class JobModule(BaseModule):
         else:
             self.show_error("Error", "Failed to create jobs")
 
-    def create_single_job(self, customer: str, job_number: str, po_number: str, description: str,
-                         drawings: List[str], is_itar: bool, files: List[str]) -> bool:
+    def create_single_job(
+            self, customer: str, job_number: str, po_number: str, description: str,
+            drawings: List[str], is_itar: bool, files: List[str]) -> bool:
         """Create a single job folder"""
         try:
             bp_dir, cf_dir = self.app_context.get_directories(is_itar)
@@ -568,7 +575,6 @@ class JobModule(BaseModule):
         parts = folder_name.split('_', 2)
 
         if len(parts) >= 2:
-            job_number = parts[0]
             description = parts[1]
             drawings = parts[2] if len(parts) > 2 else ""
 

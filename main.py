@@ -207,18 +207,18 @@ class JobDocsMainWindow(QMainWindow):
         'allow_duplicate_jobs': False,
         'ui_style': 'Fusion',
         'job_folder_structure': '{customer}/job documents/{job_folder}',
-#        'quote_folder_path': 'Quotes',
+        # 'quote_folder_path': 'Quotes',
         'legacy_mode': True,
         'default_tab': 0,
-#        'experimental_features': False,
+        # 'experimental_features': False,
         'disabled_modules': [],  # List of disabled module names
-#        'db_type': 'mssql',
-#        'db_host': 'localhost',
-#        'db_port': 1433,
-#        'db_name': '',
-#        'db_username': '',
-#        'db_password': '',
-#        'remote_server_path': '',  # Network path or URL for remote settings sync
+        # 'db_type': 'mssql',
+        # 'db_host': 'localhost',
+        # 'db_port': 1433,
+        # 'db_name': '',
+        # 'db_username': '',
+        # 'db_password': '',
+        # 'remote_server_path': '',  # Network path or URL for remote settings sync
         'report_template_path': '',  # Path to Excel template for Report Fixer
         'suppress_bp_link_notification': False,  # Suppress "linked to blueprints" confirmation dialog
         'skip_image_attachments': True,
@@ -291,7 +291,7 @@ class JobDocsMainWindow(QMainWindow):
         elif isinstance(default_tab, int) and 0 <= default_tab < self.tabs.count():
             self.tabs.setCurrentIndex(default_tab)
 
-        self.statusBar().showMessage("Ready") # pyright: ignore[reportOptionalMemberAccess]
+        self.statusBar().showMessage("Ready")  # pyright: ignore[reportOptionalMemberAccess]
 
     # ==================== Settings & History ====================
 
@@ -468,7 +468,9 @@ class JobDocsMainWindow(QMainWindow):
                     import traceback
                     traceback.print_exc()
 
-            self.statusBar().showMessage(f"Loaded {len(self.modules)} module(s)")  # pyright: ignore[reportOptionalMemberAccess]
+            self.statusBar().showMessage(  # pyright: ignore[reportOptionalMemberAccess]
+                f"Loaded {len(self.modules)} module(s)"
+            )
 
             # Populate customer lists in all modules
             self.populate_customer_lists()
@@ -507,7 +509,9 @@ class JobDocsMainWindow(QMainWindow):
         help_menu = menubar.addMenu("&Help")  # pyright: ignore[reportOptionalMemberAccess]
 
         getting_started_action = help_menu.addAction("&Getting Started")  # pyright: ignore[reportOptionalMemberAccess]
-        getting_started_action.triggered.connect(self.show_getting_started)  # pyright: ignore[reportOptionalMemberAccess]
+        getting_started_action.triggered.connect(  # pyright: ignore[reportOptionalMemberAccess]
+            self.show_getting_started
+        )
 
         readme_action = help_menu.addAction("&User Guide (README)")  # pyright: ignore[reportOptionalMemberAccess]
         readme_action.triggered.connect(self.show_readme)  # pyright: ignore[reportOptionalMemberAccess]
@@ -543,9 +547,11 @@ class JobDocsMainWindow(QMainWindow):
                 # If we can't load it, just use the module name
                 available_modules.append((module_name, module_name))
 
-        dialog = SettingsDialog(self.settings, self, available_modules,
-                               save_callback=self._partial_save_settings,
-                               active_keys=set(self.DEFAULT_SETTINGS))
+        dialog = SettingsDialog(
+            self.settings, self, available_modules,
+            save_callback=self._partial_save_settings,
+            active_keys=set(self.DEFAULT_SETTINGS)
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.settings = dialog.settings
 
@@ -620,7 +626,6 @@ class JobDocsMainWindow(QMainWindow):
     def show_getting_started(self):
         """Show getting started guide"""
         folder_term = get_os_text('folder_term')
-        path_example = get_os_text('path_example')
 
         content = f"""
 <h2>GETTING STARTED</h2>

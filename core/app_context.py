@@ -215,7 +215,12 @@ class AppContext:
         structure = self._settings.get('job_folder_structure', '{customer}/{po_number}/{job_folder}')
 
         # Replace placeholders
-        path_str = structure.replace('{customer}', customer).replace('{job_folder}', job_folder_name).replace('{po_number}', po_number)
+        path_str = (
+            structure
+            .replace('{customer}', customer)
+            .replace('{job_folder}', job_folder_name)
+            .replace('{po_number}', po_number)
+        )
 
         # Clean up any double slashes from empty placeholders
         path_str = path_str.replace('//', '/')
@@ -265,12 +270,12 @@ class AppContext:
                             print(f"[find_job_folders]     ✓ Found job: {item}", flush=True)
                             jobs.append((item, expected_docs_path))
                         else:
-                            print(f"[find_job_folders]     ✗ Path doesn't exist", flush=True)
+                            print("[find_job_folders]     ✗ Path doesn't exist", flush=True)
             except OSError as e:
                 print(f"[find_job_folders] OSError: {e}", flush=True)
         else:
             # Legacy or custom structure
-            print(f"[find_job_folders] Using legacy/custom structure", flush=True)
+            print("[find_job_folders] Using legacy/custom structure", flush=True)
             parts = after_customer.split('{job_folder}')
             if len(parts) == 2:
                 prefix = parts[0].strip('/')
@@ -317,7 +322,10 @@ class AppContext:
                                 if os.path.isdir(item_path):
                                     if suffix:
                                         expected_docs_path = os.path.join(item_path, suffix)
-                                        print(f"[find_job_folders]   Checking {item} -> {expected_docs_path}", flush=True)
+                                        print(
+                                            f"[find_job_folders]   Checking {item} -> {expected_docs_path}",
+                                            flush=True
+                                        )
                                         if os.path.exists(expected_docs_path):
                                             print(f"[find_job_folders]     ✓ Found job: {item}", flush=True)
                                             jobs.append((item, expected_docs_path))
