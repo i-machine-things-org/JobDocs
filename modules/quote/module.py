@@ -488,7 +488,14 @@ class QuoteModule(BaseModule):
 
     def auto_generate_quote_number(self):
         """Auto-generate the next quote number"""
-        next_number = get_next_number(self.app_context.history, 'quote', start_number=90000)
+        scan_dirs = [
+            self.app_context.get_setting('customer_files_dir', ''),
+            self.app_context.get_setting('itar_customer_files_dir', ''),
+        ]
+        next_number = get_next_number(
+            self.app_context.history, 'quote', start_number=90000, scan_dirs=scan_dirs,
+            quote_folder=self.app_context.get_setting('quote_folder_path', 'Quotes'),
+        )
         quote_number = f"Q{next_number}"
         self.quote_number_edit.setText(quote_number)
         self.log_message(f"Auto-generated quote number: {quote_number}")

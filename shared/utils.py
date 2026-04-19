@@ -220,21 +220,25 @@ def print_files(paths: List[str]) -> None:
                 logger.warning("print_files: 'lp' not found — cannot print %s", path)
 
 
-def get_next_number(history: Dict[str, Any], entry_type: str, start_number: int = 10000) -> str:
+def get_next_number(history: Dict[str, Any], entry_type: str, start_number: int = 10000,
+                    scan_dirs: list | None = None, quote_folder: str = 'Quotes') -> str:
     """
-    Get the next sequential number for jobs or quotes (tracked separately).
+    Get the next sequential number for jobs or quotes.
 
-    Args:
-        history: Application history dictionary
-        entry_type: Type of entry ('job' or 'quote')
-        start_number: Starting number if no history exists (default: 10000)
+    Checks both the in-memory history and (optionally) the file system so that
+    folders created outside of JobDocs are not re-used.
 
-    Returns:
-        Next number as a string
+    scan_dirs: list of base directories whose immediate subdirectory names are
+               scanned for leading numbers (e.g. customer-files and blueprints
+               dirs).  Two levels are walked: base→customer→folder so that
+               quote folders nested inside a Quotes sub-directory are found.
+    quote_folder: name of the quotes sub-directory (matches quote_folder_path
+                  setting, defaults to 'Quotes').
     """
+    _leading_num = re.compile(r'^[A-Za-z]?(\d+)')
+
     max_number = start_number - 1
 
-    # Determine which history key to use (jobs and quotes are tracked separately)
     if entry_type == 'job':
         history_key = 'recent_jobs'
         number_key = 'job_number'
@@ -244,20 +248,51 @@ def get_next_number(history: Dict[str, Any], entry_type: str, start_number: int 
     else:
         return str(start_number)
 
-    # Check history for the highest number
-    recent_entries = history.get(history_key, [])
-    for entry in recent_entries:
+    # --- history ---
+    for entry in history.get(history_key, []):
         number_str = entry.get(number_key, '')
-        # Try to parse as integer, stripping any leading non-digits (like 'Q' prefix)
         try:
-            # Extract only digits from the string
             digits = ''.join(filter(str.isdigit, number_str))
             if digits:
-                number = int(digits)
-                if number > max_number:
-                    max_number = number
+                n = int(digits)
+                if n > max_number:
+                    max_number = n
         except (ValueError, TypeError):
-            # Not parseable, skip it
             continue
+
+    # --- file system ---
+    # Jobs live at base/customer/<job_folder>; skip the quotes sub-directory.
+    # Quotes live at base/customer/<quote_folder>/<quote_folder_entry>.
+    if scan_dirs:
+        def _check(name: str) -> None:
+            nonlocal max_number
+            m = _leading_num.match(name)
+            if m:
+                n = int(m.group(1))
+                if n > max_number:
+                    max_number = n
+
+        for base_dir in scan_dirs:
+            if not base_dir or not os.path.isdir(base_dir):
+                continue
+            try:
+                for customer in os.listdir(base_dir):
+                    customer_path = os.path.join(base_dir, customer)
+                    if not os.path.isdir(customer_path):
+                        continue
+                    try:
+                        if entry_type == 'quote':
+                            quotes_path = os.path.join(customer_path, quote_folder)
+                            if os.path.isdir(quotes_path):
+                                for name in os.listdir(quotes_path):
+                                    _check(name)
+                        else:
+                            for name in os.listdir(customer_path):
+                                if name.lower() != quote_folder.lower():
+                                    _check(name)
+                    except OSError:
+                        continue
+            except OSError:
+                continue
 
     return str(max_number + 1)
