@@ -49,7 +49,8 @@ def main():
     for line in added_lines:
         if re.search(r"except\s+Exception\b", line):
             warnings.append(
-                "Broad 'except Exception' detected — use specific exceptions (e.g. OSError, AttributeError). [S&P 2026-04-06]"
+                "Broad 'except Exception' detected — use specific exceptions "
+                "(e.g. OSError, AttributeError). [S&P 2026-04-06]"
             )
             break
 
@@ -65,7 +66,8 @@ def main():
     for line in added_lines:
         if re.search(r"key\s*=\s*lambda.*os\.path\.isdir", line) and not re.search(r"not\s+os\.path\.isdir", line):
             warnings.append(
-                "Sort key may put files before directories — use 'not os.path.isdir(...)' to sort dirs first. [S&P 2026-04-06]"
+                "Sort key may put files before directories — "
+                "use 'not os.path.isdir(...)' to sort dirs first. [S&P 2026-04-06]"
             )
             break
 

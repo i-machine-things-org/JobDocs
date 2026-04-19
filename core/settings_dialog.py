@@ -9,7 +9,6 @@ Provides a UI for configuring application settings including:
 - Experimental features
 """
 
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from PyQt6.QtWidgets import (

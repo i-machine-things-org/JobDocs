@@ -1,3 +1,5 @@
 reviews:
+  auto_review:
+    enabled: false        # only review on explicit @coderabbitai review command
   path_filters:
     - "!.claude/S&P.md"
