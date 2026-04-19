@@ -100,6 +100,35 @@ git push origin v1.2.3
 
 **SignPath:** Apply at https://signpath.io/product/open-source. Once approved, uncomment the signing step in `build-release.yml` and add `SIGNPATH_API_TOKEN` and `SIGNPATH_ORG_ID` to GitHub Actions secrets.
 
+### Automatic Version Bump Triggers
+
+After every merge to `master`, count commits since the last `v*` tag:
+
+```bash
+git log $(git describe --tags --abbrev=0)..master --oneline
+```
+
+Count by type:
+- Lines starting with `feat:` → feature count
+- Lines starting with `fix:` → fix count
+
+**Thresholds:**
+- **5 or more `feat:` commits** → bump MINOR, reset PATCH to 0, tag and push
+- **5 or more `fix:` commits** → bump PATCH, tag and push
+
+If both thresholds are met simultaneously, bump MINOR (takes precedence).
+
+**To apply:**
+```bash
+# Get current version
+CURRENT=$(git describe --tags --abbrev=0)   # e.g. v0.8.1
+# Bump as needed, then:
+git tag v0.9.0
+git push origin v0.9.0
+```
+
+Check this threshold after every merge to master. Do not wait for the user to ask.
+
 ## Rule 5: Pull Request Reviews
 
 When a pull request is open or being prepared:

@@ -1989,3 +1989,13 @@ failed_print_render as before.
 2. **`shared/widgets.py`: renderable files silently dropped when `_hooked=False`** *(fixed)*
    - When the Print toolbar action could not be hooked, `cancelled = True` was set but `renderable` files were not moved to `fallback`, so they were silently lost rather than sent to the OS print handler.
    - Fix: `fallback.extend(renderable)` before setting `cancelled = True`.
+
+---
+
+## 2026-04-19 — `PR #33: fix: print preview blocked on Linux — toolbar hook too narrow` — run 1
+
+Actionable: ?  Nitpicks: 3
+- Harden tag lookup for repos with mixed/no tags.
+- Graceful degradation is reasonable; consider a one-time user hint.
+- Prefer objectName/shortcut over the broad text substring match.
+- Configuration used
