@@ -1594,6 +1594,14 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
             # 200 DPI on a native HighResolution printer, not the PDF preview printer.
             def _do_print() -> None:
                 _print_printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+                # Carry over page settings the user configured in the preview
+                # (orientation, paper size, margins) to the real print job.
+                _print_printer.setPageOrientation(preview_printer.pageLayout().orientation())
+                _print_printer.setPageSize(preview_printer.pageLayout().pageSize())
+                _print_printer.setPageMargins(
+                    preview_printer.pageLayout().margins(),
+                    preview_printer.pageLayout().units(),
+                )
                 _pdlg = QPrintDialog(_print_printer, preview)
                 if _pdlg.exec() != QPrintDialog.DialogCode.Accepted:
                     return
