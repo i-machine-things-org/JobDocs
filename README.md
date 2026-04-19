@@ -30,10 +30,6 @@ A modular tool for managing blueprint files and customer job directories with su
 - **PDF Preview** - Drop zone file list shows a live preview of PDF files (requires `pymupdf`)
 - **Cross-Platform** - Works on Windows, macOS, and Linux
 
-### PSM-Specific Features (PSM-stable branch)
-
-- **Report Fixer** (Reporting tab) - Transforms Excel job reports to match a template layout. Loads a source report and a delivery schedule file, tracks date/schedule changes, and exports a formatted Excel file with highlighted modifications. Requires `pandas` and `openpyxl`.
-
 ## Installation
 
 ### Requirements
@@ -66,7 +62,7 @@ pip install PyQt6
 ```bash
 pip install pywin32            # Windows — enables Outlook/O365 drag-and-drop
 pip install pymupdf            # All platforms — enables PDF preview in file lists
-pip install pandas openpyxl    # PSM-stable — enables Report Fixer feature
+pip install pandas openpyxl    # enables Report Fixer plugin (if installed)
 ```
 
 ## Usage
