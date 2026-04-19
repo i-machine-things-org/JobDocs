@@ -41,8 +41,8 @@ def _fetch_existing_titles() -> set:
 def _ensure_label() -> None:
     """Create all labels used by this script idempotently."""
     labels = [
-        (LABEL,      'e4e669', 'Opened automatically by the weekly code audit'),
-        ('bug',      'd73a4a', 'Something is not working'),
+        (LABEL, 'e4e669', 'Opened automatically by the weekly code audit'),
+        ('bug', 'd73a4a', 'Something is not working'),
         ('security', 'e11d48', 'Security vulnerability or concern'),
     ]
     for name, color, desc in labels:
@@ -58,7 +58,7 @@ def _ensure_label() -> None:
 def _fingerprint(tool: str, code: str, filepath: str, lineno: str | int, msg: str) -> str:
     """Short deterministic hash that survives message truncation."""
     key = f'{tool}:{code}:{filepath}:{lineno}:{msg}'
-    return hashlib.sha1(key.encode()).hexdigest()[:8]
+    return hashlib.sha1(key.encode(), usedforsecurity=False).hexdigest()[:8]  # nosec B324
 
 
 def _make_title(tool: str, code: str, msg: str, fname: str, lineno: str | int,
