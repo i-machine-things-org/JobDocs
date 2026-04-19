@@ -3,7 +3,7 @@ Database Integration Module for JobDocs
 Placeholder code for connecting to JobBOSS, ERP systems, or other SQL databases
 
 Copyright (c) 2025 JobDocs Contributors
-Licensed under the MIT License - see LICENSE file for details
+Licensed under the GNU General Public License v3.0 - see LICENSE file for details
 
 This module provides a foundation for:
 - Connecting to various database types (MSSQL, MySQL, PostgreSQL)
