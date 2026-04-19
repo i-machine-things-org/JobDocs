@@ -11,9 +11,9 @@ import shutil
 from pathlib import Path
 from typing import List
 from PyQt6.QtWidgets import (
-    QWidget, QMessageBox, QTreeWidgetItem, QButtonGroup
+    QWidget, QTreeWidgetItem, QButtonGroup
 )
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6 import uic
 
 from core.base_module import BaseModule
@@ -51,7 +51,10 @@ class JobTreeWorker(QThread):
                 if self.show_all_customers:
                     customers = [d for d in os.listdir(cf_dir) if os.path.isdir(os.path.join(cf_dir, d))]
                 else:
-                    customers = [self.selected_customer] if os.path.isdir(os.path.join(cf_dir, self.selected_customer)) else []
+                    customers = (
+                        [self.selected_customer]
+                        if os.path.isdir(os.path.join(cf_dir, self.selected_customer)) else []
+                    )
 
                 for customer in sorted(customers):
                     if self._is_cancelled:

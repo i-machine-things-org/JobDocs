@@ -92,8 +92,10 @@ class SearchWorker(QThread):
                 continue
 
             try:
-                customers = [d for d in os.listdir(base_dir)
-                           if os.path.isdir(os.path.join(base_dir, d))]
+                customers = [
+                    d for d in os.listdir(base_dir)
+                    if os.path.isdir(os.path.join(base_dir, d))
+                ]
             except OSError:
                 continue
 

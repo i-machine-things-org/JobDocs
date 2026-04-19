@@ -10,8 +10,7 @@ import sys
 import shutil
 from pathlib import Path
 from typing import List
-from PyQt6.QtWidgets import QWidget, QMessageBox
-from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QWidget
 from PyQt6 import uic
 
 from core.base_module import BaseModule

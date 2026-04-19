@@ -12,18 +12,18 @@ INSTRUCTIONS:
 5. That's it! The module loader will automatically discover it
 """
 
-import os
+import os  # noqa: F401
 import sys
 from pathlib import Path
 from typing import List, Any
-from PyQt6.QtWidgets import (
+from PyQt6.QtWidgets import (  # noqa: F401
     QWidget, QVBoxLayout, QLabel, QPushButton, QMessageBox
 )
-from PyQt6 import uic
+from PyQt6 import uic  # noqa: F401
 
 from core.base_module import BaseModule
-from shared.widgets import DropZone  # Optional: if you need file drops
-from shared.utils import get_os_text  # Optional: if you need OS-specific text
+from shared.widgets import DropZone  # noqa: F401  # Optional: if you need file drops
+from shared.utils import get_os_text  # noqa: F401  # Optional: if you need OS-specific text
 
 
 class TemplateModule(BaseModule):

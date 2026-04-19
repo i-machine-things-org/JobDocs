@@ -1392,7 +1392,9 @@ class FilePreviewWidget(QWidget):
         raise AssertionError("unreachable")
 
 
-def _draw_image_fitted(painter: 'QPainter', img: 'QImage', page_rect: 'QRectF') -> None:  # type: ignore[name-defined]  # noqa: F821
+def _draw_image_fitted(
+        painter: 'QPainter', img: 'QImage', page_rect: 'QRectF',  # noqa: F821
+) -> None:  # type: ignore[name-defined]
     """Draw img centred and scaled to fit page_rect preserving aspect ratio."""
     from PyQt6.QtCore import QRectF as _QRectF
     img_ratio = img.width() / max(img.height(), 1)
@@ -1432,7 +1434,7 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
     _RENDERABLE = _IMAGE_EXTS | {'.pdf'}
 
     renderable = [p for p in paths if os.path.isfile(p) and Path(p).suffix.lower() in _RENDERABLE]
-    fallback   = [p for p in paths if os.path.isfile(p) and Path(p).suffix.lower() not in _RENDERABLE]
+    fallback = [p for p in paths if os.path.isfile(p) and Path(p).suffix.lower() not in _RENDERABLE]
 
     cancelled = False
     failed_pre_render: list[str] = []
