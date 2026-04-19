@@ -195,8 +195,7 @@ class _PluginInstallWorker(QThread):
 
 
 class JobDocsMainWindow(QMainWindow):
-    """Main application window with modular plugin system
-    comment out to remove from settings"""
+    """Main application window with modular plugin system"""
 
     DEFAULT_SETTINGS = {
         'blueprints_dir': '',
@@ -222,7 +221,7 @@ class JobDocsMainWindow(QMainWindow):
 #        'remote_server_path': '',  # Network path or URL for remote settings sync
         'report_template_path': '',  # Path to Excel template for Report Fixer
         'suppress_bp_link_notification': False,  # Suppress "linked to blueprints" confirmation dialog
-        'skip_image_attachments': False,
+        'skip_image_attachments': True,
     }
 
     def __init__(self):
