@@ -20,7 +20,7 @@ No exceptions.
 - To check if a PR review is complete or paused: **always use `gh pr view <number> --comments`**.
 - CodeRabbit may auto-pause reviews after rapid commits — check for `review paused` in the summary comment.
 - If paused, trigger a new run with: `gh pr comment <number> --body "@coderabbitai review"`
-- If CR hits a rate limit (`Rate limit exceeded`), note the remaining wait time and re-trigger as soon as the user next interacts with the session after the window has cleared.
+- If CR hits a rate limit (`Rate limit exceeded`), run `date -u` to get the current UTC time, calculate the UTC timestamp when the window clears, and state it explicitly (e.g. "clears at 05:04 UTC"). Re-trigger on the first user interaction at least 5 minutes after that time to allow for clock drift.
 - **Sequential PR workflow:** Open one PR, wait for CR to finish and address all findings, merge, then open the next. Do not trigger multiple concurrent CodeRabbit reviews.
 
 ## Trigger Prompt
