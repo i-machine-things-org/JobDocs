@@ -1467,6 +1467,12 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
             _papersize = os.environ.get('PAPERSIZE', '').lower()
             if not _papersize:
                 try:
+                    with open('/etc/papersize') as _pf:
+                        _papersize = _pf.read().strip().lower()
+                except OSError:
+                    pass
+            if not _papersize:
+                try:
                     import subprocess as _sp
                     _papersize = _sp.check_output(
                         ['paperconf'], text=True, timeout=1
