@@ -7,7 +7,7 @@ Common UI widgets used across multiple modules.
 from PyQt6.QtWidgets import (
     QFrame, QDialog, QVBoxLayout, QScrollArea, QLabel, QDialogButtonBox,
     QPushButton, QFileDialog, QLineEdit, QListWidget, QHBoxLayout,
-    QTreeWidget, QTreeWidgetItem, QCheckBox, QHeaderView,
+    QTreeWidget, QTreeWidgetItem, QHeaderView,
     QWidget, QSplitter, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
@@ -548,7 +548,7 @@ class DropZone(QFrame):
         try:
             plain_bytes = bytes(mime_data.data('text/plain'))
             plain = plain_bytes.decode('utf-8', errors='replace')
-            lines = [l for l in plain.splitlines() if l.strip()]
+            lines = [ln for ln in plain.splitlines() if ln.strip()]
             for line in lines:
                 cols = line.split('\t')
                 if cols[0].strip().lower() not in ('from', ''):
@@ -599,7 +599,10 @@ class DropZone(QFrame):
             return []
 
         if not descriptor_bytes or not content_bytes:
-            print(f"[DropZone] Empty descriptor ({len(descriptor_bytes)}) or content ({len(content_bytes)})", flush=True)
+            print(  # noqa: E501
+                f"[DropZone] Empty descriptor ({len(descriptor_bytes)}) or content ({len(content_bytes)})",
+                flush=True,
+            )
             return []
 
         # Parse FILEGROUPDESCRIPTOR(W): 4-byte count, then FILEDESCRIPTOR structs.
@@ -723,7 +726,7 @@ class DropZone(QFrame):
 
             if saved:
                 return [eml_path] + saved  # email first, then attachments
-            print(f"[DropZone] No attachments in .eml", flush=True)
+            print("[DropZone] No attachments in .eml", flush=True)
             return [eml_path]
 
         except Exception as e:
@@ -1250,8 +1253,8 @@ class FilePreviewWidget(QWidget):
     """
 
     _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp', '.ico'}
-    _CAD_EXTS   = {'.step', '.stp', '.iges', '.igs', '.x_t', '.x_b', '.prt', '.asm'}
-    _MESH_EXTS  = {'.stl', '.obj', '.ply', '.3mf'}
+    _CAD_EXTS = {'.step', '.stp', '.iges', '.igs', '.x_t', '.x_b', '.prt', '.asm'}
+    _MESH_EXTS = {'.stl', '.obj', '.ply', '.3mf'}
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1389,7 +1392,7 @@ class FilePreviewWidget(QWidget):
         raise AssertionError("unreachable")
 
 
-def _draw_image_fitted(painter: 'QPainter', img: 'QImage', page_rect: 'QRectF') -> None:  # type: ignore[name-defined]
+def _draw_image_fitted(painter: 'QPainter', img: 'QImage', page_rect: 'QRectF') -> None:  # type: ignore[name-defined]  # noqa: F821
     """Draw img centred and scaled to fit page_rect preserving aspect ratio."""
     from PyQt6.QtCore import QRectF as _QRectF
     img_ratio = img.width() / max(img.height(), 1)
