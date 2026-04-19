@@ -1571,7 +1571,7 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
             from PyQt6.QtGui import QKeySequence, QAction
 
             preview = QPrintPreviewDialog(preview_printer, parent)
-            preview.resize(710, 450)
+            preview.resize(720, 520)
             preview.paintRequested.connect(do_render)
 
             # Intercept the built-in Print toolbar button so we can render at
