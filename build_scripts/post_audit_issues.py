@@ -22,31 +22,19 @@ def _fetch_existing_titles() -> set:
     if _existing_titles is not None:
         return _existing_titles
 
-    # Paginate: gh issue list max is 1000 per call; loop until exhausted.
-    titles: set = set()
-    skip = 0
-    page_size = 100
-    while True:
-        result = subprocess.run(
-            ['gh', 'issue', 'list',
-             '--label', LABEL,
-             '--state', 'open',
-             '--json', 'title',
-             '--limit', str(page_size),
-             '--skip', str(skip)],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            print(f'ERROR: could not fetch existing issues: {result.stderr}', file=sys.stderr)
-            sys.exit(1)
-        page = json.loads(result.stdout or '[]')
-        for i in page:
-            titles.add(i['title'])
-        if len(page) < page_size:
-            break
-        skip += page_size
+    result = subprocess.run(
+        ['gh', 'issue', 'list',
+         '--label', LABEL,
+         '--state', 'open',
+         '--json', 'title',
+         '--limit', '1000'],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f'ERROR: could not fetch existing issues: {result.stderr}', file=sys.stderr)
+        sys.exit(1)
 
-    _existing_titles = titles
+    _existing_titles = {i['title'] for i in json.loads(result.stdout or '[]')}
     return _existing_titles
 
 
