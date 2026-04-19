@@ -1,6 +1,5 @@
 """Tests for shared/utils.py — pure functions only (no Qt, no filesystem side-effects)."""
 
-import pytest
 from shared.utils import (
     is_blueprint_file,
     parse_job_numbers,
