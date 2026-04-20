@@ -1466,19 +1466,28 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
             # apply Letter explicitly when the system says so.
             _papersize = os.environ.get('PAPERSIZE', '').lower()
             if not _papersize:
-                try:
-                    with open('/etc/papersize') as _pf:
-                        _papersize = _pf.read().strip().lower()
-                except OSError:
-                    pass
+                # /run/host/etc is the host-etc bind inside Flatpak;
+                # fall back to /etc/papersize on bare Linux.
+                for _ps_path in ('/run/host/etc/papersize', '/etc/papersize'):
+                    try:
+                        with open(_ps_path) as _pf:
+                            _papersize = _pf.read().strip().lower()
+                        if _papersize:
+                            break
+                    except OSError:
+                        pass
             if not _papersize:
-                try:
-                    import subprocess as _sp
-                    _papersize = _sp.check_output(
-                        ['paperconf'], text=True, timeout=1
-                    ).strip().lower()
-                except Exception:
-                    pass
+                import subprocess as _sp
+                _paperconf = shutil.which('paperconf')
+                if _paperconf:
+                    try:
+                        _papersize = _sp.check_output(
+                            [_paperconf], text=True, timeout=1
+                        ).strip().lower()
+                    except (FileNotFoundError,
+                            _sp.CalledProcessError,
+                            _sp.TimeoutExpired):
+                        pass
             if _papersize in ('letter', 'na_letter', 'usletter'):
                 from PyQt6.QtGui import QPageSize
                 preview_printer.setPageSize(QPageSize(QPageSize.PageSizeId.Letter))
