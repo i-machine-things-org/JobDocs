@@ -2030,3 +2030,11 @@ Actionable: ?  Nitpicks: 1
 
 Actionable: 2  Nitpicks: 0
 - Configuration used
+
+---
+
+## 2026-04-19 — `PR #223: fix: widen print preview dialog to 720px` — run 1
+
+Actionable: 1  Nitpicks: 0
+- Use Flatpak's host `/etc` mapping instead of `/etc/papersize`.
+- Configuration used

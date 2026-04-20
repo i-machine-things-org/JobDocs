@@ -8,6 +8,7 @@ finish-args:
   # Display — prefer Wayland, fall back to X11
   - --socket=wayland
   - --socket=fallback-x11
+  - --socket=cups
   - --share=network
   - --share=ipc
   # GPU acceleration for Qt rendering
@@ -19,6 +20,7 @@ finish-args:
   # TODO: replace with --filesystem=xdg-data/JobDocs + portal-based dir picker
   #       once core/settings_dialog.py uses QFileDialog with portal support.
   - --filesystem=home
+  - --filesystem=/etc/papersize:ro
 
 modules:
   - name: JobDocs

@@ -1461,6 +1461,37 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
             preview_printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
             preview_printer.setResolution(96)
 
+            # In Flatpak the sandbox may not inherit LC_PAPER/PAPERSIZE from
+            # the host, causing Qt to default to A4. Read the host env and
+            # apply Letter explicitly when the system says so.
+            _papersize = os.environ.get('PAPERSIZE', '').lower()
+            if not _papersize:
+                # /run/host/etc is the host-etc bind inside Flatpak;
+                # fall back to /etc/papersize on bare Linux.
+                for _ps_path in ('/run/host/etc/papersize', '/etc/papersize'):
+                    try:
+                        with open(_ps_path) as _pf:
+                            _papersize = _pf.read().strip().lower()
+                        if _papersize:
+                            break
+                    except OSError:
+                        pass
+            if not _papersize:
+                import subprocess as _sp
+                _paperconf = shutil.which('paperconf')
+                if _paperconf:
+                    try:
+                        _papersize = _sp.check_output(
+                            [_paperconf], text=True, timeout=1
+                        ).strip().lower()
+                    except (FileNotFoundError,
+                            _sp.CalledProcessError,
+                            _sp.TimeoutExpired):
+                        pass
+            if _papersize in ('letter', 'na_letter', 'usletter'):
+                from PyQt6.QtGui import QPageSize
+                preview_printer.setPageSize(QPageSize(QPageSize.PageSizeId.Letter))
+
             # Pre-cache at 48 DPI. Each A4 page is ~397×561 px — small enough
             # that QPicture serialisation and overview-mode replay are instant.
             # The actual print job re-renders from fitz at 200 DPI.
@@ -1571,13 +1602,21 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
             from PyQt6.QtGui import QKeySequence, QAction
 
             preview = QPrintPreviewDialog(preview_printer, parent)
-            preview.resize(710, 450)
+            preview.resize(720, 520)
             preview.paintRequested.connect(do_render)
 
             # Intercept the built-in Print toolbar button so we can render at
             # 200 DPI on a native HighResolution printer, not the PDF preview printer.
             def _do_print() -> None:
                 _print_printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+                # Carry over page settings the user configured in the preview
+                # (orientation, paper size, margins) to the real print job.
+                _print_printer.setPageOrientation(preview_printer.pageLayout().orientation())
+                _print_printer.setPageSize(preview_printer.pageLayout().pageSize())
+                _print_printer.setPageMargins(
+                    preview_printer.pageLayout().margins(),
+                    preview_printer.pageLayout().units(),
+                )
                 _pdlg = QPrintDialog(_print_printer, preview)
                 if _pdlg.exec() != QPrintDialog.DialogCode.Accepted:
                     return
