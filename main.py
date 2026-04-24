@@ -500,6 +500,9 @@ class JobDocsMainWindow(QMainWindow):
         install_plugin_action = file_menu.addAction("&Install Plugin...")  # pyright: ignore[reportOptionalMemberAccess]
         install_plugin_action.triggered.connect(self.install_plugin)  # pyright: ignore[reportOptionalMemberAccess]
 
+        uninstall_plugin_action = file_menu.addAction("&Uninstall Plugin...")  # pyright: ignore[reportOptionalMemberAccess]
+        uninstall_plugin_action.triggered.connect(self.uninstall_plugin)  # pyright: ignore[reportOptionalMemberAccess]
+
         file_menu.addSeparator()  # pyright: ignore[reportOptionalMemberAccess]
 
         exit_action = file_menu.addAction("E&xit")  # pyright: ignore[reportOptionalMemberAccess]
@@ -622,6 +625,64 @@ class JobDocsMainWindow(QMainWindow):
         self._install_progress.close()
         QMessageBox.critical(self, "Install Plugin", message)
         worker.deleteLater()
+
+    def uninstall_plugin(self):
+        """List installed plugins and remove the one the user selects."""
+        plugins_dir = self._get_plugins_dir()
+        if not plugins_dir or not plugins_dir.exists():
+            QMessageBox.information(self, "Uninstall Plugin", "No plugins directory found.")
+            return
+
+        try:
+            entries = list(plugins_dir.iterdir())
+        except OSError as e:
+            QMessageBox.critical(self, "Uninstall Plugin", f"Could not scan plugins directory:\n{e}")
+            return
+
+        installed_raw = []
+        for d in entries:
+            try:
+                if d.is_dir() and (d / "module.py").exists():
+                    installed_raw.append(d)
+            except OSError:
+                pass
+        installed = sorted(installed_raw, key=lambda p: p.name.lower())
+        if not installed:
+            QMessageBox.information(self, "Uninstall Plugin", "No installed plugins found.")
+            return
+
+        names = [d.name for d in installed]
+        choice, ok = QInputDialog.getItem(
+            self, "Uninstall Plugin", "Select plugin to uninstall:", names, 0, False
+        )
+        if not ok or not choice:
+            return
+
+        confirm = QMessageBox.question(
+            self, "Uninstall Plugin",
+            f"Remove plugin '{choice}'? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        target = plugins_dir / choice
+        try:
+            shutil.rmtree(target)
+        except (OSError, shutil.Error) as e:
+            QMessageBox.critical(self, "Uninstall Plugin", f"Failed to remove plugin:\n{e}")
+            return
+
+        disabled = self.settings.get("disabled_modules", [])
+        if choice in disabled:
+            disabled.remove(choice)
+            self.settings["disabled_modules"] = disabled
+            self.save_settings()
+
+        QMessageBox.information(
+            self, "Uninstall Plugin",
+            f"Plugin '{choice}' removed. Restart JobDocs to complete uninstall."
+        )
 
     def show_getting_started(self):
         """Show getting started guide"""
