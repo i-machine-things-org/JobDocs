@@ -59,7 +59,7 @@ class ModuleLoader:
         is_frozen = getattr(sys, 'frozen', False)
 
         # Deprecated modules (kept in codebase but not loaded)
-        deprecated_modules = {'add_to_job'}
+        deprecated_modules = frozenset({'add_to_job'})
 
         if is_frozen:
             # In frozen mode, start with the hardcoded list of built-in modules.
