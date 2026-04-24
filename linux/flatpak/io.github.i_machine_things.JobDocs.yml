@@ -20,7 +20,7 @@ finish-args:
   # TODO: replace with --filesystem=xdg-data/JobDocs + portal-based dir picker
   #       once core/settings_dialog.py uses QFileDialog with portal support.
   - --filesystem=home
-  - --filesystem=/etc/papersize:ro
+  - --filesystem=host-etc:ro
 
 modules:
   - name: JobDocs
