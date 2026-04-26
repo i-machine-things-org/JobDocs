@@ -23,6 +23,8 @@ finish-args:
   - --filesystem=home
   - --filesystem=host-etc:ro
   - --filesystem=/run/systemd/resolve:ro
+  # Allow flatpak-spawn --host so plugin installer can run pip on the host
+  - --talk-name=org.freedesktop.Flatpak
 
 cleanup-commands:
   - /app/cleanup-BaseApp.sh

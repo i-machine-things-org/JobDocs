@@ -155,20 +155,21 @@ class _PluginInstallWorker(QThread):
         if not req_file.exists():
             return ''
 
-        # On Flatpak, /app is read-only at runtime; pip installs will always fail.
-        # Manual install via sys.executable is also unsupported (same read-only runtime).
-        if os.getenv('FLATPAK_ID'):
-            return (
-                "\n\nDependency installation is not supported inside a Flatpak build.\n"
-                "Install the plugin's dependencies on the host system before use."
-            )
-
         try:
             self.status.emit("Installing dependencies...")
-            flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            if os.getenv('FLATPAK_ID'):
+                # Inside Flatpak /app is read-only; use flatpak-spawn to run pip
+                # on the host Python so deps land in the host user site-packages
+                # and are visible when the plugin imports them at runtime.
+                cmd = ['flatpak-spawn', '--host', 'pip', 'install',
+                       '--user', '--no-warn-script-location', '-r', str(req_file)]
+                flags = 0
+            else:
+                cmd = [sys.executable, '-m', 'pip', 'install',
+                       '--no-warn-script-location', '-r', str(req_file)]
+                flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             proc = subprocess.Popen(
-                [sys.executable, '-m', 'pip', 'install',
-                 '--no-warn-script-location', '-r', str(req_file)],
+                cmd,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, creationflags=flags,
             )
@@ -182,6 +183,9 @@ class _PluginInstallWorker(QThread):
             if proc.returncode == 0:
                 return ''
             err = '\n'.join(output_lines[-20:])
+            if os.getenv('FLATPAK_ID'):
+                return (f"\n\nDependency installation failed.\n"
+                        f"Run on your host terminal:\n  pip install --user -r \"{req_file}\"\n\nError: {err}")
             return (f"\n\nDependency installation failed.\n"
                     f"Run manually: \"{sys.executable}\" -m pip install -r \"{req_file}\"\n\nError: {err}")
         except Exception as exc:

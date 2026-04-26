@@ -25,6 +25,9 @@ finish-args:
   # to /run/systemd/resolve/stub-resolv.conf. Without this mount the symlink
   # target is unreachable inside the sandbox and DNS fails (Errno -3).
   - --filesystem=/run/systemd/resolve:ro
+  # Allow flatpak-spawn --host so plugin installer can run pip on the host
+  # to install plugin dependencies into the host user's site-packages.
+  - --talk-name=org.freedesktop.Flatpak
 
 modules:
   - name: JobDocs
