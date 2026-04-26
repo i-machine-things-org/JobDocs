@@ -131,6 +131,13 @@ git push origin v1.2.3
 
 **Note:** Only tag from `master`.
 
+**Do not tag until proven working.** Before tagging any release:
+1. If CI workflow changes are involved, trigger a `workflow_dispatch` manual run and confirm every job passes.
+2. If Flatpak changes are involved, do a local build with `bash linux/flatpak/build-local.sh` and verify the app launches.
+3. Only tag after all jobs are green and the feature has been manually tested end-to-end.
+
+Never tag speculatively to "test" CI — use `workflow_dispatch` instead.
+
 **SignPath:** Apply at https://signpath.io/product/open-source. Once approved, uncomment the signing step in `build-release.yml` and add `SIGNPATH_API_TOKEN` and `SIGNPATH_ORG_ID` to GitHub Actions secrets.
 
 ### Automatic Version Bump Triggers
