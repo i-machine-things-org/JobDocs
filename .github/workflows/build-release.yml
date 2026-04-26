@@ -272,7 +272,6 @@ jobs:
   # ---------------------------------------------------------------------------
   publish-flatpak-repo:
     needs: build-flatpak
-    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
