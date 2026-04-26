@@ -145,27 +145,33 @@ class _PluginInstallWorker(QThread):
         self._plugins_dir = plugins_dir
 
     def _install_deps(self, plugin_dir: Path) -> str:
-        """Install plugin requirements into the embedded Python's site-packages.
+        """Install plugin requirements into a JobDocs-managed deps directory.
 
-        Uses sys.executable (the embedded runtime\\python.exe in a release build,
-        or the dev Python when running from source). Returns a non-empty warning
-        string on failure, or '' on success / no requirements.txt present.
+        Deps land in <data_dir>/deps/ (a sibling of plugins/) so they are
+        isolated from the system Python and survive across plugin updates.
+        Returns a non-empty warning string on failure, or '' on success /
+        no requirements.txt present.
         """
         req_file = plugin_dir / 'requirements.txt'
         if not req_file.exists():
             return ''
 
+        # deps/ is a sibling of plugins/ inside the writable data dir
+        deps_dir = plugin_dir.parent.parent / 'deps'
+        deps_dir.mkdir(parents=True, exist_ok=True)
+
         try:
             self.status.emit("Installing dependencies...")
             if os.getenv('FLATPAK_ID'):
-                # Inside Flatpak /app is read-only; use flatpak-spawn to run pip
-                # on the host Python so deps land in the host user site-packages
-                # and are visible when the plugin imports them at runtime.
+                # /app is read-only at runtime; spawn pip on the host so it can
+                # write to the deps dir (same absolute path, accessible on host).
                 cmd = ['flatpak-spawn', '--host', 'pip', 'install',
-                       '--user', '--no-warn-script-location', '-r', str(req_file)]
+                       '--target', str(deps_dir),
+                       '--no-warn-script-location', '-r', str(req_file)]
                 flags = 0
             else:
                 cmd = [sys.executable, '-m', 'pip', 'install',
+                       '--target', str(deps_dir),
                        '--no-warn-script-location', '-r', str(req_file)]
                 flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
             proc = subprocess.Popen(
@@ -183,11 +189,8 @@ class _PluginInstallWorker(QThread):
             if proc.returncode == 0:
                 return ''
             err = '\n'.join(output_lines[-20:])
-            if os.getenv('FLATPAK_ID'):
-                return (f"\n\nDependency installation failed.\n"
-                        f"Run on your host terminal:\n  pip install --user -r \"{req_file}\"\n\nError: {err}")
             return (f"\n\nDependency installation failed.\n"
-                    f"Run manually: \"{sys.executable}\" -m pip install -r \"{req_file}\"\n\nError: {err}")
+                    f"Error: {err}")
         except Exception as exc:
             return f"\n\nDependency installation failed: {exc}"
 

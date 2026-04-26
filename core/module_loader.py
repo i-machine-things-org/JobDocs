@@ -149,6 +149,13 @@ class ModuleLoader:
         if plugin_dir is not None:
             # External plugin — always load from the filesystem (works in both
             # dev and frozen/exe mode; plugin .py files are not bundled in the exe).
+
+            # Ensure the shared deps dir (sibling of plugins/) is on sys.path so
+            # that plugin dependencies installed there are importable.
+            deps_dir = str(plugin_dir.parent / 'deps')
+            if deps_dir not in sys.path:
+                sys.path.insert(0, deps_dir)
+
             module_path = plugin_dir / module_name / 'module.py'
             if not module_path.exists():
                 raise ImportError(f"Plugin module file not found: {module_path}")
