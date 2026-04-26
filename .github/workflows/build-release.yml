@@ -290,7 +290,7 @@ jobs:
           path: flatpak-repo
 
       - name: Rebuild repo summary
-        run: flatpak build-update-repo --prune --prune-depth=2 flatpak-repo
+        run: flatpak build-update-repo flatpak-repo
 
       - name: Publish to gh-pages
         run: |
