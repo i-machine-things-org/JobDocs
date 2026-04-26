@@ -300,6 +300,7 @@ jobs:
       - name: Sign and update repo summary
         run: |
           mkdir -p flatpak-repo/refs/remotes
+          flatpak build-sign flatpak-repo --gpg-sign="$GPG_KEY_ID"
           flatpak build-update-repo --gpg-sign="$GPG_KEY_ID" flatpak-repo
 
       - name: Publish to gh-pages
