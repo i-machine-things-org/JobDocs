@@ -21,6 +21,10 @@ finish-args:
   #       once core/settings_dialog.py uses QFileDialog with portal support.
   - --filesystem=home
   - --filesystem=host-etc:ro
+  # On systemd-resolved distros (Ubuntu, Debian) /etc/resolv.conf is a symlink
+  # to /run/systemd/resolve/stub-resolv.conf. Without this mount the symlink
+  # target is unreachable inside the sandbox and DNS fails (Errno -3).
+  - --filesystem=/run/systemd/resolve:ro
 
 modules:
   - name: JobDocs

@@ -47,6 +47,9 @@ Thumbs.db
 test_output/
 old/
 
+# Locally installed plugins (managed at runtime, not source)
+/plugins/
+
 # Shared addon packages dir (managed at runtime via pip, not checked in)
 # Lives in %LOCALAPPDATA%\JobDocs\AddonPackages\ — dev symlink if present
 /AddonPackages/
