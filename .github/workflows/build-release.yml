@@ -307,6 +307,47 @@ jobs:
           mkdir -p /tmp/gh-pages/repo
           cp -r flatpak-repo/. /tmp/gh-pages/repo/
           touch /tmp/gh-pages/.nojekyll
+
+          VERSION="${{ github.ref_name }}"
+          REPO="${{ github.repository }}"
+          RELEASES_URL="https://github.com/${REPO}/releases"
+
+          cat > /tmp/gh-pages/index.html << EOF
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>JobDocs Flatpak Repository</title>
+            <style>
+              body { font-family: sans-serif; max-width: 700px; margin: 60px auto; padding: 0 20px; color: #222; }
+              h1 { font-size: 1.8rem; }
+              pre { background: #f4f4f4; padding: 12px 16px; border-radius: 6px; overflow-x: auto; }
+              a { color: #0969da; }
+              .badge { display: inline-block; background: #0969da; color: #fff; padding: 2px 10px; border-radius: 12px; font-size: 0.85rem; margin-left: 8px; }
+            </style>
+          </head>
+          <body>
+            <h1>JobDocs <span class="badge">${VERSION}</span></h1>
+            <p>Job tracking and documentation for machine shops — Linux Flatpak repository.</p>
+
+            <h2>Add this repository to Discover</h2>
+            <p>Download and open the <a href="${RELEASES_URL}/latest/download/io.github.i_machine_things.JobDocs.flatpakrepo">.flatpakrepo file</a> — KDE Discover will prompt you to add it automatically.</p>
+            <p>Or from the terminal:</p>
+            <pre>flatpak remote-add --user jobdocs https://i-machine-things-org.github.io/JobDocs/repo</pre>
+            <p>Then install:</p>
+            <pre>flatpak install jobdocs io.github.i_machine_things.JobDocs</pre>
+
+            <h2>Releases</h2>
+            <p>All releases including Windows installer and Linux Flatpak bundle:</p>
+            <p><a href="${RELEASES_URL}">${RELEASES_URL}</a></p>
+
+            <h2>Source</h2>
+            <p><a href="https://github.com/${REPO}">https://github.com/${REPO}</a></p>
+          </body>
+          </html>
+          EOF
+
           cd /tmp/gh-pages
           git init
           git checkout --orphan gh-pages
