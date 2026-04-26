@@ -54,14 +54,15 @@ old/
 # Lives in %LOCALAPPDATA%\JobDocs\AddonPackages\ — dev symlink if present
 /AddonPackages/
 
-# Flatpak — files staged by CI before flatpak-builder runs (not source files)
+# Flatpak — files staged by CI/local build (not source files)
 linux/flatpak/src/
 linux/flatpak/JobDocs
 linux/flatpak/icon_256x256.png
 
-# Flatpak builder output
+# Flatpak local build output
 flatpak-build/
 flatpak-repo/
+.flatpak-builder/
 *.flatpak
 
 # Build artifacts (all platforms)

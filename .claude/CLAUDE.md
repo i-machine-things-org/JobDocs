@@ -65,7 +65,38 @@ Rules:
 - If a new feature is added or changed, update the top-level README.md before committing.
 - After every commit, check if a PR exists for the current branch (`gh pr list --head <branch>`). If none exists, open one immediately via `gh pr create`. Never leave a commit on a feature branch without an open PR.
 
-## Rule 3: Report Fixer Is a Plugin — Not In This Repo
+## Rule 3: Test Flatpak Locally Before Pushing
+
+Before pushing any commit that touches Flatpak manifests, launcher scripts, or
+`main.py` startup code, do a local Flatpak build and verify it launches:
+
+```bash
+# Stage source + wheels (mirrors what CI does)
+mkdir -p linux/flatpak/src
+for item in main.py core modules shared sample_files requirements.txt; do
+    [ -e "$item" ] && cp -r "$item" linux/flatpak/src/
+done
+pip download --only-binary :all: -d linux/flatpak/src/wheels/ -r requirements.txt
+cp JobDocs.iconset/icon_256x256.png linux/flatpak/icon_256x256.png
+
+# Build and install locally
+flatpak-builder --user --install --force-clean flatpak-build \
+    linux/flatpak/io.github.i_machine_things.JobDocs.yml
+
+# Run and verify
+flatpak run io.github.i_machine_things.JobDocs
+```
+
+Requires `org.freedesktop.Platform//24.08` and `org.freedesktop.Sdk//24.08`
+installed via Flathub. All build artifacts (`linux/flatpak/src/`, `flatpak-build/`,
+`flatpak-repo/`, `.flatpak-builder/`, `*.flatpak`) are gitignored.
+
+Only push and tag after confirming the local build works. Never tag a Flatpak
+fix release without a local build test first.
+
+---
+
+## Rule 3b: Report Fixer Is a Plugin — Not In This Repo
 
 Report Fixer is a standalone plugin maintained at `H:\Jobdocs\jobdocs-report-fixer`. It is loaded at runtime from the `plugins/` directory alongside the installed executable.
 
