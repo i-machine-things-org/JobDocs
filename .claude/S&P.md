@@ -2041,6 +2041,19 @@ Actionable: 1  Nitpicks: 0
 
 ---
 
+## 2026-04-23 — `PR #226: fix: prevent print settings from leaking to system defaults` — run 1
+
+**Review:** CodeRabbit flagged missing guard for empty printer list in custom print dialog.
+**Result:** Fix applied.
+
+### Findings
+
+1. **No guard when `QPrinterInfo.availablePrinters()` is empty** — `shared/widgets.py`
+   - Dialog could show with an empty combo and OK enabled, leading to a crash or nonsensical print job
+   - Fix: check `available` before building the dialog; show `QMessageBox.warning` and return early
+
+---
+
 ## 2026-04-23 — `PR #227: feat: add Uninstall Plugin menu action` — run 1
 
 **Review:** CodeRabbit flagged unsafe exception handling in `uninstall_plugin`.
@@ -2077,4 +2090,63 @@ Actionable: 1  Nitpicks: 0
 
 Actionable: ?  Nitpicks: 1
 - Consider reusing shared plugin discovery logic to avoid drift.
+- Configuration used
+
+---
+
+## 2026-04-24 — `PR #226: fix: prevent print settings from leaking to system defaults` — run 1
+
+Actionable: 1  Nitpicks: 0
+- Configuration used
+
+---
+
+## 2026-04-24 — `PR #226: fix: prevent print settings from leaking to system defaults` — run 2
+
+Actionable: 3  Nitpicks: 0
+- Configuration used
+
+### Findings (all resolved in commit 3fdc964)
+
+1. **Plain function connected to cross-thread signal runs on worker thread** — `shared/widgets.py`
+   - `_on_raster_done` was a plain Python closure; in PyQt6 plain callables connected to a QThread
+     signal use DirectConnection and execute in the emitter's thread, not the main thread
+   - Fix: replaced with `_RasterReceiver(QObject)` whose `@pyqtSlot` methods live on the main thread;
+     Qt auto-selects QueuedConnection for cross-thread delivery to a QObject
+
+2. **All PDF pages buffered as 200 DPI QImages before painting** — `shared/widgets.py`
+   - Large documents could exhaust memory before any pages were printed
+   - Fix: `_PrintRasterWorker` now emits `page_ready(QImage)` per page; `_RasterReceiver.on_page`
+     paints each page immediately via `QPainter`, calling `newPage()` between pages
+
+3. **Null QImage silently dropped for non-PDF files** — `shared/widgets.py`
+   - If `QImage(path)` fails, the file was skipped with no user feedback
+   - Fix: `else: failed.append(os.path.basename(path))` now reports the failure
+
+4. **`done` signal never emitted if exception escapes `run()`** — `shared/widgets.py`
+   - An unhandled exception would leave `_RasterReceiver` waiting forever (painter never ended)
+   - Fix: wrapped the entire loop body in `try/finally: self.done.emit(failed)`
+
+---
+
+## 2026-04-24 — `PR #226: fix: prevent print settings from leaking to system defaults` — run 3
+
+Actionable: 1 (duplicate)  Nitpicks: 1 — both resolved in commit c154851
+
+### Findings
+
+1. **Null QImage silently dropped at preview preflight** — `shared/widgets.py` line ~1638
+   - Same null-image pattern as worker path; preview preflight loop also dropped files silently
+   - Fix: `else: failed_pre_render.append(os.path.basename(path))` so file surfaces in warning dialog
+
+2. **Dead `_render_to` synchronous render path** — `shared/widgets.py`
+   - `_render_to()` and `failed_print_render` were unreachable after move to `_RasterReceiver`
+   - Fix: deleted both; worker-based path is the sole render path
+
+---
+
+## 2026-04-24 — `PR #226: fix: prevent print settings from leaking to system defaults` — run 4
+
+Actionable: 1  Nitpicks: 0
+- Skip the preview when nothing survived pre-load.
 - Configuration used

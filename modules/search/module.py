@@ -363,7 +363,7 @@ class SearchModule(BaseModule):
         folder_layout.setContentsMargins(5, 5, 5, 5)
         self.folder_contents_list = QListWidget()
         self.folder_contents_list.setAlternatingRowColors(True)
-        self.folder_contents_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        self.folder_contents_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
 
         self.file_preview = FilePreviewWidget()
         self.file_preview.setMinimumHeight(80)

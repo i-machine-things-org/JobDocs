@@ -10,8 +10,8 @@ from PyQt6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QHeaderView,
     QWidget, QSplitter, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QPixmap
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, pyqtSlot, QSize, QThread
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QImage, QPixmap
 from pathlib import Path
 import atexit
 import logging
@@ -1410,6 +1410,148 @@ def _draw_image_fitted(
     painter.drawImage(_QRectF(x, y, w, h), img)
 
 
+_active_print_workers: set = set()
+
+
+class _PrintRasterWorker(QThread):
+    """Rasterizes print files to QImages on a background thread.
+
+    QPrinter/QPainter on Windows requires the main (GUI) thread for all GDI
+    operations.  We separate the slow CPU work (PDF → QImage via PyMuPDF) from
+    the fast paint step, which runs on the main thread via the page_ready signal.
+
+    A threading.Event gate (_page_ack) enforces one-page-at-a-time flow:
+    the worker blocks after each emit until the GUI thread signals the page
+    has been painted.  This prevents all rasterized pages from piling up in
+    the Qt event queue while Windows' "Save As" dialog (shown by PDF printer
+    drivers during StartDoc) is blocking the GUI thread.
+    """
+    page_ready = pyqtSignal(object)  # QImage — one rasterized page
+    done = pyqtSignal(object)        # list[str] — failed file names
+
+    def __init__(self, files, fitz_mod, dpi):
+        import threading
+        super().__init__()
+        self._files = files
+        self._fitz = fitz_mod
+        self._dpi = dpi
+        self._page_ack = threading.Event()
+
+    def _emit_page(self, img) -> bool:
+        """Emit one page and wait for the GUI thread to paint it. Returns False if interrupted."""
+        self._page_ack.clear()
+        self.page_ready.emit(img)
+        self._page_ack.wait()
+        return not self.isInterruptionRequested()
+
+    def run(self):
+        failed: list = []
+        try:
+            for path in self._files:
+                if self.isInterruptionRequested():
+                    break
+                ext = Path(path).suffix.lower()
+                if ext == '.pdf' and self._fitz is not None:
+                    try:
+                        doc = self._fitz.open(path)
+                        try:
+                            for page_num in range(doc.page_count):
+                                if self.isInterruptionRequested():
+                                    break
+                                pg = doc[page_num]
+                                pix = pg.get_pixmap(
+                                    matrix=self._fitz.Matrix(self._dpi / 72, self._dpi / 72),
+                                    alpha=False,
+                                )
+                                samples = bytes(pix.samples)
+                                img = QImage(
+                                    samples, pix.width, pix.height,
+                                    pix.stride, QImage.Format.Format_RGB888,
+                                ).copy()
+                                if not self._emit_page(img):
+                                    break
+                        finally:
+                            doc.close()
+                    except Exception:
+                        logger.warning(
+                            "print_files_with_dialog: failed to rasterize PDF %s",
+                            path, exc_info=True,
+                        )
+                        failed.append(os.path.basename(path))
+                else:
+                    img = QImage(path)
+                    if img.isNull():
+                        failed.append(os.path.basename(path))
+                    elif not self._emit_page(img):
+                        break
+        finally:
+            self.done.emit(failed)
+
+
+class _RasterReceiver(QObject):
+    """Receives rasterized pages from _PrintRasterWorker on the main GUI thread.
+
+    Instantiated on the main thread so Qt auto-selects QueuedConnection for
+    cross-thread signal delivery, guaranteeing QPainter/QPrinter operations
+    run on the GUI thread (required by Windows GDI/COM).
+    """
+
+    def __init__(self, printer, parent_widget, worker):
+        super().__init__()
+        self._printer = printer
+        self._parent_widget = parent_widget
+        self._worker = worker
+        self._painter = None
+        self._page_rect = None
+        self._start_failed = False  # set True once StartDoc failure is detected
+
+    @pyqtSlot(object)
+    def on_page(self, img) -> None:
+        from PyQt6.QtGui import QPainter
+        from PyQt6.QtCore import QRectF
+        if self._start_failed:
+            # StartDoc already failed — ack so the worker can exit cleanly.
+            self._worker._page_ack.set()
+            return
+        if self._painter is None:
+            self._painter = QPainter(self._printer)
+            if not self._painter.isActive():
+                logger.error("print_files_with_dialog: QPainter failed to start on printer %s",
+                             self._printer.printerName())
+                self._painter = None
+                self._start_failed = True
+                self._worker.requestInterruption()
+                self._worker._page_ack.set()
+                return
+            self._page_rect = QRectF(self._painter.viewport())
+        else:
+            self._printer.newPage()
+            self._page_rect = QRectF(self._painter.viewport())
+        _draw_image_fitted(self._painter, img, self._page_rect)
+        # Unblock the worker so it can rasterize the next page.
+        self._worker._page_ack.set()
+
+    @pyqtSlot(object)
+    def on_done(self, failed) -> None:
+        if self._painter is not None:
+            self._painter.end()
+            self._painter = None
+        elif not failed:
+            # Painter never started — treat all files as failed so the user
+            # gets an error message instead of silent no-output.
+            failed = [os.path.basename(p) for p in (self._worker._files or [])]
+        if failed:
+            names = '\n'.join(f'  • {n}' for n in sorted(set(failed)))
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self._parent_widget, "Print",
+                f"Could not be rendered for printing:\n{names}",
+            )
+        _active_print_workers.discard(self._worker)
+        _active_print_workers.discard(self)
+        self.deleteLater()
+
+
 def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
     """Show a print dialog then render and print each file.
 
@@ -1438,7 +1580,6 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
 
     cancelled = False
     failed_pre_render: list[str] = []
-    failed_print_render: list[str] = []
     if renderable:
         # Pre-check fitz so the paintRequested closure doesn't import on every call
         try:
@@ -1535,55 +1676,18 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
                     if not img.isNull():
                         preview_cache.append(img)
                         renderable_for_print.append(path)
+                    else:
+                        failed_pre_render.append(os.path.basename(path))
 
-            def _render_to(pr: 'QPrinter', dpi: float) -> None:
-                """Render renderable files to pr at the given DPI."""
-                _pa = QPainter(pr)
-                try:
-                    _pr = QRectF(_pa.viewport())
-                    _first = True
-                    for path in renderable_for_print:
-                        ext = Path(path).suffix.lower()
-                        if ext == '.pdf' and _fitz is not None:
-                            try:
-                                doc = _fitz.open(path)
-                                try:
-                                    for page_num in range(doc.page_count):
-                                        if not _first:
-                                            pr.newPage()
-                                            _pr = QRectF(_pa.viewport())
-                                        _first = False
-                                        pg = doc[page_num]
-                                        pix = pg.get_pixmap(
-                                            matrix=_fitz.Matrix(dpi / 72, dpi / 72),
-                                            alpha=False,
-                                        )
-                                        samples = bytes(pix.samples)
-                                        img = QImage(
-                                            samples, pix.width, pix.height,
-                                            pix.stride, QImage.Format.Format_RGB888,
-                                        ).copy()
-                                        _draw_image_fitted(_pa, img, _pr)
-                                finally:
-                                    doc.close()
-                            except Exception:
-                                logger.warning(
-                                    "print_files_with_dialog: failed to render"
-                                    " PDF %s at %.0f DPI",
-                                    path, dpi, exc_info=True,
-                                )
-                                failed_print_render.append(os.path.basename(path))
-                        else:
-                            img = QImage(path)
-                            if img.isNull():
-                                continue
-                            if not _first:
-                                pr.newPage()
-                                _pr = QRectF(_pa.viewport())
-                            _first = False
-                            _draw_image_fitted(_pa, img, _pr)
-                finally:
-                    _pa.end()
+            if not renderable_for_print:
+                if failed_pre_render:
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.warning(
+                        parent, "Print",
+                        "Could not load the following file(s) for printing:\n\n"
+                        + "\n".join(failed_pre_render),
+                    )
+                return
 
             def do_render(pr: 'QPrinter') -> None:  # type: ignore[name-defined]
                 # Preview only — blit 48 DPI cache into the 96 DPI preview printer
@@ -1598,8 +1702,19 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
                 finally:
                     _pa.end()
 
-            from PyQt6.QtPrintSupport import QPrintPreviewDialog, QPrintDialog
-            from PyQt6.QtGui import QKeySequence, QAction
+            from PyQt6.QtPrintSupport import QPrintPreviewDialog, QPrinterInfo
+            from PyQt6.QtGui import QKeySequence, QAction, QPageSize
+            from PyQt6.QtWidgets import (
+                QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox,
+            )
+            _PAGE_SIZES = [
+                ('Letter (8.5 × 11")',  QPageSize.PageSizeId.Letter),
+                ('Legal (8.5 × 14")',   QPageSize.PageSizeId.Legal),
+                ('Tabloid (11 × 17")',  QPageSize.PageSizeId.Tabloid),
+                ('A3',                  QPageSize.PageSizeId.A3),
+                ('A4',                  QPageSize.PageSizeId.A4),
+                ('A5',                  QPageSize.PageSizeId.A5),
+            ]
 
             preview = QPrintPreviewDialog(preview_printer, parent)
             preview.resize(720, 520)
@@ -1607,21 +1722,97 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
 
             # Intercept the built-in Print toolbar button so we can render at
             # 200 DPI on a native HighResolution printer, not the PDF preview printer.
-            def _do_print() -> None:
-                _print_printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-                # Carry over page settings the user configured in the preview
-                # (orientation, paper size, margins) to the real print job.
+            # QPrintDialog is intentionally avoided here: on Windows it calls
+            # DocumentProperties with DM_APPLY, which writes the chosen settings
+            # (copies, orientation) back to the system-wide printer default.
+            def _do_print() -> bool:
+                # Build a lightweight printer-selection + copies dialog that sets
+                # properties directly on QPrinter without touching system defaults.
+                dlg = QDialog(preview)
+                dlg.setWindowTitle("Print")
+                layout = QFormLayout(dlg)
+
+                available = QPrinterInfo.availablePrinters()
+                if not available:
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.warning(preview, "Print", "No printers are available.")
+                    return False
+
+                saved_printer = app_context.get_setting('print_printer', '') if app_context else ''
+                saved_paper = app_context.get_setting('print_paper', '') if app_context else ''
+
+                printer_combo = QComboBox()
+                default_name = QPrinterInfo.defaultPrinter().printerName()
+                for info in available:
+                    printer_combo.addItem(info.printerName())
+                preferred_printer = saved_printer or default_name
+                pref_idx = printer_combo.findText(preferred_printer)
+                if pref_idx >= 0:
+                    printer_combo.setCurrentIndex(pref_idx)
+                layout.addRow("Printer:", printer_combo)
+
+                copies_spin = QSpinBox()
+                copies_spin.setRange(1, 999)
+                copies_spin.setValue(1)
+                layout.addRow("Copies:", copies_spin)
+
+                paper_combo = QComboBox()
+                for label, _ in _PAGE_SIZES:
+                    paper_combo.addItem(label)
+                current_size_id = preview_printer.pageLayout().pageSize().id()
+                paper_idx = next(
+                    (i for i, (_, sid) in enumerate(_PAGE_SIZES) if sid.name == saved_paper),
+                    next((i for i, (_, sid) in enumerate(_PAGE_SIZES) if sid == current_size_id), 0),
+                )
+                paper_combo.setCurrentIndex(paper_idx)
+                layout.addRow("Paper:", paper_combo)
+
+                buttons = QDialogButtonBox(
+                    QDialogButtonBox.StandardButton.Ok |
+                    QDialogButtonBox.StandardButton.Cancel
+                )
+                buttons.accepted.connect(dlg.accept)
+                buttons.rejected.connect(dlg.reject)
+                layout.addRow(buttons)
+
+                if dlg.exec() != QDialog.DialogCode.Accepted:
+                    return False
+
+                selected_name = printer_combo.currentText()
+                _, selected_size_id = _PAGE_SIZES[paper_combo.currentIndex()]
+
+                if app_context is not None:
+                    app_context.set_setting('print_printer', selected_name)
+                    app_context.set_setting('print_paper', selected_size_id.name)
+                    app_context.save_settings()
+
+                _print_printer = QPrinter(
+                    next(
+                        (i for i in available if i.printerName() == selected_name),
+                        QPrinterInfo.defaultPrinter(),
+                    ),
+                    QPrinter.PrinterMode.HighResolution,
+                )
                 _print_printer.setPageOrientation(preview_printer.pageLayout().orientation())
-                _print_printer.setPageSize(preview_printer.pageLayout().pageSize())
+                _print_printer.setPageSize(QPageSize(selected_size_id))
                 _print_printer.setPageMargins(
                     preview_printer.pageLayout().margins(),
                     preview_printer.pageLayout().units(),
                 )
-                _pdlg = QPrintDialog(_print_printer, preview)
-                if _pdlg.exec() != QPrintDialog.DialogCode.Accepted:
-                    return
-                _render_to(_print_printer, 200)
+                _print_printer.setCopyCount(copies_spin.value())
                 preview.accept()
+
+                _raster_worker = _PrintRasterWorker(renderable_for_print, _fitz, 200)
+                _receiver = _RasterReceiver(_print_printer, parent, _raster_worker)
+                _raster_worker.page_ready.connect(
+                    _receiver.on_page, Qt.ConnectionType.QueuedConnection)
+                _raster_worker.done.connect(
+                    _receiver.on_done, Qt.ConnectionType.QueuedConnection)
+                _raster_worker.finished.connect(_raster_worker.deleteLater)
+                _active_print_workers.add(_raster_worker)
+                _active_print_workers.add(_receiver)
+                _raster_worker.start()
+                return True
 
             # Hook the toolbar Print button to use our high-res render path.
             # Qt assigns QKeySequence.StandardKey.Print on Windows/macOS; on
@@ -1647,7 +1838,8 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
                     "print_files_with_dialog: could not locate Print toolbar "
                     "action in QPrintPreviewDialog; printing directly at high resolution."
                 )
-                _do_print()
+                if not _do_print():
+                    cancelled = True
             else:
                 if preview.exec() != QPrintPreviewDialog.DialogCode.Accepted:
                     cancelled = True
@@ -1677,9 +1869,6 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
     if failed_pre_render:
         names = '\n'.join(f'  • {n}' for n in failed_pre_render)
         sections.append(f"Could not be loaded for preview and were skipped:\n{names}")
-    if failed_print_render:
-        names = '\n'.join(f'  • {n}' for n in sorted(set(failed_print_render)))
-        sections.append(f"Could not be rendered for printing:\n{names}")
     if sections:
         from PyQt6.QtWidgets import QMessageBox
         QMessageBox.warning(parent, "Print", "\n\n".join(sections))
