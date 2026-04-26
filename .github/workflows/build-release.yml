@@ -277,6 +277,9 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Install Flatpak tools
         run: |
           sudo apt-get update -qq
@@ -305,6 +308,7 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           mkdir -p /tmp/gh-pages/repo
           cp -r flatpak-repo/. /tmp/gh-pages/repo/
+          cp linux/flatpak/io.github.i_machine_things.JobDocs.flatpakrepo /tmp/gh-pages/jobdocs.flatpakrepo
           touch /tmp/gh-pages/.nojekyll
 
           VERSION="${{ github.ref_name }}"
@@ -331,9 +335,9 @@ jobs:
             <p>Job tracking and documentation for machine shops — Linux Flatpak repository.</p>
 
             <h2>Add this repository to Discover</h2>
-            <p>Download and open the <a href="${RELEASES_URL}/latest/download/io.github.i_machine_things.JobDocs.flatpakrepo">.flatpakrepo file</a> — KDE Discover will prompt you to add it automatically.</p>
+            <p>Download and open the <a href="https://i-machine-things-org.github.io/JobDocs/jobdocs.flatpakrepo">.flatpakrepo file</a> — KDE Discover will prompt you to add it automatically.</p>
             <p>Or from the terminal:</p>
-            <pre>flatpak remote-add --user jobdocs https://i-machine-things-org.github.io/JobDocs/repo</pre>
+            <pre>flatpak remote-add --user --from jobdocs https://i-machine-things-org.github.io/JobDocs/jobdocs.flatpakrepo</pre>
             <p>Then install:</p>
             <pre>flatpak install jobdocs io.github.i_machine_things.JobDocs</pre>
 
