@@ -1,0 +1,6 @@
+[Flatpak Repo]
+Title=JobDocs
+Url=https://i-machine-things-org.github.io/JobDocs/repo
+Homepage=https://github.com/i-machine-things-org/JobDocs
+Description=JobDocs — Job tracking and documentation for machine shops
+Icon=https://raw.githubusercontent.com/i-machine-things-org/JobDocs/master/JobDocs.iconset/icon_256x256.png

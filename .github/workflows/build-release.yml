@@ -261,6 +261,52 @@ jobs:
           name: JobDocs-linux
           path: JobDocs-linux.flatpak
 
+      - name: Upload Flatpak repo artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JobDocs-flatpak-repo
+          path: flatpak-repo/
+
+  # ---------------------------------------------------------------------------
+  # Flatpak repo — publish OSTree repo to gh-pages so Discover can update
+  # ---------------------------------------------------------------------------
+  publish-flatpak-repo:
+    needs: build-flatpak
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Install Flatpak tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y flatpak
+
+      - name: Download Flatpak repo artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: JobDocs-flatpak-repo
+          path: flatpak-repo
+
+      - name: Rebuild repo summary
+        run: flatpak build-update-repo --prune --prune-depth=2 flatpak-repo
+
+      - name: Publish to gh-pages
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p /tmp/gh-pages/repo
+          cp -r flatpak-repo/. /tmp/gh-pages/repo/
+          touch /tmp/gh-pages/.nojekyll
+          cd /tmp/gh-pages
+          git init
+          git checkout --orphan gh-pages
+          git add -A
+          git commit -m "chore: publish Flatpak repo ${{ github.ref_name }}"
+          git remote add origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git push --force origin gh-pages
+
   # ---------------------------------------------------------------------------
   # Release — combine both platform artifacts into a single GitHub Release
   # ---------------------------------------------------------------------------
@@ -272,6 +318,9 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
@@ -284,6 +333,9 @@ jobs:
           name: JobDocs-linux
           path: release-assets
 
+      - name: Stage flatpakrepo file
+        run: cp linux/flatpak/io.github.i_machine_things.JobDocs.flatpakrepo release-assets/
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -291,5 +343,6 @@ jobs:
           files: |
             release-assets/JobDocs-${{ github.ref_name }}-windows-setup.exe
             release-assets/JobDocs-linux.flatpak
+            release-assets/io.github.i_machine_things.JobDocs.flatpakrepo
           generate_release_notes: true
           fail_on_unmatched_files: true
