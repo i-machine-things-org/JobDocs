@@ -26,6 +26,106 @@ from PyQt6.QtWidgets import (
 )
 
 from core.module_loader import ModuleLoader
+
+def _flatpak_dns_fix() -> None:
+    """Patch socket.getaddrinfo for Flatpak sandboxes where DNS fails.
+
+    On systemd-resolved distros, /etc/resolv.conf contains 'nameserver 127.0.0.53'
+    (the stub resolver). That address only listens on the host loopback and is
+    unreachable inside the Flatpak network namespace, causing Errno -3 on every
+    name lookup. This reads the real upstream nameservers and falls back to a
+    direct UDP DNS query when the system resolver fails.
+    """
+    if not os.getenv('FLATPAK_ID'):
+        return
+    import re
+    import socket
+    import struct
+    import random
+
+    try:
+        socket.getaddrinfo('github.com', 443, socket.AF_INET)
+        return  # DNS works — nothing to do
+    except (socket.gaierror, OSError):
+        pass
+
+    nameservers: list = []
+    for path in ('/run/systemd/resolve/resolv.conf',
+                 '/run/host/etc/resolv.conf',
+                 '/etc/resolv.conf'):
+        try:
+            with open(path) as _f:
+                for _line in _f:
+                    _m = re.match(r'^nameserver\s+(\S+)', _line)
+                    if _m:
+                        _ns = _m.group(1)
+                        if not _ns.startswith('127.') and _ns != '::1':
+                            nameservers.append(_ns)
+        except OSError:
+            continue
+        if nameservers:
+            break
+
+    if not nameservers:
+        nameservers = ['1.1.1.1', '8.8.8.8']
+
+    def _dns_a(host: str, ns: str) -> list:
+        """Minimal DNS A-record query sent directly to nameserver ns."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(3)
+        try:
+            qid = random.randint(0, 65535)
+            labels = b''.join(bytes([len(p)]) + p.encode()
+                              for p in host.rstrip('.').split('.')) + b'\x00'
+            pkt = (struct.pack('!HHHHHH', qid, 0x0100, 1, 0, 0, 0)
+                   + labels + struct.pack('!HH', 1, 1))
+            sock.sendto(pkt, (ns, 53))
+            resp = sock.recv(512)
+        finally:
+            sock.close()
+        ancount = struct.unpack('!H', resp[6:8])[0]
+        pos = 12
+        while resp[pos]:
+            pos += resp[pos] + 1
+        pos += 5
+        ips: list = []
+        for _ in range(ancount):
+            if resp[pos] & 0xC0 == 0xC0:
+                pos += 2
+            else:
+                while resp[pos]:
+                    pos += resp[pos] + 1
+                pos += 1
+            if pos + 10 > len(resp):
+                break
+            rtype, _, _, rdlen = struct.unpack('!HHIH', resp[pos:pos + 10])
+            pos += 10
+            if rtype == 1 and rdlen == 4:
+                ips.append(socket.inet_ntoa(resp[pos:pos + 4]))
+            pos += rdlen
+        return ips
+
+    _orig_getaddrinfo = socket.getaddrinfo
+    _ns_list = nameservers[:]
+
+    def _getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        try:
+            return _orig_getaddrinfo(host, port, family, type, proto, flags)
+        except (socket.gaierror, OSError):
+            pass
+        p = port if isinstance(port, int) else 0
+        for _ns in _ns_list:
+            try:
+                for _ip in _dns_a(host, _ns):
+                    return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (_ip, p)),
+                            (socket.AF_INET, socket.SOCK_DGRAM, 17, '', (_ip, p))]
+            except Exception:
+                continue
+        return _orig_getaddrinfo(host, port, family, type, proto, flags)
+
+    socket.getaddrinfo = _getaddrinfo
+
+_flatpak_dns_fix()
 from core.app_context import AppContext
 from shared.utils import get_config_dir, get_os_text
 from shared.remote_sync import RemoteSyncManager
