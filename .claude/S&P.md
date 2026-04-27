@@ -2170,3 +2170,12 @@ Actionable: 3  Nitpicks: 0 — all resolved in follow-up commit
 3. **`_version_tuple` returns `(0,0,0)` for pre-release tags** — `main.py`
    - `"v0.9.9-test"` split by `.` on a suffix-containing string yields ValueError → `(0,0,0)`
    - Fix: strip pre-release suffix with `.split("-")[0]` before splitting on `.`
+
+---
+
+## 2026-04-27 — `PR #242: feat: startup update checker and dynamic version` — run 2
+
+Actionable: ?  Nitpicks: 2
+- Avoid exception-driven fallback on native Linux.
+- Optional cleanup: clear `_update_checker` when finished.
+- Configuration used
