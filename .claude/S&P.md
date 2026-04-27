@@ -2150,3 +2150,10 @@ Actionable: 1 (duplicate)  Nitpicks: 1 — both resolved in commit c154851
 Actionable: 1  Nitpicks: 0
 - Skip the preview when nothing survived pre-load.
 - Configuration used
+
+---
+
+## 2026-04-27 — `PR #242: feat: startup update checker and dynamic version` — run 1
+
+Actionable: 3  Nitpicks: 0
+- Configuration used
