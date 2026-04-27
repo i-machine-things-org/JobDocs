@@ -136,6 +136,7 @@ class _UpdateDialog(QDialog):
         self.accept()
 
     def _on_later(self) -> None:
+        self._save_disabled()
         self.reject()
 
 
@@ -744,6 +745,9 @@ class JobDocsMainWindow(QMainWindow):
         check_updates_action = help_menu.addAction("Check for &Updates")  # pyright: ignore[reportOptionalMemberAccess]
         check_updates_action.triggered.connect(self.check_for_updates)  # pyright: ignore[reportOptionalMemberAccess]
 
+        enable_updates_action = help_menu.addAction("Re-enable Update &Notifications")  # pyright: ignore[reportOptionalMemberAccess]
+        enable_updates_action.triggered.connect(self.reenable_update_notifications)  # pyright: ignore[reportOptionalMemberAccess]
+
         help_menu.addSeparator()  # pyright: ignore[reportOptionalMemberAccess]
 
         about_action = help_menu.addAction("&About")  # pyright: ignore[reportOptionalMemberAccess]
@@ -957,6 +961,16 @@ Search across all customers and jobs.</p>
         self._manual_checker = checker  # type: ignore[attr-defined]
         checker.finished.connect(lambda: setattr(self, '_manual_checker', None))
         checker.start()
+
+    def reenable_update_notifications(self) -> None:
+        """Clear the update-notifications-disabled flag and confirm to the user."""
+        self.app_context.set_setting('updates_notifications_disabled', False)
+        self.app_context.save_settings()
+        QMessageBox.information(
+            self, "Update Notifications Enabled",
+            "Update notifications have been re-enabled.\n"
+            "You'll be notified on next launch if a new version is available.",
+        )
 
     def show_about(self):
         """Show about dialog"""
