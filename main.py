@@ -63,6 +63,7 @@ def _version_tuple(v: str) -> tuple:
 class _UpdateChecker(QThread):
     """Queries the GitHub releases API on a background thread."""
     update_available = pyqtSignal(str, str)  # (tag, html_url)
+    up_to_date = pyqtSignal()
 
     def run(self):
         try:
@@ -77,8 +78,10 @@ class _UpdateChecker(QThread):
             html_url = data.get("html_url", "")
             if tag and _version_tuple(tag) > _version_tuple(APP_VERSION):
                 self.update_available.emit(tag, html_url)
+            else:
+                self.up_to_date.emit()
         except Exception:
-            pass
+            self.up_to_date.emit()
 
 
 class _UpdateDialog(QDialog):
@@ -101,23 +104,23 @@ class _UpdateDialog(QDialog):
         label.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(label)
 
-        self._skip_cb = QCheckBox("Don't show this again for this version")
-        layout.addWidget(self._skip_cb)
+        self._disable_cb = QCheckBox("Don't show update notifications")
+        layout.addWidget(self._disable_cb)
 
         buttons = QDialogButtonBox()
-        buttons.addButton("OK", QDialogButtonBox.ButtonRole.AcceptRole)
-        buttons.addButton("Later", QDialogButtonBox.ButtonRole.RejectRole)
+        buttons.addButton("Update Now", QDialogButtonBox.ButtonRole.AcceptRole)
+        buttons.addButton("Skip This Version", QDialogButtonBox.ButtonRole.RejectRole)
         buttons.accepted.connect(self._on_ok)
         buttons.rejected.connect(self._on_later)
         layout.addWidget(buttons)
 
-    def _save_skip(self) -> None:
-        if self._skip_cb.isChecked() and self._app_context is not None:
-            self._app_context.set_setting('skip_update_version', self._latest_version)
+    def _save_disabled(self) -> None:
+        if self._disable_cb.isChecked() and self._app_context is not None:
+            self._app_context.set_setting('updates_notifications_disabled', True)
             self._app_context.save_settings()
 
     def _on_ok(self) -> None:
-        self._save_skip()
+        self._save_disabled()
         import platform
         import webbrowser
         if platform.system() == 'Linux' and os.getenv('FLATPAK_ID'):
@@ -133,7 +136,6 @@ class _UpdateDialog(QDialog):
         self.accept()
 
     def _on_later(self) -> None:
-        self._save_skip()
         self.reject()
 
 
@@ -739,6 +741,9 @@ class JobDocsMainWindow(QMainWindow):
         setup_wizard_action = help_menu.addAction("&Run Setup Wizard...")  # pyright: ignore[reportOptionalMemberAccess]
         setup_wizard_action.triggered.connect(self.run_setup_wizard)  # pyright: ignore[reportOptionalMemberAccess]
 
+        check_updates_action = help_menu.addAction("Check for &Updates")  # pyright: ignore[reportOptionalMemberAccess]
+        check_updates_action.triggered.connect(self.check_for_updates)  # pyright: ignore[reportOptionalMemberAccess]
+
         help_menu.addSeparator()  # pyright: ignore[reportOptionalMemberAccess]
 
         about_action = help_menu.addAction("&About")  # pyright: ignore[reportOptionalMemberAccess]
@@ -930,6 +935,28 @@ Search across all customers and jobs.</p>
         msg.setTextFormat(Qt.TextFormat.RichText)
         msg.setText(content)
         msg.exec()
+
+    def check_for_updates(self) -> None:
+        """Manually check for updates from the Help menu."""
+        def _on_available(tag: str, url: str) -> None:
+            dlg = _UpdateDialog(tag, url, self.app_context, self)
+            self._manual_update_dialog = dlg  # type: ignore[attr-defined]
+            dlg.finished.connect(lambda _: setattr(self, '_manual_update_dialog', None))
+            dlg.show()
+
+        def _on_up_to_date() -> None:
+            QMessageBox.information(
+                self, "Up to Date",
+                f"You're running the latest version ({APP_VERSION}).",
+            )
+
+        checker = _UpdateChecker()
+        checker.update_available.connect(_on_available)
+        checker.up_to_date.connect(_on_up_to_date)
+        checker.finished.connect(checker.deleteLater)
+        self._manual_checker = checker  # type: ignore[attr-defined]
+        checker.finished.connect(lambda: setattr(self, '_manual_checker', None))
+        checker.start()
 
     def show_about(self):
         """Show about dialog"""
@@ -1135,8 +1162,7 @@ def main():
     window.show()
 
     def _on_update_available(tag: str, url: str) -> None:
-        skipped = window.app_context.get_setting('skip_update_version', '')
-        if skipped == tag:
+        if window.app_context.get_setting('updates_notifications_disabled', False):
             return
         dlg = _UpdateDialog(tag, url, window.app_context, window)
         window._update_dialog = dlg  # type: ignore[attr-defined]
