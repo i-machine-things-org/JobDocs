@@ -1708,12 +1708,12 @@ def print_files_with_dialog(paths: list, parent=None, app_context=None) -> None:
                 QDialog, QDialogButtonBox, QFormLayout, QComboBox, QSpinBox,
             )
             _PAGE_SIZES = [
-                ('Letter (8.5 × 11")',  QPageSize.PageSizeId.Letter),
-                ('Legal (8.5 × 14")',   QPageSize.PageSizeId.Legal),
-                ('Tabloid (11 × 17")',  QPageSize.PageSizeId.Tabloid),
-                ('A3',                  QPageSize.PageSizeId.A3),
-                ('A4',                  QPageSize.PageSizeId.A4),
-                ('A5',                  QPageSize.PageSizeId.A5),
+                ('Letter (8.5 × 11")', QPageSize.PageSizeId.Letter),
+                ('Legal (8.5 × 14")', QPageSize.PageSizeId.Legal),
+                ('Tabloid (11 × 17")', QPageSize.PageSizeId.Tabloid),
+                ('A3', QPageSize.PageSizeId.A3),
+                ('A4', QPageSize.PageSizeId.A4),
+                ('A5', QPageSize.PageSizeId.A5),
             ]
 
             preview = QPrintPreviewDialog(preview_printer, parent)
