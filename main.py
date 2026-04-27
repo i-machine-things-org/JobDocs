@@ -120,7 +120,7 @@ class _UpdateDialog(QDialog):
         self._save_skip()
         import platform
         import webbrowser
-        if platform.system() == 'Linux':
+        if platform.system() == 'Linux' and os.getenv('FLATPAK_ID'):
             try:
                 subprocess.Popen(
                     ['flatpak-spawn', '--host', 'xdg-open',
@@ -1146,6 +1146,7 @@ def main():
     _checker = _UpdateChecker()
     _checker.update_available.connect(_on_update_available)
     _checker.finished.connect(_checker.deleteLater)
+    _checker.finished.connect(lambda: setattr(window, '_update_checker', None))
     window._update_checker = _checker  # type: ignore[attr-defined]
     _checker.start()
 

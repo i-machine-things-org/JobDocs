@@ -2175,7 +2175,14 @@ Actionable: 3  Nitpicks: 0 — all resolved in follow-up commit
 
 ## 2026-04-27 — `PR #242: feat: startup update checker and dynamic version` — run 2
 
-Actionable: ?  Nitpicks: 2
-- Avoid exception-driven fallback on native Linux.
-- Optional cleanup: clear `_update_checker` when finished.
-- Configuration used
+Actionable: 0  Nitpicks: 2 — both applied
+
+### Findings
+
+1. **`flatpak-spawn` attempted on all Linux, not just Flatpak** — `main.py` `_on_ok`
+   - Native Linux would always attempt `flatpak-spawn` and fail silently, wasting a subprocess
+   - Fix: gate the branch on `os.getenv('FLATPAK_ID')` so it only fires inside a Flatpak sandbox
+
+2. **`window._update_checker` not cleared on `finished`** — `main.py`
+   - `deleteLater` was called but window still held a dangling reference after GC
+   - Fix: connect a second `finished` lambda that sets `window._update_checker = None`
