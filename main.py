@@ -27,6 +27,10 @@ from PyQt6.QtWidgets import (
 )
 
 from core.module_loader import ModuleLoader
+from core.app_context import AppContext
+from shared.utils import get_config_dir, get_os_text
+from shared.remote_sync import RemoteSyncManager
+
 
 def _get_app_version() -> str:
     try:
@@ -238,10 +242,8 @@ def _flatpak_dns_fix() -> None:
 
     socket.getaddrinfo = _getaddrinfo
 
+
 _flatpak_dns_fix()
-from core.app_context import AppContext
-from shared.utils import get_config_dir, get_os_text
-from shared.remote_sync import RemoteSyncManager
 
 
 class _PluginInstallWorker(QThread):
@@ -720,7 +722,8 @@ class JobDocsMainWindow(QMainWindow):
         install_plugin_action = file_menu.addAction("&Install Plugin...")  # pyright: ignore[reportOptionalMemberAccess]
         install_plugin_action.triggered.connect(self.install_plugin)  # pyright: ignore[reportOptionalMemberAccess]
 
-        uninstall_plugin_action = file_menu.addAction("&Uninstall Plugin...")  # pyright: ignore[reportOptionalMemberAccess]
+        uninstall_plugin_action = file_menu.addAction(  # pyright: ignore[reportOptionalMemberAccess]
+            "&Uninstall Plugin...")
         uninstall_plugin_action.triggered.connect(self.uninstall_plugin)  # pyright: ignore[reportOptionalMemberAccess]
 
         file_menu.addSeparator()  # pyright: ignore[reportOptionalMemberAccess]
@@ -745,8 +748,10 @@ class JobDocsMainWindow(QMainWindow):
         check_updates_action = help_menu.addAction("Check for &Updates")  # pyright: ignore[reportOptionalMemberAccess]
         check_updates_action.triggered.connect(self.check_for_updates)  # pyright: ignore[reportOptionalMemberAccess]
 
-        enable_updates_action = help_menu.addAction("Re-enable Update &Notifications")  # pyright: ignore[reportOptionalMemberAccess]
-        enable_updates_action.triggered.connect(self.reenable_update_notifications)  # pyright: ignore[reportOptionalMemberAccess]
+        enable_updates_action = help_menu.addAction(  # pyright: ignore[reportOptionalMemberAccess]
+            "Re-enable Update &Notifications")
+        enable_updates_action.triggered.connect(  # pyright: ignore[reportOptionalMemberAccess]
+            self.reenable_update_notifications)
 
         help_menu.addSeparator()  # pyright: ignore[reportOptionalMemberAccess]
 
