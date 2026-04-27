@@ -2186,3 +2186,11 @@ Actionable: 0  Nitpicks: 2 — both applied
 2. **`window._update_checker` not cleared on `finished`** — `main.py`
    - `deleteLater` was called but window still held a dangling reference after GC
    - Fix: connect a second `finished` lambda that sets `window._update_checker = None`
+
+---
+
+## 2026-04-27 — `PR #242: feat: startup update checker and dynamic version` — run 3
+
+Actionable: 1  Nitpicks: 1
+- Derive the Flatpak appstream URI from `FLATPAK_ID`.
+- Configuration used
