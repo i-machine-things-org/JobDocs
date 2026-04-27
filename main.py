@@ -22,10 +22,118 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QMessageBox, QDialog,
-    QInputDialog, QLineEdit, QProgressDialog
+    QInputDialog, QLineEdit, QProgressDialog,
+    QVBoxLayout, QLabel, QCheckBox, QDialogButtonBox,
 )
 
 from core.module_loader import ModuleLoader
+
+def _get_app_version() -> str:
+    try:
+        from core._version import __version__ as _v
+        if _v and _v != "dev":
+            return _v
+    except ImportError:
+        pass
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            capture_output=True, text=True, timeout=3,
+            cwd=Path(__file__).parent,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "dev"
+
+
+APP_VERSION = _get_app_version()
+_GITHUB_REPO = "i-machine-things-org/JobDocs"
+
+
+def _version_tuple(v: str) -> tuple:
+    try:
+        return tuple(int(x) for x in v.lstrip("v").split(".")[:3])
+    except ValueError:
+        return (0, 0, 0)
+
+
+class _UpdateChecker(QThread):
+    """Queries the GitHub releases API on a background thread."""
+    update_available = pyqtSignal(str, str)  # (tag, html_url)
+
+    def run(self):
+        try:
+            url = f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest"
+            req = urllib.request.Request(
+                url,
+                headers={"Accept": "application/vnd.github+json", "User-Agent": "JobDocs"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
+                data = json.loads(resp.read().decode())
+            tag = data.get("tag_name", "")
+            html_url = data.get("html_url", "")
+            if tag and _version_tuple(tag) > _version_tuple(APP_VERSION):
+                self.update_available.emit(tag, html_url)
+        except Exception:
+            pass
+
+
+class _UpdateDialog(QDialog):
+    """Non-blocking update-available prompt."""
+
+    def __init__(self, latest_version: str, release_url: str, app_context, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Update Available")
+        self.setMinimumWidth(340)
+        self._app_context = app_context
+        self._latest_version = latest_version
+        self._release_url = release_url
+
+        layout = QVBoxLayout(self)
+
+        label = QLabel(
+            f"<b>{latest_version}</b> is available. Upgrade now?"
+        )
+        label.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(label)
+
+        self._skip_cb = QCheckBox("Don't show this again for this version")
+        layout.addWidget(self._skip_cb)
+
+        buttons = QDialogButtonBox()
+        buttons.addButton("OK", QDialogButtonBox.ButtonRole.AcceptRole)
+        buttons.addButton("Later", QDialogButtonBox.ButtonRole.RejectRole)
+        buttons.accepted.connect(self._on_ok)
+        buttons.rejected.connect(self._on_later)
+        layout.addWidget(buttons)
+
+    def _save_skip(self) -> None:
+        if self._skip_cb.isChecked() and self._app_context is not None:
+            self._app_context.set_setting('skip_update_version', self._latest_version)
+            self._app_context.save_settings()
+
+    def _on_ok(self) -> None:
+        self._save_skip()
+        import platform
+        import webbrowser
+        if platform.system() == 'Linux':
+            try:
+                subprocess.Popen(
+                    ['flatpak-spawn', '--host', 'xdg-open',
+                     'appstream://io.github.i_machine_things.JobDocs'],
+                )
+            except Exception:
+                webbrowser.open(self._release_url)
+        else:
+            webbrowser.open(self._release_url)
+        self.accept()
+
+    def _on_later(self) -> None:
+        self._save_skip()
+        self.reject()
+
 
 def _flatpak_dns_fix() -> None:
     """Patch socket.getaddrinfo for Flatpak sandboxes where DNS fails.
@@ -827,6 +935,7 @@ Search across all customers and jobs.</p>
 
         content = f"""
 <h2>JobDocs</h2>
+<p style="color: gray; margin-top: 0;">{APP_VERSION}</p>
 <p>A modular tool for managing blueprint files and customer job {folder_term}s.</p>
 
 <p><b>Features:</b></p>
@@ -1022,6 +1131,19 @@ def main():
 
     window = JobDocsMainWindow()
     window.show()
+
+    def _on_update_available(tag: str, url: str) -> None:
+        skipped = window.app_context.get_setting('skip_update_version', '')
+        if skipped == tag:
+            return
+        dlg = _UpdateDialog(tag, url, window.app_context, window)
+        dlg.show()
+
+    _checker = _UpdateChecker()
+    _checker.update_available.connect(_on_update_available)
+    _checker.finished.connect(_checker.deleteLater)
+    window._update_checker = _checker  # type: ignore[attr-defined]
+    _checker.start()
 
     # Run the application
     exit_code = app.exec()

@@ -114,6 +114,12 @@ jobs:
             }
           }
 
+      - name: Inject version into _version.py
+        shell: pwsh
+        run: |
+          $ver = "${{ env.RELEASE_VERSION }}"
+          "__version__ = '$ver'" | Set-Content app\core\_version.py -Encoding utf8
+
       - name: Compile launcher (MinGW)
         shell: bash
         run: |
@@ -227,6 +233,11 @@ jobs:
           done
           pip download --only-binary :all: -d linux/flatpak/src/wheels/ -r requirements.txt
           cp JobDocs.iconset/icon_256x256.png linux/flatpak/icon_256x256.png
+
+      - name: Inject version into _version.py
+        run: |
+          VERSION="${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}"
+          echo "__version__ = '${VERSION}'" > linux/flatpak/src/core/_version.py
 
       - name: Inject version into metainfo
         run: |
