@@ -22,10 +22,123 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QMessageBox, QDialog,
-    QInputDialog, QLineEdit, QProgressDialog
+    QInputDialog, QLineEdit, QProgressDialog,
+    QVBoxLayout, QLabel, QCheckBox, QDialogButtonBox,
 )
 
 from core.module_loader import ModuleLoader
+
+def _get_app_version() -> str:
+    try:
+        from core._version import __version__ as _v
+        if _v and _v != "dev":
+            return _v
+    except ImportError:
+        pass
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            capture_output=True, text=True, timeout=3,
+            cwd=Path(__file__).parent,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "dev"
+
+
+APP_VERSION = _get_app_version()
+_GITHUB_REPO = "i-machine-things-org/JobDocs"
+
+
+def _version_tuple(v: str) -> tuple:
+    try:
+        numeric = v.lstrip("v").split("-")[0]  # strip pre-release suffix (e.g. -rc1, -test)
+        return tuple(int(x) for x in numeric.split(".")[:3])
+    except ValueError:
+        return (0, 0, 0)
+
+
+class _UpdateChecker(QThread):
+    """Queries the GitHub releases API on a background thread."""
+    update_available = pyqtSignal(str, str)  # (tag, html_url)
+    up_to_date = pyqtSignal()
+
+    def run(self):
+        try:
+            url = f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest"
+            req = urllib.request.Request(
+                url,
+                headers={"Accept": "application/vnd.github+json", "User-Agent": "JobDocs"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
+                data = json.loads(resp.read().decode())
+            tag = data.get("tag_name", "")
+            html_url = data.get("html_url", "")
+            if tag and _version_tuple(tag) > _version_tuple(APP_VERSION):
+                self.update_available.emit(tag, html_url)
+            else:
+                self.up_to_date.emit()
+        except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError):
+            pass
+
+
+class _UpdateDialog(QDialog):
+    """Non-blocking update-available prompt."""
+
+    def __init__(self, latest_version: str, release_url: str, app_context, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Update Available")
+        self.setMinimumWidth(340)
+        self._app_context = app_context
+        self._latest_version = latest_version
+        self._release_url = release_url
+
+        layout = QVBoxLayout(self)
+
+        import html as _html
+        label = QLabel(
+            f"<b>{_html.escape(latest_version)}</b> is available. Upgrade now?"
+        )
+        label.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(label)
+
+        self._disable_cb = QCheckBox("Don't show update notifications")
+        layout.addWidget(self._disable_cb)
+
+        buttons = QDialogButtonBox()
+        buttons.addButton("Update Now", QDialogButtonBox.ButtonRole.AcceptRole)
+        buttons.addButton("Skip This Version", QDialogButtonBox.ButtonRole.RejectRole)
+        buttons.accepted.connect(self._on_ok)
+        buttons.rejected.connect(self._on_later)
+        layout.addWidget(buttons)
+
+    def _save_disabled(self) -> None:
+        if self._disable_cb.isChecked() and self._app_context is not None:
+            self._app_context.set_setting('updates_notifications_disabled', True)
+            self._app_context.save_settings()
+
+    def _on_ok(self) -> None:
+        self._save_disabled()
+        import platform
+        import webbrowser
+        if platform.system() == 'Linux' and os.getenv('FLATPAK_ID'):
+            try:
+                subprocess.Popen(
+                    ['flatpak-spawn', '--host', 'xdg-open',
+                     'appstream://io.github.i_machine_things.JobDocs'],
+                )
+            except Exception:
+                webbrowser.open(self._release_url)
+        else:
+            webbrowser.open(self._release_url)
+        self.accept()
+
+    def _on_later(self) -> None:
+        self._save_disabled()
+        self.reject()
+
 
 def _flatpak_dns_fix() -> None:
     """Patch socket.getaddrinfo for Flatpak sandboxes where DNS fails.
@@ -629,6 +742,12 @@ class JobDocsMainWindow(QMainWindow):
         setup_wizard_action = help_menu.addAction("&Run Setup Wizard...")  # pyright: ignore[reportOptionalMemberAccess]
         setup_wizard_action.triggered.connect(self.run_setup_wizard)  # pyright: ignore[reportOptionalMemberAccess]
 
+        check_updates_action = help_menu.addAction("Check for &Updates")  # pyright: ignore[reportOptionalMemberAccess]
+        check_updates_action.triggered.connect(self.check_for_updates)  # pyright: ignore[reportOptionalMemberAccess]
+
+        enable_updates_action = help_menu.addAction("Re-enable Update &Notifications")  # pyright: ignore[reportOptionalMemberAccess]
+        enable_updates_action.triggered.connect(self.reenable_update_notifications)  # pyright: ignore[reportOptionalMemberAccess]
+
         help_menu.addSeparator()  # pyright: ignore[reportOptionalMemberAccess]
 
         about_action = help_menu.addAction("&About")  # pyright: ignore[reportOptionalMemberAccess]
@@ -821,12 +940,49 @@ Search across all customers and jobs.</p>
         msg.setText(content)
         msg.exec()
 
+    def check_for_updates(self) -> None:
+        """Manually check for updates from the Help menu."""
+        existing = getattr(self, '_manual_checker', None)
+        if existing is not None and existing.isRunning():
+            return
+
+        def _on_available(tag: str, url: str) -> None:
+            dlg = _UpdateDialog(tag, url, self.app_context, self)
+            self._manual_update_dialog = dlg  # type: ignore[attr-defined]
+            dlg.finished.connect(lambda _: setattr(self, '_manual_update_dialog', None))
+            dlg.show()
+
+        def _on_up_to_date() -> None:
+            QMessageBox.information(
+                self, "Up to Date",
+                f"You're running the latest version ({APP_VERSION}).",
+            )
+
+        checker = _UpdateChecker()
+        checker.update_available.connect(_on_available)
+        checker.up_to_date.connect(_on_up_to_date)
+        checker.finished.connect(checker.deleteLater)
+        self._manual_checker = checker  # type: ignore[attr-defined]
+        checker.finished.connect(lambda: setattr(self, '_manual_checker', None))
+        checker.start()
+
+    def reenable_update_notifications(self) -> None:
+        """Clear the update-notifications-disabled flag and confirm to the user."""
+        self.app_context.set_setting('updates_notifications_disabled', False)
+        self.app_context.save_settings()
+        QMessageBox.information(
+            self, "Update Notifications Enabled",
+            "Update notifications have been re-enabled.\n"
+            "You'll be notified on next launch if a new version is available.",
+        )
+
     def show_about(self):
         """Show about dialog"""
         folder_term = get_os_text('folder_term')
 
         content = f"""
 <h2>JobDocs</h2>
+<p style="color: gray; margin-top: 0;">{APP_VERSION}</p>
 <p>A modular tool for managing blueprint files and customer job {folder_term}s.</p>
 
 <p><b>Features:</b></p>
@@ -1023,8 +1179,29 @@ def main():
     window = JobDocsMainWindow()
     window.show()
 
+    def _on_update_available(tag: str, url: str) -> None:
+        if window.app_context.get_setting('updates_notifications_disabled', False):
+            return
+        dlg = _UpdateDialog(tag, url, window.app_context, window)
+        window._update_dialog = dlg  # type: ignore[attr-defined]
+        dlg.finished.connect(lambda _: setattr(window, '_update_dialog', None))
+        dlg.show()
+
+    _checker = _UpdateChecker()
+    _checker.update_available.connect(_on_update_available)
+    _checker.finished.connect(_checker.deleteLater)
+    _checker.finished.connect(lambda: setattr(window, '_update_checker', None))
+    window._update_checker = _checker  # type: ignore[attr-defined]
+    _checker.start()
+
     # Run the application
     exit_code = app.exec()
+
+    # Join the startup update checker if it's still running
+    checker = getattr(window, '_update_checker', None)
+    if checker is not None and checker.isRunning():
+        checker.requestInterruption()
+        checker.wait(2000)
 
     # Ensure window is properly deleted
     window.deleteLater()

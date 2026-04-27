@@ -2150,3 +2150,67 @@ Actionable: 1 (duplicate)  Nitpicks: 1 — both resolved in commit c154851
 Actionable: 1  Nitpicks: 0
 - Skip the preview when nothing survived pre-load.
 - Configuration used
+
+---
+
+## 2026-04-27 — `PR #242: feat: startup update checker and dynamic version` — run 1
+
+Actionable: 3  Nitpicks: 0 — all resolved in follow-up commit
+
+### Findings
+
+1. **`dlg` garbage-collected before user dismisses dialog** — `main.py` `_on_update_available`
+   - Local `dlg` variable is released after the slot returns; non-modal dialog disappears immediately
+   - Fix: `window._update_dialog = dlg`; connect `dlg.finished` to clear the reference
+
+2. **Untrusted version string interpolated into RichText QLabel** — `main.py` `_UpdateDialog.__init__`
+   - A crafted tag name could inject HTML into the label
+   - Fix: wrap `latest_version` with `html.escape()` before interpolation
+
+3. **`_version_tuple` returns `(0,0,0)` for pre-release tags** — `main.py`
+   - `"v0.9.9-test"` split by `.` on a suffix-containing string yields ValueError → `(0,0,0)`
+   - Fix: strip pre-release suffix with `.split("-")[0]` before splitting on `.`
+
+---
+
+## 2026-04-27 — `PR #242: feat: startup update checker and dynamic version` — run 2
+
+Actionable: 0  Nitpicks: 2 — both applied
+
+### Findings
+
+1. **`flatpak-spawn` attempted on all Linux, not just Flatpak** — `main.py` `_on_ok`
+   - Native Linux would always attempt `flatpak-spawn` and fail silently, wasting a subprocess
+   - Fix: gate the branch on `os.getenv('FLATPAK_ID')` so it only fires inside a Flatpak sandbox
+
+2. **`window._update_checker` not cleared on `finished`** — `main.py`
+   - `deleteLater` was called but window still held a dangling reference after GC
+   - Fix: connect a second `finished` lambda that sets `window._update_checker = None`
+
+---
+
+## 2026-04-27 — `PR #242: feat: startup update checker and dynamic version` — run 3
+
+Actionable: 1  Nitpicks: 1
+- Derive the Flatpak appstream URI from `FLATPAK_ID`.
+- Configuration used
+
+---
+
+## 2026-04-27 — `PR #242: feat: startup update checker and dynamic version` — run 3
+
+Actionable: 3  Nitpicks: 0 — all resolved
+
+### Findings
+
+1. **Startup `_UpdateChecker` not joined before `main()` exits** — `main.py`
+   - Thread could still be running when Qt tears down, causing "QThread: Destroyed while thread is still running"
+   - Fix: after `app.exec()`, call `requestInterruption()` + `wait(2000)` if `window._update_checker` is still running
+
+2. **`check_for_updates` can spawn parallel checkers** — `main.py` `check_for_updates`
+   - Clicking the menu item rapidly could start multiple concurrent network threads
+   - Fix: guard with `if existing is not None and existing.isRunning(): return`
+
+3. **`except` block emits `up_to_date` on network/parse errors** — `main.py` `_UpdateChecker.run`
+   - Any error (DNS failure, timeout, malformed JSON) silently showed "You're up to date"
+   - Fix: catch only expected exceptions (`URLError`, `OSError`, `JSONDecodeError`, `ValueError`) and pass; `up_to_date` only emits on a confirmed successful check
