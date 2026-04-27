@@ -2155,5 +2155,18 @@ Actionable: 1  Nitpicks: 0
 
 ## 2026-04-27 — `PR #242: feat: startup update checker and dynamic version` — run 1
 
-Actionable: 3  Nitpicks: 0
-- Configuration used
+Actionable: 3  Nitpicks: 0 — all resolved in follow-up commit
+
+### Findings
+
+1. **`dlg` garbage-collected before user dismisses dialog** — `main.py` `_on_update_available`
+   - Local `dlg` variable is released after the slot returns; non-modal dialog disappears immediately
+   - Fix: `window._update_dialog = dlg`; connect `dlg.finished` to clear the reference
+
+2. **Untrusted version string interpolated into RichText QLabel** — `main.py` `_UpdateDialog.__init__`
+   - A crafted tag name could inject HTML into the label
+   - Fix: wrap `latest_version` with `html.escape()` before interpolation
+
+3. **`_version_tuple` returns `(0,0,0)` for pre-release tags** — `main.py`
+   - `"v0.9.9-test"` split by `.` on a suffix-containing string yields ValueError → `(0,0,0)`
+   - Fix: strip pre-release suffix with `.split("-")[0]` before splitting on `.`

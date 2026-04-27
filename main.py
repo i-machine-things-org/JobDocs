@@ -54,7 +54,8 @@ _GITHUB_REPO = "i-machine-things-org/JobDocs"
 
 def _version_tuple(v: str) -> tuple:
     try:
-        return tuple(int(x) for x in v.lstrip("v").split(".")[:3])
+        numeric = v.lstrip("v").split("-")[0]  # strip pre-release suffix (e.g. -rc1, -test)
+        return tuple(int(x) for x in numeric.split(".")[:3])
     except ValueError:
         return (0, 0, 0)
 
@@ -93,8 +94,9 @@ class _UpdateDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
+        import html as _html
         label = QLabel(
-            f"<b>{latest_version}</b> is available. Upgrade now?"
+            f"<b>{_html.escape(latest_version)}</b> is available. Upgrade now?"
         )
         label.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(label)
@@ -1137,6 +1139,8 @@ def main():
         if skipped == tag:
             return
         dlg = _UpdateDialog(tag, url, window.app_context, window)
+        window._update_dialog = dlg  # type: ignore[attr-defined]
+        dlg.finished.connect(lambda _: setattr(window, '_update_dialog', None))
         dlg.show()
 
     _checker = _UpdateChecker()
