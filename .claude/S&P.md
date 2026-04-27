@@ -2194,3 +2194,13 @@ Actionable: 0  Nitpicks: 2 — both applied
 Actionable: 1  Nitpicks: 1
 - Derive the Flatpak appstream URI from `FLATPAK_ID`.
 - Configuration used
+
+---
+
+## 2026-04-27 — `PR #242: feat: startup update checker and dynamic version` — run 4
+
+Actionable: 1  Nitpicks: 0
+- Wait for the startup checker before leaving `main()`.
+- Gate manual checks to one in-flight request.
+- Don’t report failed update checks as “Up to Date”.
+- Configuration used
