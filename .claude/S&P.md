@@ -2197,10 +2197,20 @@ Actionable: 1  Nitpicks: 1
 
 ---
 
-## 2026-04-27 — `PR #242: feat: startup update checker and dynamic version` — run 4
+## 2026-04-27 — `PR #242: feat: startup update checker and dynamic version` — run 3
 
-Actionable: 1  Nitpicks: 0
-- Wait for the startup checker before leaving `main()`.
-- Gate manual checks to one in-flight request.
-- Don’t report failed update checks as “Up to Date”.
-- Configuration used
+Actionable: 3  Nitpicks: 0 — all resolved
+
+### Findings
+
+1. **Startup `_UpdateChecker` not joined before `main()` exits** — `main.py`
+   - Thread could still be running when Qt tears down, causing "QThread: Destroyed while thread is still running"
+   - Fix: after `app.exec()`, call `requestInterruption()` + `wait(2000)` if `window._update_checker` is still running
+
+2. **`check_for_updates` can spawn parallel checkers** — `main.py` `check_for_updates`
+   - Clicking the menu item rapidly could start multiple concurrent network threads
+   - Fix: guard with `if existing is not None and existing.isRunning(): return`
+
+3. **`except` block emits `up_to_date` on network/parse errors** — `main.py` `_UpdateChecker.run`
+   - Any error (DNS failure, timeout, malformed JSON) silently showed "You're up to date"
+   - Fix: catch only expected exceptions (`URLError`, `OSError`, `JSONDecodeError`, `ValueError`) and pass; `up_to_date` only emits on a confirmed successful check

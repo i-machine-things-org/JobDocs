@@ -80,8 +80,8 @@ class _UpdateChecker(QThread):
                 self.update_available.emit(tag, html_url)
             else:
                 self.up_to_date.emit()
-        except Exception:
-            self.up_to_date.emit()
+        except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError):
+            pass
 
 
 class _UpdateDialog(QDialog):
@@ -942,6 +942,10 @@ Search across all customers and jobs.</p>
 
     def check_for_updates(self) -> None:
         """Manually check for updates from the Help menu."""
+        existing = getattr(self, '_manual_checker', None)
+        if existing is not None and existing.isRunning():
+            return
+
         def _on_available(tag: str, url: str) -> None:
             dlg = _UpdateDialog(tag, url, self.app_context, self)
             self._manual_update_dialog = dlg  # type: ignore[attr-defined]
@@ -1192,6 +1196,12 @@ def main():
 
     # Run the application
     exit_code = app.exec()
+
+    # Join the startup update checker if it's still running
+    checker = getattr(window, '_update_checker', None)
+    if checker is not None and checker.isRunning():
+        checker.requestInterruption()
+        checker.wait(2000)
 
     # Ensure window is properly deleted
     window.deleteLater()
