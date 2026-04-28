@@ -10,6 +10,7 @@ import platform
 import shutil
 import re
 import subprocess
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 
@@ -107,7 +108,8 @@ _PO_RFQ_TEXT_RE = re.compile(
 )
 
 
-_classify_cache: Dict[str, Tuple[float, bool, str]] = {}  # path -> (mtime, flagged, reason)
+_MAX_CLASSIFY_CACHE = 500
+_classify_cache: OrderedDict[str, Tuple[float, bool, str]] = OrderedDict()  # path -> (mtime, flagged, reason)
 
 
 def classify_document(filepath: str) -> Tuple[bool, str]:
@@ -128,6 +130,9 @@ def classify_document(filepath: str) -> Tuple[bool, str]:
     flagged, reason = _classify_document_uncached(filepath)
     try:
         _classify_cache[filepath] = (os.path.getmtime(filepath), flagged, reason)
+        _classify_cache.move_to_end(filepath)
+        if len(_classify_cache) > _MAX_CLASSIFY_CACHE:
+            _classify_cache.popitem(last=False)
     except OSError:
         pass
     return flagged, reason
