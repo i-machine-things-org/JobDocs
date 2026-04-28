@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 from typing import List
 from PyQt6.QtWidgets import (
-    QWidget, QTreeWidgetItem, QButtonGroup, QAbstractItemView
+    QWidget, QTreeWidgetItem, QButtonGroup, QAbstractItemView, QMessageBox
 )
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
@@ -27,7 +27,7 @@ from shared.widgets import (
 )
 from shared.utils import (
     is_blueprint_file, parse_job_numbers, create_file_link,
-    sanitize_filename, open_folder, get_next_number
+    sanitize_filename, open_folder, get_next_number, classify_document
 )
 
 
@@ -302,12 +302,40 @@ class JobModule(BaseModule):
             return
         self.add_preview.preview_file(self.add_files[row] if 0 <= row < len(self.add_files) else None)
 
+    def _check_po_rfq_files(self, newly_added: List[str], files_store: List[str], list_widget) -> None:
+        """Scan newly-added files for PO/RFQ signals and prompt the user for each flagged file."""
+        for path in list(newly_added):
+            is_flagged, reason = classify_document(path)
+            if not is_flagged:
+                continue
+            filename = os.path.basename(path)
+            msg = QMessageBox(self._widget)
+            msg.setWindowTitle("PO / RFQ Detected")
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.setText(f"'{filename}' appears to be a Purchase Order or RFQ.")
+            msg.setInformativeText(
+                f"Detected: {reason}\n\n"
+                "Save it as a document in the job folder, or remove it from the list?"
+            )
+            save_btn = msg.addButton("Save as Document", QMessageBox.ButtonRole.AcceptRole)
+            remove_btn = msg.addButton("Remove", QMessageBox.ButtonRole.RejectRole)
+            msg.setDefaultButton(save_btn)
+            msg.exec()
+            if msg.clickedButton() is remove_btn and path in files_store:
+                idx = files_store.index(path)
+                files_store.pop(idx)
+                list_widget.takeItem(idx)
+
     def handle_job_files(self, files: List[str]):
         """Add files to the job files list (Create New tab)"""
+        newly_added = []
         for f in files:
             if f not in self.job_files:
                 self.job_files.append(f)
                 self.job_files_list.addItem(os.path.basename(f))
+                newly_added.append(f)
+        if newly_added:
+            self._check_po_rfq_files(newly_added, self.job_files, self.job_files_list)
 
     def remove_job_file(self):
         """Remove selected file from job files list (Create New tab)"""
@@ -561,13 +589,17 @@ class JobModule(BaseModule):
             selected_files = dialog.get_selected_files()
             if selected_files:
                 files_added = 0
+                newly_added = []
                 for file_path in selected_files:
                     if file_path not in self.job_files:
                         self.job_files.append(file_path)
                         self.job_files_list.addItem(os.path.basename(file_path))
                         files_added += 1
+                        newly_added.append(file_path)
                 if files_added > 0:
                     self.log_message(f"Linked {files_added} drawing(s)")
+                if newly_added:
+                    self._check_po_rfq_files(newly_added, self.job_files, self.job_files_list)
 
     def _copy_info_from_folder(self, folder_path: str):
         """Copy job/quote info from folder to form, including optional file copy"""
@@ -771,10 +803,14 @@ class JobModule(BaseModule):
 
     def handle_add_files(self, files: List[str]):
         """Add files to the add files list (Add to Existing tab)"""
+        newly_added = []
         for f in files:
             if f not in self.add_files:
                 self.add_files.append(f)
                 self.add_files_list.addItem(os.path.basename(f))
+                newly_added.append(f)
+        if newly_added:
+            self._check_po_rfq_files(newly_added, self.add_files, self.add_files_list)
 
     def remove_add_file(self):
         """Remove selected file from add files list"""

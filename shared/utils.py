@@ -92,6 +92,46 @@ def get_os_text(key: str) -> str:
     return ""
 
 
+_PO_RFQ_NAME_RE = re.compile(
+    r'(?<![A-Za-z])p\.?o\.?(?![A-Za-z])'
+    r'|purchase[\s_\-]?order'
+    r'|(?<![A-Za-z])rfq(?![A-Za-z])'
+    r'|request[\s_\-]?for[\s_\-]?quote',
+    re.IGNORECASE,
+)
+
+_PO_RFQ_TEXT_RE = re.compile(
+    r'purchase\s+order|p\.?o\.?\s*(?:#|number|num|no\.?)'
+    r'|request\s+for\s+quote|rfq\s*(?:#|number|num|no\.?)',
+    re.IGNORECASE,
+)
+
+
+def classify_document(filepath: str) -> Tuple[bool, str]:
+    """
+    Detect if a file is likely a PO or RFQ.
+    Checks filename first, then first-page PDF text when PyMuPDF is available.
+    Returns (is_po_rfq, reason).
+    """
+    stem = os.path.splitext(os.path.basename(filepath))[0]
+    if _PO_RFQ_NAME_RE.search(stem):
+        return True, "filename contains PO/RFQ keyword"
+
+    if filepath.lower().endswith('.pdf'):
+        try:
+            import fitz  # PyMuPDF
+            doc = fitz.open(filepath)
+            try:
+                if doc.page_count > 0 and _PO_RFQ_TEXT_RE.search(doc[0].get_text()):
+                    return True, "PDF content contains PO/RFQ keyword"
+            finally:
+                doc.close()
+        except Exception:
+            pass
+
+    return False, ""
+
+
 def is_blueprint_file(filename: str, blueprint_extensions: List[str]) -> bool:
     """
     Check if a file is a blueprint based on its extension.
