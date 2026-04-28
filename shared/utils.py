@@ -10,6 +10,7 @@ import platform
 import shutil
 import re
 import subprocess
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 
@@ -90,6 +91,71 @@ def get_os_text(key: str) -> str:
     if key in text_map:
         return text_map[key].get(os_type, text_map[key]['linux'])
     return ""
+
+
+_PO_RFQ_NAME_RE = re.compile(
+    r'(?<![A-Za-z])p\.?o\.?(?![A-Za-z])'
+    r'|purchase[\s_\-]?order'
+    r'|(?<![A-Za-z])rfq(?![A-Za-z])'
+    r'|request[\s_\-]?for[\s_\-]?quote',
+    re.IGNORECASE,
+)
+
+_PO_RFQ_TEXT_RE = re.compile(
+    r'purchase\s+order|p\.?o\.?\s*(?:#|number|num|no\.?)'
+    r'|request\s+for\s+quote|rfq\s*(?:#|number|num|no\.?)',
+    re.IGNORECASE,
+)
+
+
+_MAX_CLASSIFY_CACHE = 500
+_classify_cache: OrderedDict[str, Tuple[float, bool, str]] = OrderedDict()  # path -> (mtime, flagged, reason)
+
+
+def classify_document(filepath: str) -> Tuple[bool, str]:
+    """
+    Detect if a file is likely a PO or RFQ.
+    Checks filename first, then first-page PDF text when PyMuPDF is available.
+    Results are cached by file path and mtime to avoid blocking repeated searches.
+    Returns (is_po_rfq, reason).
+    """
+    try:
+        mtime = os.path.getmtime(filepath)
+        cached = _classify_cache.get(filepath)
+        if cached and cached[0] == mtime:
+            return cached[1], cached[2]
+    except OSError:
+        pass
+
+    flagged, reason = _classify_document_uncached(filepath)
+    try:
+        _classify_cache[filepath] = (os.path.getmtime(filepath), flagged, reason)
+        _classify_cache.move_to_end(filepath)
+        if len(_classify_cache) > _MAX_CLASSIFY_CACHE:
+            _classify_cache.popitem(last=False)
+    except OSError:
+        pass
+    return flagged, reason
+
+
+def _classify_document_uncached(filepath: str) -> Tuple[bool, str]:
+    stem = os.path.splitext(os.path.basename(filepath))[0]
+    if _PO_RFQ_NAME_RE.search(stem):
+        return True, "filename contains PO/RFQ keyword"
+
+    if filepath.lower().endswith('.pdf'):
+        try:
+            import fitz  # PyMuPDF
+            doc = fitz.open(filepath)
+            try:
+                if doc.page_count > 0 and _PO_RFQ_TEXT_RE.search(doc[0].get_text()):
+                    return True, "PDF content contains PO/RFQ keyword"
+            finally:
+                doc.close()
+        except Exception as e:
+            logger.debug("classify_document: could not read PDF '%s': %s", filepath, e)
+
+    return False, ""
 
 
 def is_blueprint_file(filename: str, blueprint_extensions: List[str]) -> bool:

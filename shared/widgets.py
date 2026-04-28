@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QWidget, QSplitter, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, pyqtSlot, QSize, QThread
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QImage, QPixmap
+from PyQt6.QtGui import QBrush, QColor, QDragEnterEvent, QDropEvent, QImage, QPixmap
 from pathlib import Path
 import atexit
 import logging
@@ -1206,14 +1206,23 @@ class DrawingSearchDialog(QDialog):
                 pass
 
         # Add results to tree (limit to 200)
+        from shared.utils import classify_document
+        _orange = QColor(200, 120, 0)
         for filename, location, file_type, full_path in sorted(results)[:200]:
+            is_po_rfq, flag_reason = classify_document(full_path)
             item = QTreeWidgetItem()
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(0, Qt.CheckState.Unchecked)
             item.setText(0, filename)
             item.setText(1, location)
-            item.setText(2, file_type)
+            item.setText(2, "⚠ PO/RFQ" if is_po_rfq else file_type)
             item.setData(0, Qt.ItemDataRole.UserRole, full_path)
+            if is_po_rfq:
+                brush = QBrush(_orange)
+                for col in range(3):
+                    item.setForeground(col, brush)
+                item.setToolTip(0, f"Flagged as PO/RFQ: {flag_reason}")
+                item.setData(0, Qt.ItemDataRole.UserRole + 1, True)  # flagged_po_rfq
             self.results_tree.addTopLevelItem(item)
 
         if results:
@@ -1222,10 +1231,11 @@ class DrawingSearchDialog(QDialog):
             self.status_label.setText("No matches found")
 
     def _select_all(self):
-        """Select all files"""
+        """Select all non-flagged files"""
         for i in range(self.results_tree.topLevelItemCount()):
             item = self.results_tree.topLevelItem(i)
-            item.setCheckState(0, Qt.CheckState.Checked)
+            if not item.data(0, Qt.ItemDataRole.UserRole + 1):
+                item.setCheckState(0, Qt.CheckState.Checked)
 
     def _select_none(self):
         """Deselect all files"""

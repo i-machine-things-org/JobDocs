@@ -304,10 +304,14 @@ class JobModule(BaseModule):
 
     def handle_job_files(self, files: List[str]):
         """Add files to the job files list (Create New tab)"""
+        newly_added = []
         for f in files:
             if f not in self.job_files:
                 self.job_files.append(f)
                 self.job_files_list.addItem(os.path.basename(f))
+                newly_added.append(f)
+        if newly_added:
+            self._check_po_rfq_files(newly_added, self.job_files, self.job_files_list)
 
     def remove_job_file(self):
         """Remove selected file from job files list (Create New tab)"""
@@ -561,13 +565,17 @@ class JobModule(BaseModule):
             selected_files = dialog.get_selected_files()
             if selected_files:
                 files_added = 0
+                newly_added = []
                 for file_path in selected_files:
                     if file_path not in self.job_files:
                         self.job_files.append(file_path)
                         self.job_files_list.addItem(os.path.basename(file_path))
                         files_added += 1
+                        newly_added.append(file_path)
                 if files_added > 0:
                     self.log_message(f"Linked {files_added} drawing(s)")
+                if newly_added:
+                    self._check_po_rfq_files(newly_added, self.job_files, self.job_files_list)
 
     def _copy_info_from_folder(self, folder_path: str):
         """Copy job/quote info from folder to form, including optional file copy"""
@@ -771,10 +779,14 @@ class JobModule(BaseModule):
 
     def handle_add_files(self, files: List[str]):
         """Add files to the add files list (Add to Existing tab)"""
+        newly_added = []
         for f in files:
             if f not in self.add_files:
                 self.add_files.append(f)
                 self.add_files_list.addItem(os.path.basename(f))
+                newly_added.append(f)
+        if newly_added:
+            self._check_po_rfq_files(newly_added, self.add_files, self.add_files_list)
 
     def remove_add_file(self):
         """Remove selected file from add files list"""
