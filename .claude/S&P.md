@@ -2222,3 +2222,10 @@ Actionable: 3  Nitpicks: 0 — all resolved
 Actionable: 3  Nitpicks: 1
 - Tag flagged rows in item data so bulk actions can safely skip them.
 - Configuration used
+
+---
+
+## 2026-04-28 — `PR #244: feat: PO/RFQ detection and flagging` — run 2
+
+Actionable: 1  Nitpicks: 0
+- Configuration used
