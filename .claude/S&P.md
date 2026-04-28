@@ -2239,3 +2239,11 @@ Actionable: 3  Nitpicks: 0 — all resolved
 4. **"Save as Document" has no distinct routing** — by design
    - CR suggested an `is_document` flag or explicit move helper
    - Files in `job_files`/`quote_files` are always copied (never blueprint-linked); "Save as Document" is the correct label for keeping the file in that list. No flag needed.
+
+---
+
+## 2026-04-28 — `PR #244: feat: PO/RFQ detection and flagging` — run 1
+
+Actionable: ?  Nitpicks: 1
+- Bound `_classify_cache` to avoid unbounded growth in long-running sessions.
+- Configuration used
