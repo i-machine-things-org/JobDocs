@@ -2214,3 +2214,11 @@ Actionable: 3  Nitpicks: 0 — all resolved
 3. **`except` block emits `up_to_date` on network/parse errors** — `main.py` `_UpdateChecker.run`
    - Any error (DNS failure, timeout, malformed JSON) silently showed "You're up to date"
    - Fix: catch only expected exceptions (`URLError`, `OSError`, `JSONDecodeError`, `ValueError`) and pass; `up_to_date` only emits on a confirmed successful check
+
+---
+
+## 2026-04-28 — `PR #244: feat: PO/RFQ detection and flagging` — run 1
+
+Actionable: 3  Nitpicks: 1
+- Tag flagged rows in item data so bulk actions can safely skip them.
+- Configuration used
