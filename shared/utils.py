@@ -107,12 +107,33 @@ _PO_RFQ_TEXT_RE = re.compile(
 )
 
 
+_classify_cache: Dict[str, Tuple[float, bool, str]] = {}  # path -> (mtime, flagged, reason)
+
+
 def classify_document(filepath: str) -> Tuple[bool, str]:
     """
     Detect if a file is likely a PO or RFQ.
     Checks filename first, then first-page PDF text when PyMuPDF is available.
+    Results are cached by file path and mtime to avoid blocking repeated searches.
     Returns (is_po_rfq, reason).
     """
+    try:
+        mtime = os.path.getmtime(filepath)
+        cached = _classify_cache.get(filepath)
+        if cached and cached[0] == mtime:
+            return cached[1], cached[2]
+    except OSError:
+        pass
+
+    flagged, reason = _classify_document_uncached(filepath)
+    try:
+        _classify_cache[filepath] = (os.path.getmtime(filepath), flagged, reason)
+    except OSError:
+        pass
+    return flagged, reason
+
+
+def _classify_document_uncached(filepath: str) -> Tuple[bool, str]:
     stem = os.path.splitext(os.path.basename(filepath))[0]
     if _PO_RFQ_NAME_RE.search(stem):
         return True, "filename contains PO/RFQ keyword"
@@ -126,8 +147,8 @@ def classify_document(filepath: str) -> Tuple[bool, str]:
                     return True, "PDF content contains PO/RFQ keyword"
             finally:
                 doc.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("classify_document: could not read PDF '%s': %s", filepath, e)
 
     return False, ""
 

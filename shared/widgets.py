@@ -1222,6 +1222,7 @@ class DrawingSearchDialog(QDialog):
                 for col in range(3):
                     item.setForeground(col, brush)
                 item.setToolTip(0, f"Flagged as PO/RFQ: {flag_reason}")
+                item.setData(0, Qt.ItemDataRole.UserRole + 1, True)  # flagged_po_rfq
             self.results_tree.addTopLevelItem(item)
 
         if results:
@@ -1230,10 +1231,11 @@ class DrawingSearchDialog(QDialog):
             self.status_label.setText("No matches found")
 
     def _select_all(self):
-        """Select all files"""
+        """Select all non-flagged files"""
         for i in range(self.results_tree.topLevelItemCount()):
             item = self.results_tree.topLevelItem(i)
-            item.setCheckState(0, Qt.CheckState.Checked)
+            if not item.data(0, Qt.ItemDataRole.UserRole + 1):
+                item.setCheckState(0, Qt.CheckState.Checked)
 
     def _select_none(self):
         """Deselect all files"""

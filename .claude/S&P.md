@@ -2217,15 +2217,25 @@ Actionable: 3  Nitpicks: 0 — all resolved
 
 ---
 
-## 2026-04-28 — `PR #244: feat: PO/RFQ detection and flagging` — run 1
+## 2026-04-28 — `PR #244: feat: PO/RFQ detection and flagging`
 
-Actionable: 3  Nitpicks: 1
-- Tag flagged rows in item data so bulk actions can safely skip them.
-- Configuration used
+**Review:** PO/RFQ detection across job/quote file-add flows. Two CR runs.
+**Result:** 3 actionable + 1 nitpick — all resolved.
 
----
+### Findings
 
-## 2026-04-28 — `PR #244: feat: PO/RFQ detection and flagging` — run 2
+1. **Silent `except Exception: pass` in `classify_document`** — `shared/utils.py`
+   - Swallows all PDF read errors with no diagnostic trace
+   - Fix: `except Exception as e: logger.debug(...)` — preserves graceful fallback, visible in debug logs
 
-Actionable: 1  Nitpicks: 0
-- Configuration used
+2. **`classify_document` blocks the UI thread** — `shared/widgets.py`
+   - Called in the draw-results loop for up to 200 files; PDF parsing adds 0.1–0.5 s per file
+   - Fix: mtime-keyed module-level cache (`_classify_cache`) — first call parses, subsequent hits return instantly
+
+3. **No machine-readable flag on PO/RFQ rows** — `shared/widgets.py`
+   - Visual styling alone can't be queried; `Select All` would check flagged rows
+   - Fix: `item.setData(0, Qt.ItemDataRole.UserRole + 1, True)`; `_select_all` skips flagged rows
+
+4. **"Save as Document" has no distinct routing** — by design
+   - CR suggested an `is_document` flag or explicit move helper
+   - Files in `job_files`/`quote_files` are always copied (never blueprint-linked); "Save as Document" is the correct label for keeping the file in that list. No flag needed.
