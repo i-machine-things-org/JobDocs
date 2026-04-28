@@ -2247,3 +2247,11 @@ Actionable: 3  Nitpicks: 0 — all resolved
 Actionable: ?  Nitpicks: 1
 - Bound `_classify_cache` to avoid unbounded growth in long-running sessions.
 - Configuration used
+
+---
+
+## 2026-04-28 — `PR #244: feat: PO/RFQ detection and flagging` — run 2
+
+Actionable: 1  Nitpicks: 0
+- Narrow PDF parse exception handling and keep traceback in debug logs.
+- Configuration used
