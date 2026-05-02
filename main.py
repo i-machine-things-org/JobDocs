@@ -749,14 +749,6 @@ class JobDocsMainWindow(QMainWindow):
         # Help menu
         help_menu = menubar.addMenu("&Help")  # pyright: ignore[reportOptionalMemberAccess]
 
-        getting_started_action = help_menu.addAction("&Getting Started")  # pyright: ignore[reportOptionalMemberAccess]
-        getting_started_action.triggered.connect(  # pyright: ignore[reportOptionalMemberAccess]
-            self.show_getting_started
-        )
-
-        readme_action = help_menu.addAction("&User Guide (README)")  # pyright: ignore[reportOptionalMemberAccess]
-        readme_action.triggered.connect(self.show_readme)  # pyright: ignore[reportOptionalMemberAccess]
-
         setup_wizard_action = help_menu.addAction("&Run Setup Wizard...")  # pyright: ignore[reportOptionalMemberAccess]
         setup_wizard_action.triggered.connect(self.run_setup_wizard)  # pyright: ignore[reportOptionalMemberAccess]
 
@@ -931,34 +923,188 @@ class JobDocsMainWindow(QMainWindow):
         )
 
     def show_getting_started(self):
-        """Show getting started guide"""
+        """Show interactive getting started tutorial."""
+        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+            QPushButton, QFrame, QSizePolicy,
+        )
+        from PyQt6.QtCore import Qt as _Qt
+
         folder_term = get_os_text('folder_term')
 
-        content = f"""
-<h2>GETTING STARTED</h2>
+        steps = [
+            (
+                "Welcome to JobDocs",
+                f"""<p>JobDocs manages blueprint files and customer job {folder_term}s — linking
+drawings to jobs without duplicating files.</p>
+<p>This tutorial walks through the four things you need to get started.
+It takes about two minutes.</p>""",
+                None, None,
+            ),
+            (
+                "Step 1 — Configure your directories",
+                f"""<p>Open <b>File → Settings</b> and set:</p>
+<ul>
+  <li><b>Blueprints Directory</b> — where your master drawing files live</li>
+  <li><b>Customer Files Directory</b> — where job {folder_term}s are created</li>
+</ul>
+<p>Choose <b>Hard Link</b> as the link type (recommended). JobDocs will link
+blueprint files into job {folder_term}s without copying them.</p>""",
+                "Open Settings",
+                lambda: (dlg.hide(), self.open_settings(), dlg.show()),
+            ),
+            (
+                "Step 2 — Create your first job",
+                f"""<p>Go to the <b>Job</b> tab and fill in the job details:</p>
+<ul>
+  <li>Customer name and job number</li>
+  <li>Job description and drawing numbers</li>
+</ul>
+<p>Drag blueprint files onto the drop zone — or browse for them.
+Click <b>Create Job</b> to build the {folder_term} structure and link the files.</p>""",
+                "Go to Job tab",
+                lambda: (dlg.accept(), QTimer.singleShot(0, lambda: self._tutorial_go_to_tab("Job"))),
+            ),
+            (
+                "Step 3 — Drop emails with attachments",
+                """<p>Any drop zone accepts email drag-and-drop:</p>
+<ul>
+  <li><b>Outlook / O365</b> — drag from the desktop app; attachments are extracted automatically</li>
+  <li><b>Betterbird / Thunderbird</b> — drag from the message list; works the same way</li>
+</ul>
+<p>Image attachments are skipped by default. Zip files are unpacked automatically.
+Both can be changed in <b>Settings</b>.</p>""",
+                None, None,
+            ),
+            (
+                "Step 4 — Search your jobs",
+                """<p>The <b>Search</b> tab lets you find any job instantly by:</p>
+<ul>
+  <li>Customer name</li>
+  <li>Job number</li>
+  <li>Description or drawing number</li>
+</ul>
+<p>Results are indexed in the background after first launch, so searches are
+near-instant even across thousands of jobs.</p>""",
+                "Go to Search",
+                lambda: (dlg.accept(), QTimer.singleShot(0, lambda: self._tutorial_go_to_tab("Search"))),
+            ),
+            (
+                "You're all set",
+                """<p>That covers the core workflow. A few more things worth knowing:</p>
+<ul>
+  <li><b>Bulk Create</b> tab — create many jobs at once from a CSV file</li>
+  <li><b>Help → Run Setup Wizard</b> — re-run first-time configuration any time</li>
+  <li><b>ITAR mode</b> — keep controlled documents in a separate directory</li>
+</ul>
+<p>If you get stuck, the setup wizard covers directory configuration step by step.</p>""",
+                None, None,
+            ),
+        ]
 
-<p><b>1. Go to File → Settings</b><br>
-<b>2. Configure directories:</b><br>
-&nbsp;&nbsp;- Blueprints Directory: Central drawing storage<br>
-&nbsp;&nbsp;- Customer Files Directory: Where job {folder_term}s are created<br>
-<b>3. Choose link type (Hard Link recommended)</b><br>
-<b>4. Set blueprint file extensions</b></p>
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Getting Started")
+        dlg.setMinimumWidth(480)
+        dlg.setMaximumWidth(560)
 
-<p><b>CREATE JOB TAB</b><br>
-Enter job information and drop files to create job {folder_term}s.</p>
+        outer = QVBoxLayout(dlg)
+        outer.setSpacing(0)
+        outer.setContentsMargins(0, 0, 0, 0)
 
-<p><b>BULK CREATE TAB</b><br>
-Create multiple jobs at once using CSV format.</p>
+        # Header bar
+        header = QFrame()
+        header.setStyleSheet("background:#1565c0;")
+        header.setFixedHeight(6)
+        outer.addWidget(header)
 
-<p><b>SEARCH TAB</b><br>
-Search across all customers and jobs.</p>
-        """
+        inner = QVBoxLayout()
+        inner.setContentsMargins(24, 20, 24, 20)
+        inner.setSpacing(12)
+        outer.addLayout(inner)
 
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Getting Started")
-        msg.setTextFormat(Qt.TextFormat.RichText)
-        msg.setText(content)
-        msg.exec()
+        step_label = QLabel()
+        step_label.setStyleSheet("color: gray; font-size: 11px;")
+
+        title_label = QLabel()
+        title_label.setStyleSheet("font-size: 15px; font-weight: bold;")
+        title_label.setWordWrap(True)
+
+        body_label = QLabel()
+        body_label.setTextFormat(_Qt.TextFormat.RichText)
+        body_label.setWordWrap(True)
+        body_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.MinimumExpanding)
+
+        action_btn = QPushButton()
+        action_btn.setVisible(False)
+        action_btn.setFixedHeight(32)
+        action_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        action_btn.setStyleSheet(
+            "QPushButton { background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9;"
+            " border-radius: 4px; padding: 5px 14px; font-weight: bold; }"
+            "QPushButton:hover { background: #bbdefb; }"
+        )
+
+        inner.addWidget(step_label)
+        inner.addWidget(title_label)
+        inner.addWidget(body_label)
+        inner.addWidget(action_btn)
+        inner.addStretch()
+
+        # Nav row
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("color: #e0e0e0;")
+        outer.addWidget(sep)
+
+        nav = QHBoxLayout()
+        nav.setContentsMargins(24, 12, 24, 16)
+        back_btn = QPushButton("← Back")
+        back_btn.setFlat(True)
+        next_btn = QPushButton("Next →")
+        next_btn.setStyleSheet(
+            "QPushButton { background: #1565c0; color: white; border-radius: 4px;"
+            " padding: 6px 18px; font-weight: bold; }"
+            "QPushButton:hover { background: #1976d2; }"
+        )
+        nav.addWidget(back_btn)
+        nav.addStretch()
+        nav.addWidget(next_btn)
+        outer.addLayout(nav)
+
+        state = {'idx': 0}
+
+        def _show(idx):
+            state['idx'] = idx
+            title, body, act_label, act_cb = steps[idx]
+            total = len(steps)
+            step_label.setText(f"Step {idx + 1} of {total}")
+            title_label.setText(title)
+            body_label.setText(body)
+            back_btn.setVisible(idx > 0)
+            next_btn.setText("Finish" if idx == total - 1 else "Next →")
+            if act_label and act_cb:
+                action_btn.setText(act_label)
+                try:
+                    action_btn.clicked.disconnect()
+                except Exception:
+                    pass
+                action_btn.clicked.connect(act_cb)
+                action_btn.setVisible(True)
+            else:
+                action_btn.setVisible(False)
+
+        back_btn.clicked.connect(lambda: _show(state['idx'] - 1))
+        next_btn.clicked.connect(lambda: dlg.accept() if state['idx'] == len(steps) - 1 else _show(state['idx'] + 1))
+
+        _show(0)
+        dlg.exec()
+
+    def _tutorial_go_to_tab(self, name: str) -> None:
+        """Switch to a named tab, used by the tutorial action buttons."""
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == name:
+                self.tabs.setCurrentIndex(i)
+                return
 
     def check_for_updates(self) -> None:
         """Manually check for updates from the Help menu."""
@@ -1023,35 +1169,6 @@ Search across all customers and jobs.</p>
         msg.setTextFormat(Qt.TextFormat.RichText)
         msg.setText(content)
         msg.exec()
-
-    def show_readme(self):
-        """Show README.md in a scrollable dialog"""
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
-
-        readme_path = Path(__file__).parent / 'README.md'
-        try:
-            content = readme_path.read_text(encoding='utf-8')
-        except Exception as e:
-            QMessageBox.warning(self, "User Guide", f"README.md could not be opened:\n{e}")
-            return
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle("JobDocs — User Guide")
-        dialog.resize(820, 640)
-
-        layout = QVBoxLayout(dialog)
-        text = QTextEdit()
-        text.setReadOnly(True)
-        text.setPlainText(content)
-        text.setFontFamily("Courier New")
-        text.setFontPointSize(9)
-        layout.addWidget(text)
-
-        btn = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        btn.rejected.connect(dialog.close)
-        layout.addWidget(btn)
-
-        dialog.exec()
 
     def run_setup_wizard(self):
         """Launch the first-time setup wizard manually from Help menu"""

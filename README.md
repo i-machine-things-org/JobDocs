@@ -26,7 +26,7 @@ A modular tool for managing blueprint files and customer job directories with su
 - **File Organization** - Automatic folder structure creation and file management
 - **Import Tools** - Direct import of files to blueprint folders
 - **History Tracking** - Keep track of recent jobs and customer information
-- **Outlook / O365 Drag-and-Drop** - Drag emails directly from the new Microsoft 365 Outlook desktop app onto any drop zone; the email is saved as a named `.msg` file and all attachments are extracted automatically (requires `pywin32` on Windows). Image attachments (jpg, png, etc.) are skipped by default and can be toggled in Settings. Zip attachments are automatically extracted — the files inside are added directly to the file list.
+- **Email Drag-and-Drop** - Drag emails directly onto any drop zone and attachments are extracted automatically. Supports Outlook / O365 (saves as `.msg`, requires `pywin32` on Windows), classic Outlook desktop, and Betterbird / Thunderbird on Linux (attachments extracted from the `.eml`). Image attachments (jpg, png, etc.) are skipped by default and can be toggled in Settings. Zip attachments are automatically extracted — the files inside are added directly to the file list.
 - **PDF Preview** - Drop zone file list shows a live preview of PDF files (requires `pymupdf`)
 - **Cross-Platform** - Works on Windows, macOS, and Linux
 
