@@ -5,9 +5,12 @@ The AppContext provides modules with access to shared application state,
 settings, and common operations without tight coupling to the main window.
 """
 
+import logging
 import os
 from pathlib import Path
 from typing import Dict, Any, Callable, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 class AppContext:
@@ -233,7 +236,7 @@ class AppContext:
 
         return Path(base_dir) / path_str
 
-    def find_job_folders(self, customer_path: str) -> List[Tuple[str, str]]:
+    def find_job_folders(self, customer_path: str, *, errors: Optional[List[OSError]] = None) -> List[Tuple[str, str]]:
         """
         Find all job folders in a customer directory.
 
@@ -244,47 +247,31 @@ class AppContext:
             List of (job_name, job_docs_path) tuples
         """
         structure = self._settings.get('job_folder_structure', '{customer}/{job_folder}/job documents')
-        print(f"[find_job_folders] Customer: {customer_path}", flush=True)
-        print(f"[find_job_folders] Structure: {structure}", flush=True)
+        logger.debug("find_job_folders: customer=%s structure=%s", customer_path, structure)
 
-        # Determine where job_folder appears in the structure relative to customer
         after_customer = structure.split('{customer}/', 1)[-1] if '{customer}/' in structure else structure
-        print(f"[find_job_folders] After customer: {after_customer}", flush=True)
-
         jobs = []
 
-        # Check if job_folder is at the root level after customer
         if after_customer.startswith('{job_folder}/'):
-            # New structure: customer/job_folder/...
             suffix = after_customer.replace('{job_folder}/', '', 1)
-            print(f"[find_job_folders] Using new structure, suffix: {suffix}", flush=True)
             try:
-                items = os.listdir(customer_path)
-                print(f"[find_job_folders] Found {len(items)} items in {customer_path}", flush=True)
-                for item in items:
+                for item in os.listdir(customer_path):
                     item_path = os.path.join(customer_path, item)
                     if os.path.isdir(item_path):
                         expected_docs_path = os.path.join(item_path, suffix)
-                        print(f"[find_job_folders]   Checking {item} -> {expected_docs_path}", flush=True)
                         if os.path.exists(expected_docs_path):
-                            print(f"[find_job_folders]     ✓ Found job: {item}", flush=True)
                             jobs.append((item, expected_docs_path))
-                        else:
-                            print("[find_job_folders]     ✗ Path doesn't exist", flush=True)
             except OSError as e:
-                print(f"[find_job_folders] OSError: {e}", flush=True)
+                logger.debug("find_job_folders: OSError %s", e)
+                if errors is not None:
+                    errors.append(e)
         else:
-            # Legacy or custom structure
-            print("[find_job_folders] Using legacy/custom structure", flush=True)
             parts = after_customer.split('{job_folder}')
             if len(parts) == 2:
                 prefix = parts[0].strip('/')
                 suffix = parts[1].strip('/')
-                print(f"[find_job_folders] Prefix: '{prefix}', Suffix: '{suffix}'", flush=True)
 
                 if '{po_number}' in prefix:
-                    # Template has a PO number segment — enumerate actual PO subdirectories
-                    print("[find_job_folders] Detected {po_number} in prefix, enumerating PO dirs", flush=True)
                     po_parts = prefix.split('{po_number}')
                     pre_po = po_parts[0].strip('/')
                     post_po = po_parts[1].strip('/') if len(po_parts) > 1 else ''
@@ -308,38 +295,28 @@ class AppContext:
                                         else:
                                             jobs.append((item, item_path))
                         except OSError as e:
-                            print(f"[find_job_folders] OSError enumerating PO dirs: {e}", flush=True)
+                            logger.debug("find_job_folders: OSError enumerating PO dirs: %s", e)
+                            if errors is not None:
+                                errors.append(e)
                 else:
                     prefix_path = os.path.join(customer_path, prefix) if prefix else customer_path
-                    print(f"[find_job_folders] Prefix path: {prefix_path}", flush=True)
-
                     if os.path.exists(prefix_path):
                         try:
-                            items = os.listdir(prefix_path)
-                            print(f"[find_job_folders] Found {len(items)} items in prefix path", flush=True)
-                            for item in items:
+                            for item in os.listdir(prefix_path):
                                 item_path = os.path.join(prefix_path, item)
                                 if os.path.isdir(item_path):
                                     if suffix:
                                         expected_docs_path = os.path.join(item_path, suffix)
-                                        print(
-                                            f"[find_job_folders]   Checking {item} -> {expected_docs_path}",
-                                            flush=True
-                                        )
                                         if os.path.exists(expected_docs_path):
-                                            print(f"[find_job_folders]     ✓ Found job: {item}", flush=True)
                                             jobs.append((item, expected_docs_path))
-                                        else:
-                                            print("[find_job_folders]     ✗ Path doesn't exist", flush=True)
                                     else:
-                                        print(f"[find_job_folders]   Found job (no suffix): {item}", flush=True)
                                         jobs.append((item, item_path))
                         except OSError as e:
-                            print(f"[find_job_folders] OSError: {e}", flush=True)
-                    else:
-                        print("[find_job_folders] Prefix path doesn't exist!", flush=True)
+                            logger.debug("find_job_folders: OSError: %s", e)
+                            if errors is not None:
+                                errors.append(e)
 
-        print(f"[find_job_folders] Returning {len(jobs)} jobs", flush=True)
+        logger.debug("find_job_folders: returning %d jobs from %s", len(jobs), customer_path)
         return jobs
 
     def find_quote_folders(self, customer_path: str) -> List[Tuple[str, str]]:

@@ -2255,3 +2255,110 @@ Actionable: ?  Nitpicks: 1
 Actionable: 1  Nitpicks: 0
 - Narrow PDF parse exception handling and keep traceback in debug logs.
 - Configuration used
+
+---
+
+## 2026-04-29 — `PR #245: feat: SQLite search index for fast job and blueprint lookup` — run 1
+
+Actionable: ?  Nitpicks: 4
+- Narrow exception type from `Exception` to `OSError`.
+- Consider adding a result limit to prevent excessive memory usage.
+- Consider adding a composite index for faster DELETE operations.
+- Move import to top of file.
+- Duplicate PRAGMA statements.
+- Configuration used
+
+---
+
+## 2026-04-29 — `PR #245: feat: SQLite search index for fast job and blueprint lookup` — run 2
+
+Actionable: ?  Nitpicks: 2
+- `IndexWorker` is still not cleaned up on module shutdown.
+- Broad exception catch is acceptable here but consider being more specific.
+- Consider adding error handling for index queries.
+- Configuration used
+
+---
+
+## 2026-04-29 — `PR #245: feat: SQLite search index for fast job and blueprint lookup` — run 3
+
+Actionable: 2  Nitpicks: 0
+- Purge customers that disappeared from `base_dir`.
+- Skip reindexing when `find_job_folders()` fails.
+- Make the blueprint rebuild succeed before you mark it fresh.
+- Configuration used
+
+---
+
+## 2026-04-29 — `PR #245: feat: SQLite search index for fast job and blueprint lookup` — run 4
+
+Actionable: 2  Nitpicks: 0
+- Track blueprint staleness below `base_dir`, not just on the root.
+- Configuration used
+
+---
+
+## 2026-04-29 — `PR #245: feat: SQLite search index for fast job and blueprint lookup` — run 5
+
+Actionable: ?  Nitpicks: 0
+- Apply same LIKE wildcard escaping for blueprint search.
+- Escape LIKE wildcard characters to match filesystem fallback behavior.
+- Index path bypasses legacy-mode semantics.
+- Configuration used
+
+---
+
+## 2026-04-29 — `PR #245: feat: SQLite search index for fast job and blueprint lookup` — run 6
+
+Actionable: 2  Nitpicks: 0
+- Blueprint invalidation still only watches the root directory.
+- Configuration used
+
+---
+
+## 2026-04-29 — `PR #245: feat: SQLite search index for fast job and blueprint lookup` — run 7
+
+Actionable: 2  Nitpicks: 0
+- Blueprint invalidation still only watches the root directory.
+- Cancelled blueprint rebuilds can still commit a partial prefix.
+- Configuration used
+
+### Fixed
+
+1. **Blueprint staleness tracked per customer dir** (`core/search_index.py`)
+   - Changed blueprint section to enumerate customer subdirs of `base_dir` and call `_is_stale` per customer path (mirrors jobs side). New/renamed files inside a customer subdir now correctly trigger re-indexing.
+   - Added purge of disappeared customer rows in `bp_files` and `indexed_dirs`.
+
+2. **Cancelled blueprint walk no longer commits partial data** (`core/search_index.py`)
+   - Collect all rows into `new_rows` list before touching the DB. Only DELETE + executemany + mark_indexed after `completed=True`. A cancelled walk discards `new_rows` without touching the DB, leaving existing rows intact.
+
+---
+
+## 2026-04-29 — `PR #245: feat: SQLite search index for fast job and blueprint lookup` — run 8
+
+Actionable: 1  Nitpicks: 0
+- Escape path-based LIKE patterns in indexed_dirs queries (lines 221 and 296 used raw paths with no ESCAPE).
+- Configuration used
+
+### Fixed
+
+1. **LIKE patterns in indexed_dirs queries escaped** (`core/search_index.py`)
+   - Added `_like_prefix(path)` helper using `!` as ESCAPE char (avoids conflicting with Windows `\` path separators).
+   - Updated both `prev_containers` and `prev_indexed` queries to use `_like_prefix()` with `ESCAPE '!'`.
+
+---
+
+## 2026-04-29 — `core/search_index.py` (blueprint walk error handling and stale detection)
+
+**Review:** Two issues: (1) `os.walk` without `onerror` silently continues on subdirectory read errors, so `completed` could be set `True` with partial results. (2) `_is_stale` used a single `getmtime` on the customer directory, so nested subdirectory changes were invisible.
+**Result:** Both fixed.
+
+### Findings
+
+1. **os.walk must use onerror callback to catch subdirectory read failures**
+   - Without `onerror`, internal walk errors are silently swallowed; `completed` becomes `True` on partial data.
+   - Fix: add `_on_walk_error` callback setting `walk_failed = True`; final `completed = completed and not walk_failed`.
+
+2. **Blueprint stale check must consider nested directory mtimes**
+   - `_dir_mtime(customer_path)` only sees immediate-directory mtime; subdirectory additions are invisible.
+   - Fix: added `_subtree_mtime` (walks only dirs, not files — lightweight) and `recursive=True` param on `_is_stale` / `_mark_indexed`; blueprint call sites pass `recursive=True`.

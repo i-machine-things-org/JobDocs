@@ -6,6 +6,7 @@ Main application entry point using the modular plugin architecture.
 """
 
 import io
+import logging
 import os
 import shutil
 import subprocess
@@ -18,13 +19,15 @@ import zipfile
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QMessageBox, QDialog,
     QInputDialog, QLineEdit, QProgressDialog,
     QVBoxLayout, QLabel, QCheckBox, QDialogButtonBox,
 )
+
+logger = logging.getLogger(__name__)
 
 from core.module_loader import ModuleLoader
 from core.app_context import AppContext
@@ -33,6 +36,7 @@ from shared.remote_sync import RemoteSyncManager
 
 
 def _get_app_version() -> str:
+    
     try:
         from core._version import __version__ as _v
         if _v and _v != "dev":
@@ -697,6 +701,9 @@ class JobDocsMainWindow(QMainWindow):
             # Populate customer lists in all modules
             self.populate_customer_lists()
 
+            # Kick off the search index build after the event loop starts
+            QTimer.singleShot(0, self._start_search_indexer)
+
         except Exception as e:
             QMessageBox.critical(
                 self,
@@ -705,6 +712,14 @@ class JobDocsMainWindow(QMainWindow):
             )
             import traceback
             traceback.print_exc()
+
+    def _start_search_indexer(self):
+        for module in self.modules:
+            if hasattr(module, 'start_indexer'):
+                try:
+                    module.start_indexer()
+                except Exception as exc:
+                    logger.warning("_start_search_indexer: %s: %s", module.__class__.__name__, exc)
 
     # ==================== Menu ====================
 

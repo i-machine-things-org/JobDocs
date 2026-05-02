@@ -6,13 +6,14 @@ Supports both strict format (fast) and legacy recursive search modes.
 Uses background threading to prevent UI lockup during searches.
 """
 
+import logging
 import os
 import sys
 import re
 import ctypes
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from PyQt6.QtWidgets import (
     QWidget, QMessageBox, QTableWidgetItem, QApplication, QMenu,
     QListWidgetItem, QListWidget, QSplitter, QGroupBox, QVBoxLayout, QCheckBox
@@ -23,8 +24,11 @@ from PyQt6.QtGui import QDesktopServices
 from PyQt6 import uic
 
 from core.base_module import BaseModule
-from shared.utils import open_folder
+from core.search_index import SearchIndex, _parse_job_folder
+from shared.utils import open_folder, get_config_dir
 from shared.widgets import print_files_with_dialog
+
+logger = logging.getLogger(__name__)
 
 
 def _is_hidden_file(full_path: str, name: str) -> bool:
@@ -120,22 +124,9 @@ class SearchWorker(QThread):
                     if not dir_name or not dir_name[0].isdigit():
                         continue
 
-                    # Parse folder name into components
-                    parts = dir_name.split('_')
-                    job_num = parts[0] if parts else ""
-                    remaining_parts = parts[1:] if len(parts) > 1 else []
-
-                    drawings = []
-                    desc_parts = []
-
-                    if remaining_parts:
-                        if '-' in remaining_parts[-1]:
-                            drawings = [d.strip() for d in remaining_parts[-1].split('-') if d.strip()]
-                            desc_parts = remaining_parts[:-1]
-                        else:
-                            desc_parts = remaining_parts
-
-                    desc = ' '.join(desc_parts) if desc_parts else ""
+                    # Parse folder name — shared parser keeps strict-mode results
+                    # consistent whether the index is ready or not.
+                    job_num, desc, drawings = _parse_job_folder(dir_name)
 
                     # Check for matches
                     match = customer_match
@@ -165,6 +156,35 @@ class SearchWorker(QThread):
                         }
                         self.result_found.emit(result)
                         self.result_count += 1
+
+                # find_job_folders requires a specific subfolder (e.g. "job documents")
+                # that may not exist.  When the customer name matched but no structured
+                # jobs were returned, fall back to a plain directory scan so the customer
+                # is still reachable in strict mode.
+                if customer_match and not jobs:
+                    try:
+                        for item in sorted(os.listdir(customer_path)):
+                            if self._is_cancelled:
+                                break
+                            item_path = os.path.join(customer_path, item)
+                            if not os.path.isdir(item_path) or not item or not item[0].isdigit():
+                                continue
+                            job_num, desc, drawings = _parse_job_folder(item)
+                            try:
+                                mod_time = datetime.fromtimestamp(Path(item_path).stat().st_mtime)
+                            except OSError:
+                                mod_time = datetime.now()
+                            self.result_found.emit({
+                                'date': mod_time,
+                                'customer': display_customer,
+                                'job_number': job_num,
+                                'description': desc,
+                                'drawings': drawings,
+                                'path': item_path,
+                            })
+                            self.result_count += 1
+                    except OSError:
+                        pass
 
     def _legacy_search(self):
         """Recursive search through all directories"""
@@ -280,6 +300,33 @@ class SearchWorker(QThread):
             pass
 
 
+class IndexWorker(QThread):
+    """Background thread that builds/updates the search index at startup."""
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(int)   # emits job count when done
+
+    def __init__(self, index: SearchIndex, cf_dirs, bp_dirs, app_context):
+        super().__init__()
+        self._index = index
+        self._cf_dirs = cf_dirs
+        self._bp_dirs = bp_dirs
+        self._app_context = app_context
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        self._index.update(
+            self._cf_dirs,
+            self._bp_dirs,
+            self._app_context,
+            progress=self.progress.emit,
+            cancelled=lambda: self._cancelled,
+        )
+        self.finished.emit(self._index.job_count())
+
+
 class SearchModule(BaseModule):
     """Module for searching jobs across customer directories"""
 
@@ -287,7 +334,10 @@ class SearchModule(BaseModule):
         super().__init__()
         self._widget = None
         self.search_results: List[Dict[str, Any]] = []
-        self._worker = None  # Background search worker
+        self._worker = None       # Background search worker
+        self._index_worker = None # Background index builder
+        self._index: Optional[SearchIndex] = None
+        self._index_failures = 0  # consecutive query errors
 
         # Widget references
         self.search_edit = None
@@ -316,6 +366,42 @@ class SearchModule(BaseModule):
 
     def initialize(self, app_context):
         super().initialize(app_context)
+        try:
+            db_path = get_config_dir() / 'search_index.db'
+            self._index = SearchIndex(db_path)
+        except Exception as exc:
+            logger.warning("search: could not open index DB (%s): %s", type(exc).__name__, exc)
+            self._index = None
+
+    def start_indexer(self):
+        """Start the background index update. Called after the UI is shown."""
+        if self._index is None:
+            return
+        if self._index_worker and self._index_worker.isRunning():
+            return
+
+        cf_dirs = self._get_customer_files_dirs()
+        bp_dirs = []
+        for key, prefix in [('blueprints_dir', 'BP'), ('itar_blueprints_dir', 'ITAR-BP')]:
+            d = self.app_context.get_setting(key, '')
+            if d and os.path.exists(d):
+                bp_dirs.append((prefix, d))
+
+        if not cf_dirs and not bp_dirs:
+            return
+
+        self._index_worker = IndexWorker(self._index, cf_dirs, bp_dirs, self.app_context)
+        self._index_worker.progress.connect(self._on_index_progress)
+        self._index_worker.finished.connect(self._on_index_finished)
+        self._index_worker.start()
+
+    def _on_index_progress(self, msg: str):
+        if self.search_status_label:
+            self.search_status_label.setText(f"Index: {msg}")
+
+    def _on_index_finished(self, job_count: int):
+        if self.search_status_label:
+            self.search_status_label.setText(f"Index ready — {job_count} jobs")
 
     def get_widget(self) -> QWidget:
         if self._widget is None:
@@ -457,13 +543,12 @@ class SearchModule(BaseModule):
     # ==================== Search Functionality ====================
 
     def perform_search(self):
-        """Perform search based on search term and mode"""
+        """Perform search — uses SQLite index when available, filesystem walk as fallback."""
         search_term = self.search_edit.text().strip().lower()
         if len(search_term) < 2:
             self.show_error("Search", "Please enter at least 2 characters")
             return
 
-        # Cancel any existing search
         if self._worker and self._worker.isRunning():
             self.cancel_search()
             return
@@ -472,13 +557,20 @@ class SearchModule(BaseModule):
         self.search_results.clear()
 
         strict_mode = self.search_strict_radio.isChecked()
+        include_blueprints = self.search_blueprints_check.isChecked()
 
-        # Build list of directories to search
-        dirs_to_search = []
-
-        # Always search customer files directories
         customer_dirs = self._get_customer_files_dirs()
-        if not customer_dirs:
+
+        # Build blueprint dirs before the customer_dirs guard so a
+        # blueprint-only install (no customer files dir) can still search.
+        bp_dirs = []
+        if include_blueprints:
+            for key, bp_prefix in [('blueprints_dir', 'BP'), ('itar_blueprints_dir', 'ITAR-BP')]:
+                d = self.app_context.get_setting(key, '')
+                if d and os.path.exists(d):
+                    bp_dirs.append((bp_prefix, d))
+
+        if not customer_dirs and not bp_dirs:
             cf_dir = self.app_context.get_setting('customer_files_dir', '')
             itar_cf_dir = self.app_context.get_setting('itar_customer_files_dir', '')
             if not cf_dir and not itar_cf_dir:
@@ -487,44 +579,97 @@ class SearchModule(BaseModule):
                 self.show_error("Error", "Configured directories do not exist")
             return
 
-        dirs_to_search.extend(customer_dirs)
-
-        # Optionally search blueprints directories (available in all modes)
-        if self.search_blueprints_check.isChecked():
-            bp_dir = self.app_context.get_setting('blueprints_dir', '')
-            if bp_dir and os.path.exists(bp_dir):
-                dirs_to_search.append(('BP', bp_dir))
-            itar_bp_dir = self.app_context.get_setting('itar_blueprints_dir', '')
-            if itar_bp_dir and os.path.exists(itar_bp_dir):
-                dirs_to_search.append(('ITAR-BP', itar_bp_dir))
-
-        # Determine which fields to search
         if strict_mode:
             search_customer = self.search_customer_check.isChecked()
             search_job = self.search_job_check.isChecked()
             search_desc = self.search_desc_check.isChecked()
             search_drawing = self.search_drawing_check.isChecked()
         else:
-            # Legacy mode: search all fields
             search_customer = search_job = search_desc = search_drawing = True
 
-        # Show progress UI
-        self.search_progress.setMaximum(0)  # Indeterminate progress
+        # Index is used for strict mode only. Legacy mode uses the filesystem walk
+        # because it has different matching semantics (recursive, rel_path matching).
+        index_ready = (
+            strict_mode
+            and self._index is not None
+            and self._index.is_populated()
+            and not (self._index_worker and self._index_worker.isRunning())
+        )
+
+        if index_ready:
+            if self._search_from_index(
+                search_term, search_customer, search_job,
+                search_desc, search_drawing, include_blueprints,
+            ):
+                return
+            # Index returned 0 results — fall back to filesystem strict search.
+            # The index may not have indexed all customer directories (e.g. when
+            # the folder structure doesn't match the configured template).
+
+        # --- Fallback: live filesystem walk ---
+        dirs_to_search = list(customer_dirs) + bp_dirs
+
+        self.search_progress.setMaximum(0)
         self.search_progress.show()
-        self.search_status_label.setText("Starting search...")
+        self.search_status_label.setText("Searching…")
         self.search_btn.setEnabled(False)
         self.cancel_btn.show()
 
-        # Start background search worker
         self._worker = SearchWorker(
             dirs_to_search, search_term, strict_mode,
             search_customer, search_job, search_desc, search_drawing,
-            self.app_context
+            self.app_context,
         )
         self._worker.result_found.connect(self._on_result_found)
         self._worker.progress_update.connect(self._on_progress_update)
         self._worker.finished.connect(self._on_search_finished)
         self._worker.start()
+
+    def _search_from_index(self, term, search_customer, search_job,
+                           search_desc, search_drawing, include_blueprints) -> bool:
+        """Query the SQLite index and populate results immediately.
+
+        Returns True if results were found and displayed, False if the caller
+        should fall back to a filesystem search.
+        """
+        try:
+            results = self._index.search_jobs(
+                term, search_customer, search_job, search_desc, search_drawing,
+            )
+            if include_blueprints:
+                results += self._index.search_bp(term)
+        except Exception as exc:
+            self._index_failures += 1
+            logger.error(
+                "search: index query failed (%s): %s (failure %d/3)",
+                type(exc).__name__, exc, self._index_failures,
+            )
+            if self._index_failures >= 3:
+                self._index = None  # disable index after repeated failures
+            return False
+
+        self._index_failures = 0
+
+        if not results:
+            return False
+
+        results.sort(key=lambda x: x['date'], reverse=True)
+        self.search_results = results
+
+        self.search_table.blockSignals(True)
+        self.search_table.setRowCount(0)
+        for result in results:
+            row = self.search_table.rowCount()
+            self.search_table.insertRow(row)
+            self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
+            self.search_table.setItem(row, 1, QTableWidgetItem(result['customer']))
+            self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
+            self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
+            self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
+        self.search_table.blockSignals(False)
+
+        self.search_status_label.setText(f"Found {len(results)} result(s)")
+        return True
 
     def cancel_search(self):
         """Cancel the running search"""
@@ -865,8 +1010,10 @@ class SearchModule(BaseModule):
 
     def cleanup(self):
         """Cleanup resources"""
-        # Stop any running worker thread
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait()
+        if self._index_worker and self._index_worker.isRunning():
+            self._index_worker.cancel()
+            self._index_worker.wait()
         self.search_results.clear()
