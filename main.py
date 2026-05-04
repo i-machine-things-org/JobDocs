@@ -212,7 +212,8 @@ class _UpdateDialog(QDialog):
             self.accept()
 
     def _start_download(self) -> None:
-        fd, dest = tempfile.mkstemp(suffix=".exe", prefix=f"JobDocs-{self._latest_version}-")
+        safe_ver = ''.join(c if c.isalnum() or c in '._-' else '_' for c in self._latest_version)
+        fd, dest = tempfile.mkstemp(suffix=".exe", prefix=f"JobDocs-{safe_ver}-")
         os.close(fd)
 
         progress_dlg = QProgressDialog(
@@ -225,11 +226,9 @@ class _UpdateDialog(QDialog):
 
         downloader = _UpdateDownloader(self._asset_url, dest)
         self._downloader = downloader
+        progress_dlg.canceled.connect(downloader.requestInterruption)
 
         def _on_progress(done: int, total: int) -> None:
-            if progress_dlg.wasCanceled():
-                downloader.requestInterruption()
-                return
             progress_dlg.setValue(int(done * 100 / total) if total else 50)
 
         def _on_done(path: str) -> None:
