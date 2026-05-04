@@ -111,6 +111,9 @@ class _UpdateDownloader(QThread):
 
     def run(self):
         try:
+            if not self._asset_url.startswith("https://"):
+                self.error.emit("Invalid asset URL scheme")
+                return
             req = urllib.request.Request(
                 self._asset_url,
                 headers={"User-Agent": "JobDocs"},
