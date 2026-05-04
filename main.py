@@ -114,19 +114,28 @@ class _UpdateDownloader(QThread):
                 self._asset_url,
                 headers={"User-Agent": "JobDocs"},
             )
+            cancelled = False
             with urllib.request.urlopen(req, timeout=60) as resp:  # nosec B310
                 total = int(resp.headers.get("Content-Length", 0))
                 done = 0
                 with open(self._dest_path, "wb") as f:
                     while True:
                         if self.isInterruptionRequested():
-                            return
+                            cancelled = True
+                            break
                         buf = resp.read(65536)
                         if not buf:
                             break
                         f.write(buf)
                         done += len(buf)
                         self.progress.emit(done, total)
+            if cancelled:
+                try:
+                    os.remove(self._dest_path)
+                except OSError:
+                    pass
+                self.error.emit("cancelled")
+                return
             self.finished.emit(self._dest_path)
         except Exception as exc:
             self.error.emit(str(exc))
@@ -219,7 +228,15 @@ class _UpdateDialog(QDialog):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.Yes:
-                subprocess.Popen([path])
+                try:
+                    subprocess.Popen([path])
+                except OSError as exc:
+                    QMessageBox.critical(
+                        self, "Launch Failed",
+                        f"Could not launch the installer:\n{exc}\n\nInstaller saved at:\n{path}",
+                    )
+                    self.accept()
+                    return
                 QApplication.quit()
             self.accept()
 
