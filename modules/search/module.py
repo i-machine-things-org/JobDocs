@@ -347,7 +347,7 @@ class SearchModule(BaseModule):
         self._widget = None
         self.search_results: List[Dict[str, Any]] = []
         self._worker = None       # Background search worker
-        self._index_worker = None # Background index builder
+        self._index_worker = None  # Background index builder
         self._index: Optional[SearchIndex] = None
         self._index_failures = 0  # consecutive query errors
 

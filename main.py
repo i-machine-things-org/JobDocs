@@ -27,12 +27,12 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QLabel, QCheckBox, QDialogButtonBox,
 )
 
-logger = logging.getLogger(__name__)
-
 from core.module_loader import ModuleLoader
 from core.app_context import AppContext
 from shared.utils import get_config_dir, get_os_text
 from shared.remote_sync import RemoteSyncManager
+
+logger = logging.getLogger(__name__)
 
 
 def _get_app_version() -> str:
@@ -239,7 +239,12 @@ class _UpdateDialog(QDialog):
             try:
                 with open(path, 'rb') as _f:
                     if _f.read(2) != b'MZ':
-                        raise ValueError("Not a valid Windows executable (bad PE header)")
+                        raise ValueError("Not a valid Windows executable (bad MZ header)")
+                    _f.seek(0x3C)
+                    e_lfanew = int.from_bytes(_f.read(4), 'little')
+                    _f.seek(e_lfanew)
+                    if _f.read(4) != b'PE\x00\x00':
+                        raise ValueError("Not a valid Windows executable (bad PE signature)")
             except (OSError, ValueError) as exc:
                 QMessageBox.critical(
                     self, "Verification Failed",

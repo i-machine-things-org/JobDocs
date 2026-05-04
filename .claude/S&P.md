@@ -2362,3 +2362,15 @@ Actionable: 1  Nitpicks: 0
 2. **Blueprint stale check must consider nested directory mtimes**
    - `_dir_mtime(customer_path)` only sees immediate-directory mtime; subdirectory additions are invisible.
    - Fix: added `_subtree_mtime` (walks only dirs, not files — lightweight) and `recursive=True` param on `_is_stale` / `_mark_indexed`; blueprint call sites pass `recursive=True`.
+
+## 2026-05-04 — `main.py` (_UpdateDialog — PE verification) (PR #270)
+
+**Review:** CodeRabbit flagged that PE header verification (MZ + PE\x00\x00 signature) validates structural integrity but not publisher authenticity. Recommended adding Authenticode signature verification via WinVerifyTrust before launching the installer.
+**Result:** Deferred — app is currently unsigned (SignPath approval pending per CLAUDE.md Rule 4). Implementing Authenticode verification now would cause our own unsigned builds to fail their own auto-updater. Revisit once signing is in place.
+
+### Findings
+
+1. **Authenticode verification before installer launch** — `main.py` `_UpdateDialog._on_done`
+   - WinVerifyTrust / VerifyEmbeddedSignature check before `subprocess.Popen([path])`
+   - Deferred: unsigned builds would self-reject until SignPath is approved
+   - Re-enable this check as the first action when signing is set up
