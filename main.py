@@ -101,6 +101,7 @@ class _UpdateDownloader(QThread):
     """Downloads a release asset to a temp file on a background thread."""
     progress = pyqtSignal(int, int)  # (bytes_done, total_bytes)
     finished = pyqtSignal(str)       # dest_path on success
+    cancelled = pyqtSignal()
     error = pyqtSignal(str)
 
     def __init__(self, asset_url: str, dest_path: str):
@@ -134,7 +135,7 @@ class _UpdateDownloader(QThread):
                     os.remove(self._dest_path)
                 except OSError:
                     pass
-                self.error.emit("cancelled")
+                self.cancelled.emit()
                 return
             self.finished.emit(self._dest_path)
         except Exception as exc:
@@ -200,7 +201,8 @@ class _UpdateDialog(QDialog):
             self.accept()
 
     def _start_download(self) -> None:
-        dest = os.path.join(tempfile.gettempdir(), f"JobDocs-{self._latest_version}-Setup.exe")
+        fd, dest = tempfile.mkstemp(suffix=".exe", prefix=f"JobDocs-{self._latest_version}-")
+        os.close(fd)
 
         progress_dlg = QProgressDialog(
             f"Downloading {self._latest_version}...", "Cancel", 0, 100, self,
@@ -221,6 +223,24 @@ class _UpdateDialog(QDialog):
 
         def _on_done(path: str) -> None:
             progress_dlg.close()
+            try:
+                with open(path, 'rb') as _f:
+                    if _f.read(2) != b'MZ':
+                        raise ValueError("Not a valid Windows executable (bad PE header)")
+            except (OSError, ValueError) as exc:
+                QMessageBox.critical(
+                    self, "Verification Failed",
+                    f"The downloaded installer failed verification:\n{exc}\n\n"
+                    "Opening the releases page instead.",
+                )
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                import webbrowser
+                webbrowser.open(self._release_url)
+                self.accept()
+                return
             reply = QMessageBox.question(
                 self, "Ready to Install",
                 f"{self._latest_version} downloaded.\n\n"
@@ -240,6 +260,9 @@ class _UpdateDialog(QDialog):
                 QApplication.quit()
             self.accept()
 
+        def _on_cancelled() -> None:
+            progress_dlg.close()
+
         def _on_error(msg: str) -> None:
             progress_dlg.close()
             QMessageBox.warning(
@@ -252,8 +275,10 @@ class _UpdateDialog(QDialog):
 
         downloader.progress.connect(_on_progress)
         downloader.finished.connect(_on_done)
+        downloader.cancelled.connect(_on_cancelled)
         downloader.error.connect(_on_error)
         downloader.finished.connect(downloader.deleteLater)
+        downloader.cancelled.connect(downloader.deleteLater)
         downloader.error.connect(downloader.deleteLater)
         downloader.start()
 
