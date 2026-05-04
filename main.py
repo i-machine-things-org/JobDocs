@@ -180,7 +180,7 @@ class _UpdateDialog(QDialog):
         layout.addWidget(self._disable_cb)
 
         buttons = QDialogButtonBox()
-        ok_label = "Download & Install" if self._can_download else "Update Now"
+        ok_label = "Download && Install" if self._can_download else "Update Now"
         buttons.addButton(ok_label, QDialogButtonBox.ButtonRole.AcceptRole)
         buttons.addButton("Skip This Version", QDialogButtonBox.ButtonRole.RejectRole)
         buttons.accepted.connect(self._on_ok)
@@ -295,6 +295,9 @@ class _UpdateDialog(QDialog):
 
     def _on_later(self) -> None:
         self._save_disabled()
+        if self._app_context is not None:
+            self._app_context.set_setting('updates_skipped_version', self._latest_version)
+            self._app_context.save_settings()
         self.reject()
 
 
@@ -1468,6 +1471,8 @@ def main():
 
     def _on_update_available(tag: str, url: str, asset_url: str) -> None:
         if window.app_context.get_setting('updates_notifications_disabled', False):
+            return
+        if window.app_context.get_setting('updates_skipped_version', '') == tag:
             return
         dlg = _UpdateDialog(tag, url, asset_url, window.app_context, window)
         window._update_dialog = dlg  # type: ignore[attr-defined]
