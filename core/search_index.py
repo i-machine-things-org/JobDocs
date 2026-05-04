@@ -344,12 +344,12 @@ class SearchIndex:
 
                 if all_cf_prefixes:
                     _ph = ','.join('?' * len(all_cf_prefixes))
-                    conn.execute(  # nosec B608  # noqa: S608
-                        f"DELETE FROM jobs WHERE prefix NOT IN ({_ph})",
+                    conn.execute(
+                        f"DELETE FROM jobs WHERE prefix NOT IN ({_ph})",  # nosec B608  # noqa: S608
                         tuple(all_cf_prefixes),
                     )
-                    conn.execute(  # nosec B608  # noqa: S608
-                        f"DELETE FROM indexed_dirs WHERE kind='cf' AND prefix NOT IN ({_ph})",
+                    conn.execute(
+                        f"DELETE FROM indexed_dirs WHERE kind='cf' AND prefix NOT IN ({_ph})",  # nosec B608  # noqa: S608, E501
                         tuple(all_cf_prefixes),
                     )
                 else:
@@ -358,12 +358,12 @@ class SearchIndex:
 
                 if all_bp_prefixes:
                     _ph = ','.join('?' * len(all_bp_prefixes))
-                    conn.execute(  # nosec B608  # noqa: S608
-                        f"DELETE FROM bp_files WHERE prefix NOT IN ({_ph})",
+                    conn.execute(
+                        f"DELETE FROM bp_files WHERE prefix NOT IN ({_ph})",  # nosec B608  # noqa: S608
                         tuple(all_bp_prefixes),
                     )
-                    conn.execute(  # nosec B608  # noqa: S608
-                        f"DELETE FROM indexed_dirs WHERE kind='bp' AND prefix NOT IN ({_ph})",
+                    conn.execute(
+                        f"DELETE FROM indexed_dirs WHERE kind='bp' AND prefix NOT IN ({_ph})",  # nosec B608  # noqa: S608, E501
                         tuple(all_bp_prefixes),
                     )
                 else:
@@ -388,7 +388,7 @@ class SearchIndex:
                         if customer_set:
                             placeholders = ','.join('?' * len(customer_set))
                             conn.execute(
-                                f"DELETE FROM jobs WHERE prefix=? AND customer NOT IN ({placeholders})",  # nosec B608  # noqa: S608
+                                f"DELETE FROM jobs WHERE prefix=? AND customer NOT IN ({placeholders})",  # nosec B608  # noqa: S608, E501
                                 (prefix, *customer_set),
                             )
                         else:
@@ -536,7 +536,7 @@ class SearchIndex:
                         if customer_set:
                             placeholders = ','.join('?' * len(customer_set))
                             conn.execute(
-                                f"DELETE FROM bp_files WHERE prefix=? AND customer NOT IN ({placeholders})",  # nosec B608  # noqa: S608
+                                f"DELETE FROM bp_files WHERE prefix=? AND customer NOT IN ({placeholders})",  # nosec B608  # noqa: S608, E501
                                 (prefix, *customer_set),
                             )
                         else:
