@@ -137,8 +137,19 @@ class _UpdateDownloader(QThread):
                     pass
                 self.cancelled.emit()
                 return
+            if total > 0 and done != total:
+                try:
+                    os.remove(self._dest_path)
+                except OSError:
+                    pass
+                self.error.emit(f"Download truncated: received {done} of {total} bytes")
+                return
             self.finished.emit(self._dest_path)
         except Exception as exc:
+            try:
+                os.remove(self._dest_path)
+            except OSError:
+                pass
             self.error.emit(str(exc))
 
 
