@@ -114,7 +114,8 @@ class SearchWorker(QThread):
                 customer_match = self.search_customer and self.search_term in customer.lower()
 
                 # Find job folders
-                jobs = self.app_context.find_job_folders(customer_path)
+                scan_errors: List[OSError] = []
+                jobs = self.app_context.find_job_folders(customer_path, errors=scan_errors)
 
                 for dir_name, job_docs_path in jobs:
                     if self._is_cancelled:
@@ -158,10 +159,10 @@ class SearchWorker(QThread):
                         self.result_count += 1
 
                 # find_job_folders requires a specific subfolder (e.g. "job documents")
-                # that may not exist.  When the customer name matched but no structured
-                # jobs were returned, fall back to a plain directory scan so the customer
-                # is still reachable in strict mode.
-                if customer_match and not jobs:
+                # that may not exist.  Fall back to a plain digit-prefixed directory scan
+                # whenever no structured jobs were returned, applying the same match logic
+                # so searches by job number or description still work on flat layouts.
+                if not jobs and not scan_errors:
                     try:
                         for item in sorted(os.listdir(customer_path)):
                             if self._is_cancelled:
@@ -170,6 +171,17 @@ class SearchWorker(QThread):
                             if not os.path.isdir(item_path) or not item or not item[0].isdigit():
                                 continue
                             job_num, desc, drawings = _parse_job_folder(item)
+                            match = customer_match
+                            if not match and self.search_job and self.search_term in job_num.lower():
+                                match = True
+                            if not match and self.search_desc and self.search_term in desc.lower():
+                                match = True
+                            if not match and self.search_drawing and any(
+                                self.search_term in d.lower() for d in drawings
+                            ):
+                                match = True
+                            if not match:
+                                continue
                             try:
                                 mod_time = datetime.fromtimestamp(Path(item_path).stat().st_mtime)
                             except OSError:
@@ -396,11 +408,11 @@ class SearchModule(BaseModule):
         self._index_worker.start()
 
     def _on_index_progress(self, msg: str):
-        if self.search_status_label:
+        if self.search_status_label and not (self._worker and self._worker.isRunning()):
             self.search_status_label.setText(f"Index: {msg}")
 
     def _on_index_finished(self, job_count: int):
-        if self.search_status_label:
+        if self.search_status_label and not (self._worker and self._worker.isRunning()):
             self.search_status_label.setText(f"Index ready — {job_count} jobs")
 
     def get_widget(self) -> QWidget:
