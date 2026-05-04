@@ -70,7 +70,7 @@ def _version_tuple(v: str) -> tuple:
 
 class _UpdateChecker(QThread):
     """Queries the GitHub releases API on a background thread."""
-    update_available = pyqtSignal(str, str)  # (tag, html_url)
+    update_available = pyqtSignal(str, str, str)  # (tag, html_url, asset_url)
     up_to_date = pyqtSignal()
 
     def run(self):
@@ -85,30 +85,73 @@ class _UpdateChecker(QThread):
             tag = data.get("tag_name", "")
             html_url = data.get("html_url", "")
             if tag and _version_tuple(tag) > _version_tuple(APP_VERSION):
-                self.update_available.emit(tag, html_url)
+                asset_url = ""
+                for asset in data.get("assets", []):
+                    if asset.get("name", "").lower().endswith(".exe"):
+                        asset_url = asset.get("browser_download_url", "")
+                        break
+                self.update_available.emit(tag, html_url, asset_url)
             else:
                 self.up_to_date.emit()
         except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError):
             pass
 
 
+class _UpdateDownloader(QThread):
+    """Downloads a release asset to a temp file on a background thread."""
+    progress = pyqtSignal(int, int)  # (bytes_done, total_bytes)
+    finished = pyqtSignal(str)       # dest_path on success
+    error = pyqtSignal(str)
+
+    def __init__(self, asset_url: str, dest_path: str):
+        super().__init__()
+        self._asset_url = asset_url
+        self._dest_path = dest_path
+
+    def run(self):
+        try:
+            req = urllib.request.Request(
+                self._asset_url,
+                headers={"User-Agent": "JobDocs"},
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:  # nosec B310
+                total = int(resp.headers.get("Content-Length", 0))
+                done = 0
+                with open(self._dest_path, "wb") as f:
+                    while True:
+                        if self.isInterruptionRequested():
+                            return
+                        buf = resp.read(65536)
+                        if not buf:
+                            break
+                        f.write(buf)
+                        done += len(buf)
+                        self.progress.emit(done, total)
+            self.finished.emit(self._dest_path)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
 class _UpdateDialog(QDialog):
     """Non-blocking update-available prompt."""
 
-    def __init__(self, latest_version: str, release_url: str, app_context, parent=None):
+    def __init__(self, latest_version: str, release_url: str, asset_url: str, app_context, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Update Available")
         self.setMinimumWidth(340)
         self._app_context = app_context
         self._latest_version = latest_version
         self._release_url = release_url
+        self._asset_url = asset_url
+
+        import platform as _platform
+        self._is_flatpak = _platform.system() == 'Linux' and bool(os.getenv('FLATPAK_ID'))
+        self._can_download = _platform.system() == 'Windows' and bool(asset_url)
 
         layout = QVBoxLayout(self)
 
         import html as _html
-        label = QLabel(
-            f"<b>{_html.escape(latest_version)}</b> is available. Upgrade now?"
-        )
+        label = QLabel(f"<b>{_html.escape(latest_version)}</b> is available. Upgrade now?")
         label.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(label)
 
@@ -116,7 +159,8 @@ class _UpdateDialog(QDialog):
         layout.addWidget(self._disable_cb)
 
         buttons = QDialogButtonBox()
-        buttons.addButton("Update Now", QDialogButtonBox.ButtonRole.AcceptRole)
+        ok_label = "Download & Install" if self._can_download else "Update Now"
+        buttons.addButton(ok_label, QDialogButtonBox.ButtonRole.AcceptRole)
         buttons.addButton("Skip This Version", QDialogButtonBox.ButtonRole.RejectRole)
         buttons.accepted.connect(self._on_ok)
         buttons.rejected.connect(self._on_later)
@@ -129,19 +173,72 @@ class _UpdateDialog(QDialog):
 
     def _on_ok(self) -> None:
         self._save_disabled()
-        import platform
-        import webbrowser
-        if platform.system() == 'Linux' and os.getenv('FLATPAK_ID'):
+        if self._is_flatpak:
             try:
                 subprocess.Popen(
                     ['flatpak-spawn', '--host', 'xdg-open',
                      'appstream://io.github.i_machine_things.JobDocs'],
                 )
             except Exception:
+                import webbrowser
                 webbrowser.open(self._release_url)
+            self.accept()
+        elif self._can_download:
+            self._start_download()
         else:
+            import webbrowser
             webbrowser.open(self._release_url)
-        self.accept()
+            self.accept()
+
+    def _start_download(self) -> None:
+        dest = os.path.join(tempfile.gettempdir(), f"JobDocs-{self._latest_version}-Setup.exe")
+
+        progress_dlg = QProgressDialog(
+            f"Downloading {self._latest_version}...", "Cancel", 0, 100, self,
+        )
+        progress_dlg.setWindowTitle("Downloading Update")
+        progress_dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        progress_dlg.setMinimumDuration(0)
+        progress_dlg.setValue(0)
+
+        downloader = _UpdateDownloader(self._asset_url, dest)
+        self._downloader = downloader
+
+        def _on_progress(done: int, total: int) -> None:
+            if progress_dlg.wasCanceled():
+                downloader.requestInterruption()
+                return
+            progress_dlg.setValue(int(done * 100 / total) if total else 50)
+
+        def _on_done(path: str) -> None:
+            progress_dlg.close()
+            reply = QMessageBox.question(
+                self, "Ready to Install",
+                f"{self._latest_version} downloaded.\n\n"
+                "JobDocs will close and the installer will launch.\nReady to install?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                subprocess.Popen([path])
+                QApplication.quit()
+            self.accept()
+
+        def _on_error(msg: str) -> None:
+            progress_dlg.close()
+            QMessageBox.warning(
+                self, "Download Failed",
+                f"Could not download the update:\n{msg}\n\nOpening the releases page instead.",
+            )
+            import webbrowser
+            webbrowser.open(self._release_url)
+            self.accept()
+
+        downloader.progress.connect(_on_progress)
+        downloader.finished.connect(_on_done)
+        downloader.error.connect(_on_error)
+        downloader.finished.connect(downloader.deleteLater)
+        downloader.error.connect(downloader.deleteLater)
+        downloader.start()
 
     def _on_later(self) -> None:
         self._save_disabled()
@@ -1112,8 +1209,8 @@ near-instant even across thousands of jobs.</p>""",
         if existing is not None and existing.isRunning():
             return
 
-        def _on_available(tag: str, url: str) -> None:
-            dlg = _UpdateDialog(tag, url, self.app_context, self)
+        def _on_available(tag: str, url: str, asset_url: str) -> None:
+            dlg = _UpdateDialog(tag, url, asset_url, self.app_context, self)
             self._manual_update_dialog = dlg  # type: ignore[attr-defined]
             dlg.finished.connect(lambda _: setattr(self, '_manual_update_dialog', None))
             dlg.show()
@@ -1316,10 +1413,10 @@ def main():
     window = JobDocsMainWindow()
     window.show()
 
-    def _on_update_available(tag: str, url: str) -> None:
+    def _on_update_available(tag: str, url: str, asset_url: str) -> None:
         if window.app_context.get_setting('updates_notifications_disabled', False):
             return
-        dlg = _UpdateDialog(tag, url, window.app_context, window)
+        dlg = _UpdateDialog(tag, url, asset_url, window.app_context, window)
         window._update_dialog = dlg  # type: ignore[attr-defined]
         dlg.finished.connect(lambda _: setattr(window, '_update_dialog', None))
         dlg.show()
