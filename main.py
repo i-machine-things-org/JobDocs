@@ -239,7 +239,12 @@ class _UpdateDialog(QDialog):
             try:
                 with open(path, 'rb') as _f:
                     if _f.read(2) != b'MZ':
-                        raise ValueError("Not a valid Windows executable (bad PE header)")
+                        raise ValueError("Not a valid Windows executable (bad MZ header)")
+                    _f.seek(0x3C)
+                    e_lfanew = int.from_bytes(_f.read(4), 'little')
+                    _f.seek(e_lfanew)
+                    if _f.read(4) != b'PE\x00\x00':
+                        raise ValueError("Not a valid Windows executable (bad PE signature)")
             except (OSError, ValueError) as exc:
                 QMessageBox.critical(
                     self, "Verification Failed",
