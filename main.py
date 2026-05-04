@@ -27,12 +27,12 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QLabel, QCheckBox, QDialogButtonBox,
 )
 
-logger = logging.getLogger(__name__)
-
 from core.module_loader import ModuleLoader
 from core.app_context import AppContext
 from shared.utils import get_config_dir, get_os_text
 from shared.remote_sync import RemoteSyncManager
+
+logger = logging.getLogger(__name__)
 
 
 def _get_app_version() -> str:

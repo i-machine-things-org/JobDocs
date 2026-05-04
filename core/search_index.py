@@ -241,7 +241,9 @@ class SearchIndex:
         except OSError:
             return 0.0
 
-    def _is_stale(self, conn: sqlite3.Connection, dir_path: str, prefix: str, kind: str, *, recursive: bool = False) -> bool:
+    def _is_stale(
+        self, conn: sqlite3.Connection, dir_path: str, prefix: str, kind: str, *, recursive: bool = False
+    ) -> bool:
         if recursive:
             return self._is_stale_recursive(conn, dir_path, prefix, kind)
         current = self._dir_mtime(dir_path)
@@ -276,7 +278,9 @@ class SearchIndex:
         except OSError:
             return True
 
-    def _mark_indexed(self, conn: sqlite3.Connection, dir_path: str, prefix: str, kind: str, *, recursive: bool = False) -> None:
+    def _mark_indexed(
+        self, conn: sqlite3.Connection, dir_path: str, prefix: str, kind: str, *, recursive: bool = False
+    ) -> None:
         # For recursive dirs, store wall-clock time as mtime so the _is_stale
         # non-recursive path still has a sensible value if the same row is ever
         # reused.  _is_stale_recursive uses indexed_at directly, not mtime.
@@ -340,16 +344,28 @@ class SearchIndex:
 
                 if all_cf_prefixes:
                     _ph = ','.join('?' * len(all_cf_prefixes))
-                    conn.execute(f"DELETE FROM jobs WHERE prefix NOT IN ({_ph})", tuple(all_cf_prefixes))
-                    conn.execute(f"DELETE FROM indexed_dirs WHERE kind='cf' AND prefix NOT IN ({_ph})", tuple(all_cf_prefixes))
+                    conn.execute(  # nosec B608
+                        f"DELETE FROM jobs WHERE prefix NOT IN ({_ph})",
+                        tuple(all_cf_prefixes),
+                    )
+                    conn.execute(  # nosec B608
+                        f"DELETE FROM indexed_dirs WHERE kind='cf' AND prefix NOT IN ({_ph})",
+                        tuple(all_cf_prefixes),
+                    )
                 else:
                     conn.execute("DELETE FROM jobs")
                     conn.execute("DELETE FROM indexed_dirs WHERE kind='cf'")
 
                 if all_bp_prefixes:
                     _ph = ','.join('?' * len(all_bp_prefixes))
-                    conn.execute(f"DELETE FROM bp_files WHERE prefix NOT IN ({_ph})", tuple(all_bp_prefixes))
-                    conn.execute(f"DELETE FROM indexed_dirs WHERE kind='bp' AND prefix NOT IN ({_ph})", tuple(all_bp_prefixes))
+                    conn.execute(  # nosec B608
+                        f"DELETE FROM bp_files WHERE prefix NOT IN ({_ph})",
+                        tuple(all_bp_prefixes),
+                    )
+                    conn.execute(  # nosec B608
+                        f"DELETE FROM indexed_dirs WHERE kind='bp' AND prefix NOT IN ({_ph})",
+                        tuple(all_bp_prefixes),
+                    )
                 else:
                     conn.execute("DELETE FROM bp_files")
                     conn.execute("DELETE FROM indexed_dirs WHERE kind='bp'")
@@ -372,7 +388,7 @@ class SearchIndex:
                         if customer_set:
                             placeholders = ','.join('?' * len(customer_set))
                             conn.execute(
-                                f"DELETE FROM jobs WHERE prefix=? AND customer NOT IN ({placeholders})",
+                                f"DELETE FROM jobs WHERE prefix=? AND customer NOT IN ({placeholders})",  # nosec B608
                                 (prefix, *customer_set),
                             )
                         else:
@@ -387,7 +403,8 @@ class SearchIndex:
                         # before calling the expensive find_job_folders.
                         prev_containers = {
                             row[0] for row in conn.execute(
-                                "SELECT dir_path FROM indexed_dirs WHERE prefix=? AND kind=? AND dir_path LIKE ? ESCAPE '!'",
+                                "SELECT dir_path FROM indexed_dirs"
+                                " WHERE prefix=? AND kind=? AND dir_path LIKE ? ESCAPE '!'",
                                 (prefix, 'cf', _like_prefix(customer_path)),
                             )
                         }
@@ -405,7 +422,8 @@ class SearchIndex:
                             continue  # preserve existing rows on scan failure
                         if scan_errors:
                             logger.warning(
-                                "search_index: find_job_folders(%s) partial scan (%d error(s)); preserving existing rows",
+                                "search_index: find_job_folders(%s) partial scan"
+                                " (%d error(s)); preserving existing rows",
                                 customer_path, len(scan_errors),
                             )
                             continue
@@ -518,7 +536,7 @@ class SearchIndex:
                         if customer_set:
                             placeholders = ','.join('?' * len(customer_set))
                             conn.execute(
-                                f"DELETE FROM bp_files WHERE prefix=? AND customer NOT IN ({placeholders})",
+                                f"DELETE FROM bp_files WHERE prefix=? AND customer NOT IN ({placeholders})",  # nosec B608
                                 (prefix, *customer_set),
                             )
                         else:
@@ -527,7 +545,8 @@ class SearchIndex:
                         # Prune indexed_dirs rows for customer paths that disappeared.
                         prev_indexed = {
                             row[0] for row in conn.execute(
-                                "SELECT dir_path FROM indexed_dirs WHERE prefix=? AND kind=? AND dir_path LIKE ? ESCAPE '!'",
+                                "SELECT dir_path FROM indexed_dirs"
+                                " WHERE prefix=? AND kind=? AND dir_path LIKE ? ESCAPE '!'",
                                 (prefix, 'bp', _like_prefix(base_dir)),
                             )
                         }
@@ -649,7 +668,7 @@ class SearchIndex:
             return []
 
         sql = (
-            f"SELECT * FROM jobs WHERE ({' OR '.join(conditions)}) "
+            f"SELECT * FROM jobs WHERE ({' OR '.join(conditions)}) "  # nosec B608
             f"ORDER BY mtime DESC LIMIT {_MAX_RESULTS}"
         )
         with closing(self._connect(timeout=5.0)) as conn:
@@ -675,7 +694,7 @@ class SearchIndex:
         escaped = _escape_like(term)
         like = f'%{escaped}%'
         sql = (
-            f"SELECT * FROM bp_files WHERE filename LIKE ? ESCAPE '\\' COLLATE NOCASE "
+            f"SELECT * FROM bp_files WHERE filename LIKE ? ESCAPE '\\' COLLATE NOCASE "  # nosec B608
             f"ORDER BY mtime DESC LIMIT {_MAX_RESULTS}"
         )
         with closing(self._connect(timeout=5.0)) as conn:
