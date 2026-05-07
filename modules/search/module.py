@@ -198,6 +198,30 @@ class SearchWorker(QThread):
                     except OSError:
                         pass
 
+                # Search quotes for this customer.
+                display_quote_customer = (
+                    f"[ITAR Quote] {customer}" if prefix == 'ITAR' else f"[Quote] {customer}"
+                )
+                quotes = self.app_context.find_quote_folders(customer_path)
+                for quote_name, quote_path in quotes:
+                    if self._is_cancelled:
+                        break
+                    if not (customer_match or self.search_term in quote_name.lower()):
+                        continue
+                    try:
+                        mod_time = datetime.fromtimestamp(Path(quote_path).stat().st_mtime)
+                    except OSError:
+                        mod_time = datetime.now()
+                    self.result_found.emit({
+                        'date': mod_time,
+                        'customer': display_quote_customer,
+                        'job_number': quote_name,
+                        'description': '',
+                        'drawings': [],
+                        'path': quote_path,
+                    })
+                    self.result_count += 1
+
     def _legacy_search(self):
         """Recursive search through all directories"""
         for prefix, base_dir in self.dirs_to_search:
@@ -648,6 +672,7 @@ class SearchModule(BaseModule):
             results = self._index.search_jobs(
                 term, search_customer, search_job, search_desc, search_drawing,
             )
+            results += self._index.search_quotes(term, search_customer)
             if include_blueprints:
                 results += self._index.search_bp(term)
         except Exception as exc:
@@ -815,7 +840,7 @@ class SearchModule(BaseModule):
         if 0 <= row < len(self.search_results):
             raw_customer = self.search_results[row]['customer']
             # Strip all known prefixes to get the bare customer name
-            for prefix in ('[ITAR] ', '[ITAR-BP] ', '[BP] ', '[IR] '):
+            for prefix in ('[ITAR] ', '[ITAR-BP] ', '[BP] ', '[IR] ', '[Quote] ', '[ITAR Quote] '):
                 raw_customer = raw_customer.replace(prefix, '')
             customer = raw_customer.strip()
 
@@ -824,7 +849,7 @@ class SearchModule(BaseModule):
                 return
 
             customer_label = self.search_results[row]['customer']
-            is_itar = customer_label.startswith(('[ITAR] ', '[ITAR-BP] '))
+            is_itar = customer_label.startswith(('[ITAR] ', '[ITAR-BP] ', '[ITAR Quote] '))
             bp_dir = self.app_context.get_setting('itar_blueprints_dir' if is_itar else 'blueprints_dir', '')
             if bp_dir:
                 customer_bp = os.path.join(bp_dir, customer)
@@ -942,14 +967,14 @@ class SearchModule(BaseModule):
             return None, None
 
         raw_customer = self.search_results[row]['customer']
-        for prefix in ('[ITAR] ', '[ITAR-BP] ', '[BP] ', '[IR] '):
+        for prefix in ('[ITAR] ', '[ITAR-BP] ', '[BP] ', '[IR] ', '[Quote] ', '[ITAR Quote] '):
             raw_customer = raw_customer.replace(prefix, '')
         customer = raw_customer.strip()
         if not customer:
             return None, None
 
         customer_label = self.search_results[row]['customer']
-        is_itar = customer_label.startswith(('[ITAR] ', '[ITAR-BP] '))
+        is_itar = customer_label.startswith(('[ITAR] ', '[ITAR-BP] ', '[ITAR Quote] '))
         bp_dir = self.app_context.get_setting(
             'itar_blueprints_dir' if is_itar else 'blueprints_dir', ''
         )
