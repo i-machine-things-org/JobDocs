@@ -43,6 +43,16 @@ CREATE TABLE IF NOT EXISTS bp_files (
     UNIQUE(prefix, dir_path, filename)
 );
 
+CREATE TABLE IF NOT EXISTS quotes (
+    id          INTEGER PRIMARY KEY,
+    prefix      TEXT    NOT NULL DEFAULT '',
+    customer    TEXT    NOT NULL,
+    quote_name  TEXT    NOT NULL DEFAULT '',
+    path        TEXT    NOT NULL,
+    mtime       REAL    NOT NULL,
+    UNIQUE(prefix, path)
+);
+
 CREATE TABLE IF NOT EXISTS indexed_dirs (
     dir_path    TEXT    NOT NULL,
     prefix      TEXT    NOT NULL DEFAULT '',
@@ -59,6 +69,8 @@ CREATE INDEX IF NOT EXISTS idx_jobs_draw        ON jobs(drawings    COLLATE NOCA
 CREATE INDEX IF NOT EXISTS idx_jobs_cust_prefix ON jobs(customer, prefix);
 CREATE INDEX IF NOT EXISTS idx_bp_filename      ON bp_files(filename COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS idx_bp_cust          ON bp_files(customer COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_quotes_name      ON quotes(quote_name COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_quotes_cust      ON quotes(customer   COLLATE NOCASE);
 """
 
 _MIGRATION_V1 = """
@@ -121,6 +133,13 @@ CREATE TABLE indexed_dirs (
     PRIMARY KEY (dir_path, prefix, kind)
 );
 PRAGMA user_version = 2;
+COMMIT;
+"""
+
+_MIGRATION_V3 = """
+BEGIN;
+DELETE FROM indexed_dirs WHERE kind='cf';
+PRAGMA user_version = 3;
 COMMIT;
 """
 
@@ -207,7 +226,7 @@ class SearchIndex:
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version >= 2:
+        if version >= 3:
             return
         if version < 1:
             row = conn.execute(
@@ -218,8 +237,11 @@ class SearchIndex:
                 conn.executescript(_MIGRATION_V1)
             else:
                 conn.execute("PRAGMA user_version = 1")
-        logger.info("search_index: migrating schema to v2 (kind-aware indexed_dirs)")
-        conn.executescript(_MIGRATION_V2)
+        if version < 2:
+            logger.info("search_index: migrating schema to v2 (kind-aware indexed_dirs)")
+            conn.executescript(_MIGRATION_V2)
+        logger.info("search_index: migrating schema to v3 (quotes table, force re-index)")
+        conn.executescript(_MIGRATION_V3)
 
     def _dir_mtime(self, path: str) -> float:
         try:
@@ -352,9 +374,14 @@ class SearchIndex:
                         f"DELETE FROM indexed_dirs WHERE kind='cf' AND prefix NOT IN ({_ph})",  # nosec B608  # noqa: S608, E501
                         tuple(all_cf_prefixes),
                     )
+                    conn.execute(
+                        f"DELETE FROM quotes WHERE prefix NOT IN ({_ph})",  # nosec B608  # noqa: S608
+                        tuple(all_cf_prefixes),
+                    )
                 else:
                     conn.execute("DELETE FROM jobs")
                     conn.execute("DELETE FROM indexed_dirs WHERE kind='cf'")
+                    conn.execute("DELETE FROM quotes")
 
                 if all_bp_prefixes:
                     _ph = ','.join('?' * len(all_bp_prefixes))
@@ -391,8 +418,13 @@ class SearchIndex:
                                 f"DELETE FROM jobs WHERE prefix=? AND customer NOT IN ({placeholders})",  # nosec B608  # noqa: S608, E501
                                 (prefix, *customer_set),
                             )
+                            conn.execute(
+                                f"DELETE FROM quotes WHERE prefix=? AND customer NOT IN ({placeholders})",  # nosec B608  # noqa: S608, E501
+                                (prefix, *customer_set),
+                            )
                         else:
                             conn.execute("DELETE FROM jobs WHERE prefix=?", (prefix,))
+                            conn.execute("DELETE FROM quotes WHERE prefix=?", (prefix,))
 
                     for customer in customers:
                         if _cancelled():
@@ -433,6 +465,8 @@ class SearchIndex:
                         # in indexed_dirs. customer_path must be included so the
                         # precheck can confirm it was indexed and avoid calling
                         # find_job_folders every run.
+                        # Also track the quotes dir so a new quote folder triggers
+                        # re-indexing even when no job folders changed.
                         customer_p = Path(customer_path)
                         container_dirs: set = {customer_path}
                         for _, job_docs_path in jobs:
@@ -440,6 +474,10 @@ class SearchIndex:
                                 if p == customer_p:
                                     break
                                 container_dirs.add(str(p))
+                        quote_folder_path = app_context.get_setting('quote_folder_path', 'Quotes')
+                        quotes_dir = os.path.join(customer_path, quote_folder_path)
+                        if os.path.isdir(quotes_dir):
+                            container_dirs.add(quotes_dir)
                         all_containers = container_dirs | prev_containers
 
                         if not any(self._is_stale(conn, d, prefix, 'cf') for d in all_containers):
@@ -504,7 +542,50 @@ class SearchIndex:
                                    VALUES(?,?,?,?,?,?,?)""",
                                 new_job_rows,
                             )
-                            for d in container_dirs:
+
+                            # Index quotes for this customer.
+                            new_quote_rows = []
+                            quote_scan_cancelled = False
+                            quote_scan_failed = False
+                            if os.path.isdir(quotes_dir):
+                                try:
+                                    for item in os.listdir(quotes_dir):
+                                        if _cancelled():
+                                            quote_scan_cancelled = True
+                                            break
+                                        item_path = os.path.join(quotes_dir, item)
+                                        if not os.path.isdir(item_path):
+                                            continue
+                                        try:
+                                            mtime = os.path.getmtime(item_path)
+                                        except OSError:
+                                            continue
+                                        new_quote_rows.append(
+                                            (prefix, customer, item, item_path, mtime)
+                                        )
+                                except OSError as exc:
+                                    quote_scan_failed = True
+                                    logger.warning(
+                                        "search_index: quote scan(%s): %s", quotes_dir, exc
+                                    )
+                            if not quote_scan_cancelled and not quote_scan_failed:
+                                conn.execute(
+                                    "DELETE FROM quotes WHERE customer=? AND prefix=?",
+                                    (customer, prefix),
+                                )
+                                conn.executemany(
+                                    """INSERT OR REPLACE INTO quotes
+                                       (prefix, customer, quote_name, path, mtime)
+                                       VALUES(?,?,?,?,?)""",
+                                    new_quote_rows,
+                                )
+
+                            # Skip marking quotes_dir indexed if its scan failed
+                            # or was cancelled so the next launch will retry it.
+                            dirs_to_mark = container_dirs.copy()
+                            if quote_scan_cancelled or quote_scan_failed:
+                                dirs_to_mark.discard(quotes_dir)
+                            for d in dirs_to_mark:
                                 self._mark_indexed(conn, d, prefix, 'cf')
 
                             # Prune indexed_dirs rows for containers that no longer
@@ -717,6 +798,41 @@ class SearchIndex:
                 'description': row['rel_path'] if row['rel_path'] != '.' else '',
                 'drawings': [],
                 'path': row['dir_path'],
+            })
+        return results
+
+    def search_quotes(self, term: str, search_customer: bool = True) -> List[Dict]:
+        """Search quotes table; returns up to _MAX_RESULTS results ordered by mtime."""
+        escaped = _escape_like(term)
+        like = f'%{escaped}%'
+        conditions, params = [], []
+        if search_customer:
+            conditions.append("customer LIKE ? ESCAPE '\\' COLLATE NOCASE")
+            params.append(like)
+        conditions.append("quote_name LIKE ? ESCAPE '\\' COLLATE NOCASE")
+        params.append(like)
+
+        sql = (
+            f"SELECT * FROM quotes WHERE ({' OR '.join(conditions)}) "  # nosec B608  # noqa: S608
+            f"ORDER BY mtime DESC LIMIT {_MAX_RESULTS}"
+        )
+        with closing(self._connect(timeout=5.0)) as conn:
+            rows = conn.execute(sql, params).fetchall()
+
+        results = []
+        for row in rows:
+            prefix = row['prefix']
+            customer = row['customer']
+            display_customer = (
+                f"[ITAR Quote] {customer}" if prefix == 'ITAR' else f"[Quote] {customer}"
+            )
+            results.append({
+                'date': datetime.fromtimestamp(row['mtime']),
+                'customer': display_customer,
+                'job_number': row['quote_name'],
+                'description': '',
+                'drawings': [],
+                'path': row['path'],
             })
         return results
 
