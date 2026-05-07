@@ -545,10 +545,13 @@ class SearchIndex:
 
                             # Index quotes for this customer.
                             new_quote_rows = []
+                            quote_scan_cancelled = False
+                            quote_scan_failed = False
                             if os.path.isdir(quotes_dir):
                                 try:
                                     for item in os.listdir(quotes_dir):
                                         if _cancelled():
+                                            quote_scan_cancelled = True
                                             break
                                         item_path = os.path.join(quotes_dir, item)
                                         if not os.path.isdir(item_path):
@@ -561,19 +564,21 @@ class SearchIndex:
                                             (prefix, customer, item, item_path, mtime)
                                         )
                                 except OSError as exc:
+                                    quote_scan_failed = True
                                     logger.warning(
                                         "search_index: quote scan(%s): %s", quotes_dir, exc
                                     )
-                            conn.execute(
-                                "DELETE FROM quotes WHERE customer=? AND prefix=?",
-                                (customer, prefix),
-                            )
-                            conn.executemany(
-                                """INSERT OR REPLACE INTO quotes
-                                   (prefix, customer, quote_name, path, mtime)
-                                   VALUES(?,?,?,?,?)""",
-                                new_quote_rows,
-                            )
+                            if not quote_scan_cancelled and not quote_scan_failed:
+                                conn.execute(
+                                    "DELETE FROM quotes WHERE customer=? AND prefix=?",
+                                    (customer, prefix),
+                                )
+                                conn.executemany(
+                                    """INSERT OR REPLACE INTO quotes
+                                       (prefix, customer, quote_name, path, mtime)
+                                       VALUES(?,?,?,?,?)""",
+                                    new_quote_rows,
+                                )
 
                             for d in container_dirs:
                                 self._mark_indexed(conn, d, prefix, 'cf')
