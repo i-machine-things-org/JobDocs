@@ -580,7 +580,12 @@ class SearchIndex:
                                     new_quote_rows,
                                 )
 
-                            for d in container_dirs:
+                            # Skip marking quotes_dir indexed if its scan failed
+                            # or was cancelled so the next launch will retry it.
+                            dirs_to_mark = container_dirs.copy()
+                            if quote_scan_cancelled or quote_scan_failed:
+                                dirs_to_mark.discard(quotes_dir)
+                            for d in dirs_to_mark:
                                 self._mark_indexed(conn, d, prefix, 'cf')
 
                             # Prune indexed_dirs rows for containers that no longer
