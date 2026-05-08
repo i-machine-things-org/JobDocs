@@ -16,7 +16,8 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 from PyQt6.QtWidgets import (
     QWidget, QMessageBox, QTableWidgetItem, QApplication, QMenu,
-    QListWidgetItem, QListWidget, QSplitter, QGroupBox, QVBoxLayout, QCheckBox
+    QTreeWidget, QTreeWidgetItem, QHeaderView, QAbstractItemView,
+    QSplitter, QGroupBox, QVBoxLayout, QCheckBox
 )
 from shared.widgets import FilePreviewWidget
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl
@@ -366,6 +367,8 @@ class IndexWorker(QThread):
 class SearchModule(BaseModule):
     """Module for searching jobs across customer directories"""
 
+    _PLACEHOLDER_ROLE = Qt.ItemDataRole.UserRole + 1
+
     def __init__(self):
         super().__init__()
         self._widget = None
@@ -391,7 +394,7 @@ class SearchModule(BaseModule):
         self.legacy_options_widget = None
         self.search_btn = None
         self.cancel_btn = None
-        self.folder_contents_list = None
+        self.folder_tree = None
         self.file_preview: FilePreviewWidget | None = None
 
     def get_name(self) -> str:
@@ -483,15 +486,18 @@ class SearchModule(BaseModule):
         folder_group = QGroupBox("Folder Contents")
         folder_layout = QVBoxLayout()
         folder_layout.setContentsMargins(5, 5, 5, 5)
-        self.folder_contents_list = QListWidget()
-        self.folder_contents_list.setAlternatingRowColors(True)
-        self.folder_contents_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.folder_tree = QTreeWidget()
+        self.folder_tree.setHeaderLabels(["Name"])
+        self.folder_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.folder_tree.setAlternatingRowColors(True)
+        self.folder_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.folder_tree.setRootIsDecorated(True)
 
         self.file_preview = FilePreviewWidget()
         self.file_preview.setMinimumHeight(80)
 
         contents_splitter = QSplitter(Qt.Orientation.Vertical)
-        contents_splitter.addWidget(self.folder_contents_list)
+        contents_splitter.addWidget(self.folder_tree)
         contents_splitter.addWidget(self.file_preview)
         contents_splitter.setSizes([200, 180])
 
@@ -507,8 +513,8 @@ class SearchModule(BaseModule):
         self.search_table.horizontalHeader().setStretchLastSection(True)
         self.search_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
-        # Setup folder contents list
-        self.folder_contents_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        # Setup folder tree
+        self.folder_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
         # Hide progress bar and cancel button initially
         self.search_progress.hide()
@@ -526,9 +532,10 @@ class SearchModule(BaseModule):
         self.search_table.itemSelectionChanged.connect(
             lambda: self._on_result_selected(self.search_table.currentRow())
         )
-        self.folder_contents_list.doubleClicked.connect(self._open_folder_file)
-        self.folder_contents_list.customContextMenuRequested.connect(self._show_file_context_menu)
-        self.folder_contents_list.currentItemChanged.connect(self._on_folder_file_selected)
+        self.folder_tree.doubleClicked.connect(self._on_tree_double_clicked)
+        self.folder_tree.customContextMenuRequested.connect(self._show_file_context_menu)
+        self.folder_tree.currentItemChanged.connect(self._on_folder_file_selected)
+        self.folder_tree.itemExpanded.connect(self._on_tree_item_expanded)
 
         # Initialize UI state
         self.update_legacy_mode_ui()
@@ -780,7 +787,7 @@ class SearchModule(BaseModule):
         self.search_edit.clear()
         self.search_table.setRowCount(0)
         self.search_results.clear()
-        self.folder_contents_list.clear()
+        self.folder_tree.clear()
         if self.file_preview is not None:
             self.file_preview.clear()
         self.search_status_label.setText("")
@@ -869,21 +876,21 @@ class SearchModule(BaseModule):
     # ==================== Folder Contents Panel ====================
 
     def _on_folder_file_selected(self, current, previous):
-        """Preview the file selected in the folder contents list"""
+        """Preview the file selected in the folder tree"""
         if self.file_preview is None:
             return
         if current is None:
             self.file_preview.clear()
             return
-        path = current.data(Qt.ItemDataRole.UserRole)
+        path = current.data(0, Qt.ItemDataRole.UserRole)
         if path and os.path.isfile(path):
             self.file_preview.preview_file(path)
         else:
             self.file_preview.clear()
 
     def _on_result_selected(self, row: int):
-        """Populate folder contents list when a search result row is selected"""
-        self.folder_contents_list.clear()
+        """Populate folder tree when a search result row is selected"""
+        self.folder_tree.clear()
         if self.file_preview is not None:
             self.file_preview.clear()
         if row < 0 or row >= len(self.search_results):
@@ -891,44 +898,75 @@ class SearchModule(BaseModule):
 
         path = self.search_results[row]['path']
         if not os.path.exists(path):
-            item = QListWidgetItem("(folder not found)")
+            item = QTreeWidgetItem(["(folder not found)"])
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
-            self.folder_contents_list.addItem(item)
+            self.folder_tree.addTopLevelItem(item)
             return
 
+        self._populate_tree_level(self.folder_tree.invisibleRootItem(), path)
+
+    def _populate_tree_level(self, parent_item, dir_path: str):
+        """Read one level of dir_path and add children to parent_item.
+        Subdirectories get a placeholder child so Qt shows the expand arrow."""
         try:
-            raw = os.listdir(path)
+            raw = os.listdir(dir_path)
         except OSError:
             return
 
         entries = sorted(
-            [n for n in raw if not _is_hidden_file(os.path.join(path, n), n)],
-            key=lambda n: (not os.path.isdir(os.path.join(path, n)), n.lower()),
+            [n for n in raw if not _is_hidden_file(os.path.join(dir_path, n), n)],
+            key=lambda n: (not os.path.isdir(os.path.join(dir_path, n)), n.lower()),
         )
 
         for name in entries:
-            full_path = os.path.join(path, name)
-            item = QListWidgetItem(name)
-            item.setData(Qt.ItemDataRole.UserRole, full_path)
+            full_path = os.path.join(dir_path, name)
+            item = QTreeWidgetItem([name])
+            item.setData(0, Qt.ItemDataRole.UserRole, full_path)
             if os.path.isdir(full_path):
-                item.setText(f"[{name}]")
-            self.folder_contents_list.addItem(item)
+                placeholder = QTreeWidgetItem([""])
+                placeholder.setData(0, self._PLACEHOLDER_ROLE, True)
+                item.addChild(placeholder)
+            parent_item.addChild(item)
 
-    def _open_folder_file(self):
-        """Open the double-clicked file or folder from the contents list"""
-        item = self.folder_contents_list.currentItem()
+    def _on_tree_item_expanded(self, item):
+        """Lazy-load children when a directory node is expanded for the first time."""
+        if item.childCount() != 1:
+            return
+        child = item.child(0)
+        if not child.data(0, self._PLACEHOLDER_ROLE):
+            return
+        item.removeChild(child)
+        dir_path = item.data(0, Qt.ItemDataRole.UserRole)
+        if dir_path and os.path.isdir(dir_path):
+            self._populate_tree_level(item, dir_path)
+
+    def _on_tree_double_clicked(self, index):
+        """Expand/collapse directories in-tree; open files externally."""
+        item = self.folder_tree.currentItem()
         if item is None:
             return
-        path = item.data(Qt.ItemDataRole.UserRole)
+        path = item.data(0, Qt.ItemDataRole.UserRole)
+        if not path:
+            return
+        if os.path.isdir(path):
+            item.setExpanded(not item.isExpanded())
+        elif os.path.isfile(path) and os.path.exists(path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _open_item_externally(self, item):
+        """Open the given tree item's path in the OS."""
+        if item is None:
+            return
+        path = item.data(0, Qt.ItemDataRole.UserRole)
         if path and os.path.exists(path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _show_file_context_menu(self, pos):
-        """Context menu for the folder contents list"""
-        item = self.folder_contents_list.itemAt(pos)
+        """Context menu for the folder tree"""
+        item = self.folder_tree.itemAt(pos)
         if item is None:
             return
-        path = item.data(Qt.ItemDataRole.UserRole)
+        path = item.data(0, Qt.ItemDataRole.UserRole)
         if not path:
             return
 
@@ -936,7 +974,7 @@ class SearchModule(BaseModule):
 
         menu = QMenu(self._widget)
         open_action = menu.addAction("Open")
-        open_action.triggered.connect(self._open_folder_file)
+        open_action.triggered.connect(lambda: self._open_item_externally(item))
 
         copy_action = menu.addAction("Copy Path")
         copy_action.triggered.connect(lambda: QApplication.clipboard().setText(path))
@@ -948,14 +986,14 @@ class SearchModule(BaseModule):
             bp_action = menu.addAction("Blueprints Path")
             bp_action.triggered.connect(lambda: self._blueprints_path_action(path))
 
-        menu.exec(self.folder_contents_list.viewport().mapToGlobal(pos))
+        menu.exec(self.folder_tree.viewport().mapToGlobal(pos))
 
     def _print_selected_folder_files(self):
-        """Print all selected files from the folder contents list."""
+        """Print all selected files from the folder tree."""
         paths = [
-            item.data(Qt.ItemDataRole.UserRole)
-            for item in self.folder_contents_list.selectedItems()
-            if os.path.isfile(item.data(Qt.ItemDataRole.UserRole) or '')
+            item.data(0, Qt.ItemDataRole.UserRole)
+            for item in self.folder_tree.selectedItems()
+            if os.path.isfile(item.data(0, Qt.ItemDataRole.UserRole) or '')
         ]
         if paths:
             print_files_with_dialog(paths, self._widget, self.app_context)
