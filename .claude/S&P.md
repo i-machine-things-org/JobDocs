@@ -2374,3 +2374,18 @@ Actionable: 1  Nitpicks: 0
    - WinVerifyTrust / VerifyEmbeddedSignature check before `subprocess.Popen([path])`
    - Deferred: unsigned builds would self-reject until SignPath is approved
    - Re-enable this check as the first action when signing is set up
+
+---
+
+## 2026-05-08 — `modules/search/module.py` (QTreeWidget double-click handler)
+
+**Review:** Double-click handler conflicts with QTreeWidget's built-in expand-on-double-click. The manual `setExpanded(not isExpanded())` toggle fires after Qt already toggled state, double-inverting it. Also used `currentItem()` which may not match the clicked item.
+**Result:** Fixed — added `setExpandsOnDoubleClick(False)` to disable built-in toggle; changed handler to use `itemFromIndex(index)` for the authoritative clicked item.
+
+### Findings
+
+1. **Disable QTreeWidget default expand-on-double-click when using a custom handler**
+   - `QTreeWidget` expands/collapses items on double-click by default
+   - If a custom `doubleClicked` slot also calls `setExpanded(not isExpanded())`, the two toggles cancel out
+   - Fix: call `self.folder_tree.setExpandsOnDoubleClick(False)` at widget construction time
+   - Use `self.folder_tree.itemFromIndex(index)` in the slot (not `currentItem()`) to get the exact clicked item
