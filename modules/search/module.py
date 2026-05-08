@@ -492,6 +492,7 @@ class SearchModule(BaseModule):
         self.folder_tree.setAlternatingRowColors(True)
         self.folder_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.folder_tree.setRootIsDecorated(True)
+        self.folder_tree.setExpandsOnDoubleClick(False)
 
         self.file_preview = FilePreviewWidget()
         self.file_preview.setMinimumHeight(80)
@@ -942,7 +943,7 @@ class SearchModule(BaseModule):
 
     def _on_tree_double_clicked(self, index):
         """Expand/collapse directories in-tree; open files externally."""
-        item = self.folder_tree.currentItem()
+        item = self.folder_tree.itemFromIndex(index)
         if item is None:
             return
         path = item.data(0, Qt.ItemDataRole.UserRole)
