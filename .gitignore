@@ -54,6 +54,10 @@ old/
 # Lives in %LOCALAPPDATA%\JobDocs\AddonPackages\ — dev symlink if present
 /AddonPackages/
 
+# Plugin dependencies installed at runtime via pip --target (managed, not source)
+# Lives in %LOCALAPPDATA%\JobDocs\deps\ — dev symlink if present
+/deps/
+
 # Flatpak — files staged by CI/local build (not source files)
 linux/flatpak/src/
 linux/flatpak/JobDocs
