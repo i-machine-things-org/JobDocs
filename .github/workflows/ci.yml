@@ -1,0 +1,276 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master, stable]
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint — flake8 (errors + undefined names) and bandit (medium/high severity)
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint & Security
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Install tools
+        run: pip install flake8 bandit
+
+      - name: flake8
+        run: |
+          flake8 \
+            --max-line-length=120 \
+            --select=E,F \
+            --exclude=.git,__pycache__,build_scripts,linux \
+            .
+
+      - name: bandit
+        run: |
+          bandit -r . \
+            --exclude ./.git,./build_scripts,./linux \
+            --severity-level medium \
+            -q
+
+  # ---------------------------------------------------------------------------
+  # Tests — shared/__init__.py eagerly imports PyQt6, so system libs and the
+  # full requirements are needed even for pure-utility tests.
+  # ---------------------------------------------------------------------------
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system libraries for PyQt6
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libegl1 libgl1
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run pytest
+        env:
+          PYTHONPATH: .
+          QT_QPA_PLATFORM: offscreen
+        run: pytest tests/ -v
+
+  # ---------------------------------------------------------------------------
+  # Windows — Embedded Python + Inno Setup installer
+  # Mirrors build-release.yml build-windows job; no signing, no release upload.
+  # ---------------------------------------------------------------------------
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-latest
+
+    env:
+      PY_VER: "3.12.9"
+      PY_EMBED_SHA256: "615861fb801e8b04c847598db4e1e46e4b046295017caa37cb5486dde72b5865"
+      RELEASE_VERSION: v0.0.0-pr${{ github.event.pull_request.number }}
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Download Python embeddable
+        shell: pwsh
+        run: |
+          $url = "https://www.python.org/ftp/python/$env:PY_VER/python-$env:PY_VER-embed-amd64.zip"
+          Invoke-WebRequest $url -OutFile python-embed.zip
+          $actual = (Get-FileHash python-embed.zip -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $env:PY_EMBED_SHA256) {
+            Write-Error "SHA256 mismatch for python-embed.zip`nExpected: $env:PY_EMBED_SHA256`nActual:   $actual"
+            exit 1
+          }
+          Expand-Archive python-embed.zip -DestinationPath runtime
+
+      - name: Enable site-packages in embedded Python
+        shell: pwsh
+        run: |
+          $pth = Get-Item runtime\python3*._pth
+          $content = (Get-Content $pth) -replace '#import site', 'import site'
+          $content += "`n../app"
+          $content | Set-Content $pth
+          New-Item -ItemType Directory -Path runtime\Lib\site-packages -Force | Out-Null
+
+      - name: Bootstrap pip into embedded Python
+        shell: pwsh
+        run: |
+          python -m pip install --target runtime\Lib\site-packages --no-deps "pip==24.3.1"
+          runtime\python.exe -m pip --version
+
+      - name: Install app dependencies into embedded Python
+        shell: pwsh
+        run: runtime\python.exe -m pip install -r requirements.txt --no-warn-script-location
+
+      - name: Stage app source tree
+        shell: pwsh
+        run: |
+          $src_items = @('main.py','README.md','core','modules','shared',
+                         'JobDocs.iconset','sample_files','requirements.txt')
+          New-Item -ItemType Directory -Path app -Force | Out-Null
+          foreach ($item in $src_items) {
+            if (Test-Path $item) {
+              Copy-Item $item app\ -Recurse -Force
+            }
+          }
+
+      - name: Inject version into _version.py
+        shell: pwsh
+        run: |
+          $ver = "${{ env.RELEASE_VERSION }}"
+          "__version__ = '$ver'" | Set-Content app\core\_version.py -Encoding utf8
+
+      - name: Compile launcher (MinGW)
+        shell: bash
+        run: |
+          VER="${{ env.RELEASE_VERSION }}"
+          VER="${VER#v}"
+          VER="${VER%%-*}"
+          IFS='.' read -r MAJOR MINOR PATCH rest <<< "$VER"
+          MAJOR=${MAJOR:-0}; MINOR=${MINOR:-0}; PATCH=${PATCH:-0}
+          windres launcher/launcher.rc -O coff -o launcher_res.o \
+            -D VERSION_MAJOR="$MAJOR" -D VERSION_MINOR="$MINOR" \
+            -D VERSION_PATCH="$PATCH" -D VERSION_BUILD=0
+          gcc -mwindows -O2 -o JobDocs.exe launcher/launcher.c launcher_res.o
+
+      - name: Verify build
+        shell: pwsh
+        run: |
+          if (!(Test-Path "JobDocs.exe")) {
+            Write-Error "JobDocs.exe not found — launcher build failed"; exit 1
+          }
+          if (!(Test-Path "runtime\python.exe")) {
+            Write-Error "runtime\python.exe not found — embed setup failed"; exit 1
+          }
+          if (!(Test-Path "app\main.py")) {
+            Write-Error "app\main.py not found — staging failed"; exit 1
+          }
+          Write-Output "Launcher: $(Get-Item JobDocs.exe | Select-Object -ExpandProperty Length) bytes"
+          Write-Output "Runtime Python: $(runtime\python.exe --version)"
+          runtime\python.exe -c "from core.module_loader import ModuleLoader; print('imports OK')"
+          if ($LASTEXITCODE -ne 0) { Write-Error "App imports failed — check _pth ../app entry"; exit 1 }
+
+      - name: Ensure Inno Setup is available
+        shell: pwsh
+        run: |
+          if (!(Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup --confirm --no-progress
+          }
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $env:RELEASE_VERSION = "${{ env.RELEASE_VERSION }}"
+          iscc build_scripts\JobDocs.iss
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: JobDocs-windows-pr-${{ github.event.pull_request.number }}
+          path: installer_out/JobDocs-${{ env.RELEASE_VERSION }}-windows-setup.exe
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Linux — Flatpak bundle
+  # Mirrors build-release.yml build-flatpak job; no gh-pages publish, no release.
+  # ---------------------------------------------------------------------------
+  build-flatpak:
+    name: Build (Flatpak)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Flatpak tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y flatpak flatpak-builder
+
+      - name: Cache Flatpak runtimes
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.local/share/flatpak
+          key: flatpak-runtime-freedesktop-24.08-${{ runner.arch }}
+          restore-keys: |
+            flatpak-runtime-freedesktop-24.08-
+
+      - name: Add Flathub remote
+        run: flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Install Flatpak runtime
+        run: |
+          flatpak install --user -y flathub \
+            org.freedesktop.Platform//24.08 \
+            org.freedesktop.Sdk//24.08
+
+      - name: Stage source files and download wheels
+        run: |
+          mkdir -p linux/flatpak/src
+          for item in main.py core modules shared sample_files requirements.txt; do
+            [ -e "$item" ] && cp -r "$item" linux/flatpak/src/
+          done
+          pip download --only-binary :all: -d linux/flatpak/src/wheels/ -r requirements.txt
+          cp JobDocs.iconset/icon_256x256.png linux/flatpak/icon_256x256.png
+
+      - name: Inject version into _version.py
+        run: |
+          echo "__version__ = '0.0.0-pr${{ github.event.pull_request.number }}'" \
+            > linux/flatpak/src/core/_version.py
+
+      - name: Inject version into metainfo
+        run: |
+          sed -i \
+            "s/@VERSION@/0.0.0/g; s/@DATE@/$(date -u +%Y-%m-%d)/g" \
+            linux/flatpak/io.github.i_machine_things.JobDocs.metainfo.xml
+
+      - name: Build Flatpak
+        run: |
+          flatpak-builder \
+            --user \
+            --repo=flatpak-repo \
+            --force-clean \
+            flatpak-build \
+            linux/flatpak/io.github.i_machine_things.JobDocs.yml
+          flatpak build-bundle \
+            --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
+            flatpak-repo \
+            JobDocs-linux.flatpak \
+            io.github.i_machine_things.JobDocs
+
+      - name: Verify Flatpak bundle
+        run: |
+          test -f JobDocs-linux.flatpak \
+            || { echo "JobDocs-linux.flatpak not found — build failed"; exit 1; }
+          echo "Flatpak OK: $(du -h JobDocs-linux.flatpak | cut -f1)"
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: JobDocs-linux-pr-${{ github.event.pull_request.number }}
+          path: JobDocs-linux.flatpak
+          retention-days: 7
