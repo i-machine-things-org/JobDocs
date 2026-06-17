@@ -377,6 +377,8 @@ class SearchModule(BaseModule):
         self._index_worker = None  # Background index builder
         self._index: Optional[SearchIndex] = None
         self._index_failures = 0  # consecutive query errors
+        self._sort_column: int = 0   # 0 = Date
+        self._sort_ascending: bool = False  # newest first
 
         # Widget references
         self.search_edit = None
@@ -513,6 +515,11 @@ class SearchModule(BaseModule):
         # Setup table properties
         self.search_table.horizontalHeader().setStretchLastSection(True)
         self.search_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+        header = self.search_table.horizontalHeader()
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(0, Qt.SortOrder.DescendingOrder)
+        header.sectionClicked.connect(self._on_header_clicked)
 
         # Setup folder tree
         self.folder_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -698,12 +705,41 @@ class SearchModule(BaseModule):
         if not results:
             return False
 
-        results.sort(key=lambda x: x['date'], reverse=True)
         self.search_results = results
+        self._apply_sort()
+        self.search_status_label.setText(f"Found {len(results)} result(s)")
+        return True
 
+    # ==================== Sorting ====================
+
+    _SORT_KEYS = {
+        0: lambda x: x['date'],
+        1: lambda x: x['customer'].lower(),
+        2: lambda x: x['job_number'].lower(),
+        3: lambda x: x['description'].lower(),
+        4: lambda x: ', '.join(x['drawings']).lower(),
+    }
+
+    def _on_header_clicked(self, column: int):
+        if self._sort_column == column:
+            self._sort_ascending = not self._sort_ascending
+        else:
+            self._sort_column = column
+            self._sort_ascending = column != 0  # date defaults descending, text ascending
+
+        order = Qt.SortOrder.AscendingOrder if self._sort_ascending else Qt.SortOrder.DescendingOrder
+        self.search_table.horizontalHeader().setSortIndicator(column, order)
+        self._apply_sort()
+
+    def _apply_sort(self, selected_path=None):
+        key = self._SORT_KEYS.get(self._sort_column, lambda x: x['date'])
+        self.search_results.sort(key=key, reverse=not self._sort_ascending)
+        self._rebuild_table(selected_path)
+
+    def _rebuild_table(self, selected_path=None):
         self.search_table.blockSignals(True)
         self.search_table.setRowCount(0)
-        for result in results:
+        for result in self.search_results:
             row = self.search_table.rowCount()
             self.search_table.insertRow(row)
             self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
@@ -712,9 +748,13 @@ class SearchModule(BaseModule):
             self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
             self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
         self.search_table.blockSignals(False)
+        if selected_path is not None:
+            for i, result in enumerate(self.search_results):
+                if result['path'] == selected_path:
+                    self.search_table.selectRow(i)
+                    break
 
-        self.search_status_label.setText(f"Found {len(results)} result(s)")
-        return True
+    # ==================== Search Control ====================
 
     def cancel_search(self):
         """Cancel the running search"""
@@ -749,29 +789,7 @@ class SearchModule(BaseModule):
             else None
         )
 
-        # Sort results by date (newest first)
-        self.search_results.sort(key=lambda x: x['date'], reverse=True)
-
-        # Rebuild table with sorted results; block signals so clearing rows
-        # doesn't wipe the folder-contents panel via itemSelectionChanged
-        self.search_table.blockSignals(True)
-        self.search_table.setRowCount(0)
-        for result in self.search_results:
-            row = self.search_table.rowCount()
-            self.search_table.insertRow(row)
-            self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
-            self.search_table.setItem(row, 1, QTableWidgetItem(result['customer']))
-            self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
-            self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
-            self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
-        self.search_table.blockSignals(False)
-
-        # Restore the previously selected row (fires itemSelectionChanged once)
-        if selected_path is not None:
-            for i, result in enumerate(self.search_results):
-                if result['path'] == selected_path:
-                    self.search_table.selectRow(i)
-                    break
+        self._apply_sort(selected_path=selected_path)
 
         self.search_status_label.setText(f"Found {result_count} result(s)")
         self.search_progress.hide()
