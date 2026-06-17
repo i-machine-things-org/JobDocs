@@ -13,6 +13,7 @@ import re
 import ctypes
 from pathlib import Path
 from datetime import datetime
+from types import MappingProxyType
 from typing import List, Dict, Any, Optional
 from PyQt6.QtWidgets import (
     QWidget, QMessageBox, QTableWidgetItem, QApplication, QMenu,
@@ -712,15 +713,22 @@ class SearchModule(BaseModule):
 
     # ==================== Sorting ====================
 
-    _SORT_KEYS = {
+    _SORT_KEYS = MappingProxyType({
         0: lambda x: x['date'],
         1: lambda x: x['customer'].lower(),
         2: lambda x: x['job_number'].lower(),
         3: lambda x: x['description'].lower(),
         4: lambda x: ', '.join(x['drawings']).lower(),
-    }
+    })
 
     def _on_header_clicked(self, column: int):
+        selected_row = self.search_table.currentRow()
+        selected_path = (
+            self.search_results[selected_row]['path']
+            if 0 <= selected_row < len(self.search_results)
+            else None
+        )
+
         if self._sort_column == column:
             self._sort_ascending = not self._sort_ascending
         else:
@@ -729,7 +737,7 @@ class SearchModule(BaseModule):
 
         order = Qt.SortOrder.AscendingOrder if self._sort_ascending else Qt.SortOrder.DescendingOrder
         self.search_table.horizontalHeader().setSortIndicator(column, order)
-        self._apply_sort()
+        self._apply_sort(selected_path=selected_path)
 
     def _apply_sort(self, selected_path=None):
         key = self._SORT_KEYS.get(self._sort_column, lambda x: x['date'])
@@ -738,16 +746,18 @@ class SearchModule(BaseModule):
 
     def _rebuild_table(self, selected_path=None):
         self.search_table.blockSignals(True)
-        self.search_table.setRowCount(0)
-        for result in self.search_results:
-            row = self.search_table.rowCount()
-            self.search_table.insertRow(row)
-            self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
-            self.search_table.setItem(row, 1, QTableWidgetItem(result['customer']))
-            self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
-            self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
-            self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
-        self.search_table.blockSignals(False)
+        try:
+            self.search_table.setRowCount(0)
+            for result in self.search_results:
+                row = self.search_table.rowCount()
+                self.search_table.insertRow(row)
+                self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
+                self.search_table.setItem(row, 1, QTableWidgetItem(result['customer']))
+                self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
+                self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
+                self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
+        finally:
+            self.search_table.blockSignals(False)
         if selected_path is not None:
             for i, result in enumerate(self.search_results):
                 if result['path'] == selected_path:
