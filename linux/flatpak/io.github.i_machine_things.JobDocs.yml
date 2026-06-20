@@ -20,6 +20,7 @@ finish-args:
   # TODO: replace with --filesystem=xdg-data/JobDocs + portal-based dir picker
   #       once core/settings_dialog.py uses QFileDialog with portal support.
   - --filesystem=home
+  - --filesystem=/mnt
   - --filesystem=host-etc:ro
   # On systemd-resolved distros (Ubuntu, Debian) /etc/resolv.conf is a symlink
   # to /run/systemd/resolve/stub-resolv.conf. Without this mount the symlink
