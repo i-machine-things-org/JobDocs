@@ -791,7 +791,11 @@ class JobDocsMainWindow(QMainWindow):
         for path in candidates:
             if path.exists():
                 self.setWindowIcon(QIcon(str(path)))
-                break
+                return
+        # Flatpak / system install: icon is in the hicolor theme, not next to main.py
+        theme_icon = QIcon.fromTheme("io.github.i_machine_things.JobDocs")
+        if not theme_icon.isNull():
+            self.setWindowIcon(theme_icon)
 
     # ==================== Module Loading ====================
 

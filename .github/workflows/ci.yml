@@ -235,7 +235,9 @@ jobs:
             [ -e "$item" ] && cp -r "$item" linux/flatpak/src/
           done
           pip download --only-binary :all: -d linux/flatpak/src/wheels/ -r requirements.txt
-          cp JobDocs.iconset/icon_256x256.png linux/flatpak/icon_256x256.png
+          for size in 16x16 32x32 128x128 256x256 512x512; do
+            cp JobDocs.iconset/icon_${size}.png linux/flatpak/icon_${size}.png
+          done
 
       - name: Inject version into _version.py
         run: |
