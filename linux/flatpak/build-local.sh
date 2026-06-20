@@ -18,8 +18,10 @@ if [ -d "$REPO_ROOT/sample_files" ]; then
     cp -r "$REPO_ROOT/sample_files" "$SRC_DIR/"
 fi
 
-echo "==> Copying icon..."
-cp "$REPO_ROOT/JobDocs.iconset/icon_256x256.png" "$SCRIPT_DIR/icon_256x256.png"
+echo "==> Copying icons..."
+for size in 16x16 32x32 128x128 256x256 512x512; do
+    cp "$REPO_ROOT/JobDocs.iconset/icon_${size}.png" "$SCRIPT_DIR/icon_${size}.png"
+done
 
 echo "==> Downloading wheels (abi3 + cp312 sip for Python 3.12 runtime)..."
 pip download --only-binary :all: \
