@@ -58,6 +58,7 @@ modules:
       - install -d /app/lib/JobDocs
       - cp -r main.py core modules shared /app/lib/JobDocs/
       - sh -c '[ -d sample_files ] && cp -r sample_files /app/lib/JobDocs/ || true'
+      - install -Dm644 icon_256x256.png /app/lib/JobDocs/icon.png
       # Launcher script
       - install -d /app/bin
       - printf '#!/bin/sh\nexec python3 /app/lib/JobDocs/main.py "$@"\n' > /app/bin/JobDocs
