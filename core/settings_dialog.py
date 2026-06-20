@@ -294,7 +294,10 @@ class SettingsDialog(QDialog):
         main_layout.addWidget(button_box)
 
     def browse_dir(self, line_edit: QLineEdit):
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Directory")
+        dir_path = QFileDialog.getExistingDirectory(
+            self, "Select Directory", "",
+            QFileDialog.Option.DontUseNativeDialog,
+        )
         if dir_path:
             line_edit.setText(dir_path)
 
