@@ -1006,6 +1006,7 @@ class JobModule(BaseModule):
         dialog.exec()
 
     def prefill_fields(self, data: dict) -> None:
+        """Prefill Create New form fields from CLI launch arguments."""
         if 'customer' in data and self.customer_combo is not None:
             self.customer_combo.setCurrentText(data['customer'])
         if 'j_no' in data and self.job_number_edit is not None:

@@ -310,9 +310,11 @@ class _UpdateDialog(QDialog):
 
 
 def _parse_prefill_args(argv: list) -> tuple:
-    """Extract JobDocs prefill args from argv; return (prefill_dict, remaining_argv_for_qt).
+    """Extract JobDocs prefill args from argv.
 
-    Unknown args are left in remaining so Qt can consume platform/style flags.
+    Returns (prefill_dict, remaining_argv_for_qt). Known flags (--customer,
+    --j_no, --q_no, --po_no, --desc, --drawings) are consumed; unrecognised
+    args are left in remaining so Qt can consume platform/style flags.
     """
     parser = argparse.ArgumentParser(prog='JobDocs', add_help=False)
     parser.add_argument('--customer', metavar='NAME')
@@ -1371,7 +1373,12 @@ near-instant even across thousands of jobs.</p>""",
     # ==================== CLI Prefill ====================
 
     def _apply_prefill(self, data: Dict[str, str]) -> None:
-        """Prefill module form fields from CLI args and switch to the relevant tab."""
+        """Prefill module form fields from CLI args and switch to the relevant tab.
+
+        Iterates loaded modules and calls prefill_fields(data) on each. Then
+        switches the active tab to Job (if j_no is present) or Quote (if q_no
+        is present). Called once from __init__ when prefill data is supplied.
+        """
         for module in self.modules:
             module.prefill_fields(data)
 
