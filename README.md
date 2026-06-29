@@ -76,14 +76,23 @@ python main.py
 
 ### Command-Line Pre-fill
 
-External programs can launch JobDocs with form fields pre-populated using command-line arguments. The app opens normally and the specified fields are filled in automatically.
+External programs can launch JobDocs with form fields pre-populated. The app opens normally and the specified fields are filled in automatically.
 
+**Windows (installed build):**
+```
+JobDocs.exe --j_no 12345 --desc "flange machining" --customer "Acme Corp" --po_no PO-9876
+JobDocs.exe --q_no Q10042 --desc "shaft assembly" --customer "Acme Corp"
+```
+
+**Linux (Flatpak):**
 ```bash
-# Pre-fill the Job tab
-python main.py --j_no 12345 --desc "flange machining" --customer "Acme Corp" --po_no PO-9876 --drawings DWG-001,DWG-002
+flatpak run io.github.i_machine_things.JobDocs --j_no 12345 --desc "flange machining"
+flatpak run io.github.i_machine_things.JobDocs --q_no Q10042 --desc "shaft assembly"
+```
 
-# Pre-fill the Quote tab
-python main.py --q_no Q10042 --desc "shaft assembly" --customer "Acme Corp"
+**Development (source):**
+```bash
+python main.py --j_no 12345 --desc "flange machining"
 ```
 
 **Available arguments:**
@@ -97,15 +106,8 @@ python main.py --q_no Q10042 --desc "shaft assembly" --customer "Acme Corp"
 | `--desc TEXT` | Job / Quote | Description |
 | `--drawings NUMS` | Job / Quote | Drawing numbers (comma-separated) |
 
-- If `--j_no` is present, the app opens on the **Job** tab.
-- If `--q_no` is present (and no `--j_no`), the app opens on the **Quote** tab.
-- Unknown arguments are passed through to Qt (e.g. `--platform`, `--style`).
-
-**Windows installer** — pass arguments the same way via a shortcut or `ShellExecute` call:
-
-```
-JobDocs.exe --j_no 12345 --desc "flange machining"
-```
+- If `--j_no` is present the app opens on the **Job** tab; if `--q_no` is present (and no `--j_no`) it opens on the **Quote** tab.
+- Unrecognised arguments are forwarded to Qt (e.g. `--platform`, `--style`).
 
 ### First Time Setup
 
