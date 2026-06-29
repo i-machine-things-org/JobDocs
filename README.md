@@ -29,6 +29,7 @@ A modular tool for managing blueprint files and customer job directories with su
 - **Email Drag-and-Drop** - Drag emails directly onto any drop zone and attachments are extracted automatically. Supports Outlook / O365 (saves as `.msg`, requires `pywin32` on Windows), classic Outlook desktop, and Betterbird / Thunderbird on Linux (attachments extracted from the `.eml`). Image attachments (jpg, png, etc.) are skipped by default and can be toggled in Settings. Zip attachments are automatically extracted — the files inside are added directly to the file list.
 - **PDF Preview** - Drop zone file list shows a live preview of PDF files (requires `pymupdf`)
 - **Cross-Platform** - Works on Windows, macOS, and Linux
+- **CLI Pre-fill** - Launch with `--j_no`, `--desc`, `--customer` etc. to open with fields already populated — useful for integrating with external systems
 
 ## Installation
 
@@ -71,6 +72,39 @@ Run the application:
 
 ```bash
 python main.py
+```
+
+### Command-Line Pre-fill
+
+External programs can launch JobDocs with form fields pre-populated using command-line arguments. The app opens normally and the specified fields are filled in automatically.
+
+```bash
+# Pre-fill the Job tab
+python main.py --j_no 12345 --desc "flange machining" --customer "Acme Corp" --po_no PO-9876 --drawings DWG-001,DWG-002
+
+# Pre-fill the Quote tab
+python main.py --q_no Q10042 --desc "shaft assembly" --customer "Acme Corp"
+```
+
+**Available arguments:**
+
+| Argument | Tab | Field |
+|---|---|---|
+| `--customer NAME` | Job / Quote | Customer name |
+| `--j_no NUMBER` | Job | Job number |
+| `--q_no NUMBER` | Quote | Quote number |
+| `--po_no NUMBER` | Job | PO number |
+| `--desc TEXT` | Job / Quote | Description |
+| `--drawings NUMS` | Job / Quote | Drawing numbers (comma-separated) |
+
+- If `--j_no` is present, the app opens on the **Job** tab.
+- If `--q_no` is present (and no `--j_no`), the app opens on the **Quote** tab.
+- Unknown arguments are passed through to Qt (e.g. `--platform`, `--style`).
+
+**Windows installer** — pass arguments the same way via a shortcut or `ShellExecute` call:
+
+```
+JobDocs.exe --j_no 12345 --desc "flange machining"
 ```
 
 ### First Time Setup

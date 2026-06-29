@@ -5,6 +5,7 @@ JobDocs - Modular Blueprint and Job Management System
 Main application entry point using the modular plugin architecture.
 """
 
+import argparse
 import io
 import logging
 import os
@@ -306,6 +307,25 @@ class _UpdateDialog(QDialog):
             self._app_context.set_setting('updates_skipped_version', self._latest_version)
             self._app_context.save_settings()
         self.reject()
+
+
+def _parse_prefill_args(argv: list) -> tuple:
+    """Extract JobDocs prefill args from argv; return (prefill_dict, remaining_argv_for_qt).
+
+    Unknown args are left in remaining so Qt can consume platform/style flags.
+    """
+    parser = argparse.ArgumentParser(prog='JobDocs', add_help=False)
+    parser.add_argument('--customer', metavar='NAME')
+    parser.add_argument('--j_no', metavar='NUMBER')
+    parser.add_argument('--q_no', metavar='NUMBER')
+    parser.add_argument('--po_no', metavar='NUMBER')
+    parser.add_argument('--desc', metavar='TEXT')
+    parser.add_argument('--drawings', metavar='NUMS',
+                        help='Comma-separated drawing numbers')
+    known, remaining = parser.parse_known_args(argv)
+
+    prefill = {k: v for k, v in vars(known).items() if v is not None}
+    return prefill, remaining
 
 
 def _flatpak_dns_fix() -> None:
@@ -610,7 +630,7 @@ class JobDocsMainWindow(QMainWindow):
         'skip_image_attachments': True,
     }
 
-    def __init__(self):
+    def __init__(self, prefill: Dict[str, str] | None = None):
         super().__init__()
 
         # Configuration
@@ -678,6 +698,9 @@ class JobDocsMainWindow(QMainWindow):
             self.tabs.setCurrentIndex(default_tab)
 
         self.statusBar().showMessage("Ready")  # pyright: ignore[reportOptionalMemberAccess]
+
+        if prefill:
+            self._apply_prefill(prefill)
 
     # ==================== Settings & History ====================
 
@@ -1345,6 +1368,25 @@ near-instant even across thousands of jobs.</p>""",
             from shared.widgets import DropZone
             DropZone.set_skip_image_attachments(self.settings.get('skip_image_attachments', True))
 
+    # ==================== CLI Prefill ====================
+
+    def _apply_prefill(self, data: Dict[str, str]) -> None:
+        """Prefill module form fields from CLI args and switch to the relevant tab."""
+        for module in self.modules:
+            module.prefill_fields(data)
+
+        if 'j_no' in data:
+            target_tab = 'Job'
+        elif 'q_no' in data:
+            target_tab = 'Quote'
+        else:
+            return
+
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == target_tab:
+                self.tabs.setCurrentIndex(i)
+                break
+
     # ==================== UI Helpers ====================
 
     def apply_ui_style(self):
@@ -1461,7 +1503,8 @@ def main():
     except Exception:
         pass
 
-    app = QApplication(sys.argv)
+    prefill, qt_argv = _parse_prefill_args(sys.argv[1:])
+    app = QApplication([sys.argv[0]] + qt_argv)
     app.setApplicationName("JobDocs")
     app.setOrganizationName("JobDocs")
 
@@ -1473,7 +1516,7 @@ def main():
     print("=" * 60)
     print()
 
-    window = JobDocsMainWindow()
+    window = JobDocsMainWindow(prefill=prefill if prefill else None)
     window.show()
 
     def _on_update_available(tag: str, url: str, asset_url: str) -> None:
