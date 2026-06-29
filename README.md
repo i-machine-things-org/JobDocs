@@ -28,16 +28,39 @@ A modular tool for managing blueprint files and customer job directories with su
 - **History Tracking** - Keep track of recent jobs and customer information
 - **Email Drag-and-Drop** - Drag emails directly onto any drop zone and attachments are extracted automatically. Supports Outlook / O365 (saves as `.msg`, requires `pywin32` on Windows), classic Outlook desktop, and Betterbird / Thunderbird on Linux (attachments extracted from the `.eml`). Image attachments (jpg, png, etc.) are skipped by default and can be toggled in Settings. Zip attachments are automatically extracted — the files inside are added directly to the file list.
 - **PDF Preview** - Drop zone file list shows a live preview of PDF files (requires `pymupdf`)
-- **Cross-Platform** - Works on Windows, macOS, and Linux
+- **Cross-Platform** - Works on Windows and Linux
 - **CLI Pre-fill** - Launch with `--j_no`, `--desc`, `--customer` etc. to open with fields already populated — useful for integrating with external systems
 
 ## Installation
 
-### Requirements
-- Python 3.8 or higher
-- PyQt6
+### Windows
 
-### Install Dependencies
+Download the installer from the [latest release](https://github.com/i-machine-things-org/JobDocs/releases/latest) and run it. The installer offers two options:
+
+- **Install for me only** — installs to `%LOCALAPPDATA%\Programs\JobDocs` (no admin required)
+- **Install for all users** — installs to `C:\Program Files\JobDocs` (requires admin/UAC)
+
+Both options add `JobDocs.exe` to `PATH` so it is callable from any terminal.
+
+### Linux (Flatpak)
+
+Add the JobDocs repository and install:
+
+```bash
+flatpak remote-add --user --from jobdocs \
+  https://i-machine-things-org.github.io/JobDocs/jobdocs.flatpakrepo
+flatpak install jobdocs io.github.i_machine_things.JobDocs
+```
+
+Or download the `.flatpak` bundle directly from the [latest release](https://github.com/i-machine-things-org/JobDocs/releases/latest) and install it:
+
+```bash
+flatpak install JobDocs-linux.flatpak
+```
+
+### From Source (Development)
+
+Requires Python 3.12+ and PyQt6.
 
 #### On Debian/Ubuntu:
 ```bash
@@ -54,11 +77,6 @@ sudo pacman -S python-pyqt6
 pip install -r requirements.txt
 ```
 
-Or install PyQt6 directly:
-```bash
-pip install PyQt6
-```
-
 #### Optional dependencies:
 ```bash
 pip install pywin32            # Windows — enables Outlook/O365 drag-and-drop
@@ -66,28 +84,39 @@ pip install pymupdf            # All platforms — enables PDF preview in file l
 pip install pandas openpyxl    # enables Report Fixer plugin (if installed)
 ```
 
-## Usage
-
-Run the application:
-
+Run from source:
 ```bash
 python main.py
 ```
+
+## Usage
+
+### First Time Setup
+
+On first launch a setup wizard walks you through configuration. You can re-run it anytime via **Help → Run Setup Wizard**.
+
+1. Go to **File → Settings**
+2. Configure your directories:
+   - **Blueprints Directory** — central storage for all blueprint files
+   - **Customer Files Directory** — where job folders will be created
+   - **ITAR Directories** — optional separate directories for ITAR-controlled projects
+3. Choose your link type (Hard Link recommended to save disk space)
+4. Set blueprint file extensions (default: `.pdf`, `.dwg`, `.dxf`)
+5. Toggle **Skip image attachments** to filter out images when dragging emails from Outlook (enabled by default)
 
 ### Command-Line Pre-fill
 
 External programs can launch JobDocs with form fields pre-populated. The app opens normally and the specified fields are filled in automatically.
 
-**Windows (installed build):**
-
-The installer adds `JobDocs.exe` to your user `PATH`, so you can call it directly:
-
+**Windows:**
 ```powershell
-JobDocs.exe --j_no 12345 --desc "flange machining" --customer "Acme Corp"
-JobDocs.exe --q_no Q10042 --desc "shaft assembly"
+JobDocs.exe --j_no 12345 --desc "flange machining" --customer "Acme Corp" --po_no PO-9876
+JobDocs.exe --q_no Q10042 --desc "shaft assembly" --customer "Acme Corp"
 ```
 
-You may need to open a new terminal after installing for `PATH` to take effect. External programs can also use `ShellExecute` / `CreateProcess` with the full install path (`%LOCALAPPDATA%\Programs\JobDocs\JobDocs.exe`).
+You may need to open a new terminal after installing for `PATH` to take effect. External programs can also call the exe directly by full path:
+- Per-user install: `%LOCALAPPDATA%\Programs\JobDocs\JobDocs.exe`
+- All-users install: `%ProgramFiles%\JobDocs\JobDocs.exe`
 
 **Linux (Flatpak):**
 ```bash
@@ -95,7 +124,7 @@ flatpak run io.github.i_machine_things.JobDocs --j_no 12345 --desc "flange machi
 flatpak run io.github.i_machine_things.JobDocs --q_no Q10042 --desc "shaft assembly"
 ```
 
-**Development (source only):**
+**From source:**
 ```bash
 python main.py --j_no 12345 --desc "flange machining"
 ```
@@ -114,41 +143,28 @@ python main.py --j_no 12345 --desc "flange machining"
 - If `--j_no` is present the app opens on the **Job** tab; if `--q_no` is present (and no `--j_no`) it opens on the **Quote** tab.
 - Unrecognised arguments are forwarded to Qt (e.g. `--platform`, `--style`).
 
-### First Time Setup
-
-On first launch a setup wizard walks you through configuration in a few steps. You can re-run it anytime from the Setup tab.
-
-1. Go to **File → Settings**
-2. Configure your directories:
-   - **Blueprints Directory**: Central storage for all blueprint files
-   - **Customer Files Directory**: Where job folders will be created
-   - **ITAR Directories**: Optional separate directories for ITAR-controlled projects
-3. Choose your link type (Hard Link recommended to save disk space)
-4. Set blueprint file extensions (default: .pdf, .dwg, .dxf)
-5. Toggle **Skip image attachments** to filter out images (jpg, png, etc.) when dragging emails from Outlook (enabled by default)
-
 ### Creating Quotes
 
-1. Go to the **Create Quote** tab
+1. Go to the **Quote** tab → **Create New**
 2. Enter customer name (auto-completes from existing customers)
 3. Enter quote number(s):
-   - Click **Auto** button to auto-generate next number (starts at 10000)
-   - Or manually enter - supports ranges like Q12345-Q12350
+   - Click **Auto** to generate the next sequential number (starts at 10000)
+   - Or enter manually — supports ranges like `Q12345-Q12350`
 4. Enter description
 5. Optionally add drawing numbers (comma-separated)
 6. Add files by dragging/dropping
 7. Click **Create Quote**
-8. Use **Copy From...** to copy information from existing quotes or jobs
+8. Use **Copy From...** to copy details from an existing quote or job
 9. Use **Link Drawings** to link drawing files directly to the quote
 
 ### Creating Jobs
 
 #### Single Job Creation
-1. Go to the **Create Job** tab
+1. Go to the **Job** tab → **Create New**
 2. Enter customer name (auto-completes from history)
 3. Enter job number(s):
-   - Click **Auto** button to auto-generate next number (starts at 10000)
-   - Or manually enter - supports:
+   - Click **Auto** to generate the next sequential number (starts at 10000)
+   - Or enter manually — supports:
      - Single: `12345`
      - Multiple: `12345, 12346, 12347`
      - Range: `12345-12350`
@@ -157,7 +173,7 @@ On first launch a setup wizard walks you through configuration in a few steps. Y
 6. Optionally add a PO number
 7. Add files by dragging/dropping or browsing
 8. Click **Create Job**
-9. Use **Copy From...** to copy information from existing quotes or jobs
+9. Use **Copy From...** to copy details from an existing quote or job
 10. Use **Link Drawings** to link drawing files directly to the job
 
 #### Bulk Job Creation
@@ -167,15 +183,13 @@ On first launch a setup wizard walks you through configuration in a few steps. Y
    Customer Name, Job Number, Description, Drawing1, Drawing2...
    ```
 3. Click **Validate** to check for errors
-4. Click **Create All Jobs**
-   - Automatically detects and skips duplicate jobs
-   - Shows warning if duplicates are found
+4. Click **Create All Jobs** — duplicates are detected and skipped automatically
 
-Or import from CSV file using the **Import CSV** button.
+Or import from a CSV file using the **Import CSV** button.
 
 ### Managing Existing Jobs
 
-Use the **Add to Job** tab to:
+Use the **Job** tab → **Add to Existing** to:
 - Browse existing job folders
 - Add files to existing jobs
 - Filter by customer or ITAR status
@@ -187,24 +201,18 @@ Use the **Import Blueprints** tab to:
 - Import blueprint files directly to the blueprints directory
 - Select customer name
 - Choose ITAR or standard blueprints directory
-- Automatically creates customer folders
+- Customer folders are created automatically
 
 ### Searching
 
 The **Search** tab provides powerful search capabilities:
-- Search by customer name, job number, description, or drawing
-- Filter by PO number (Strict Format mode)
-- Filter by inspection status (searches inspection reports directory)
+- Search by customer name, job number, description, or drawing number
 - Two search modes:
-  - **Search All Folders** (Legacy mode): Full recursive search through all folders
-    - Handles inconsistent folder structures from legacy files
-    - Optional: Also search blueprints directories
-    - Slower but comprehensive
-  - **Strict Format** (Faster): Only searches properly formatted job folders
-    - Filter by specific fields (customer, job #, description, drawings)
-    - Much faster for well-organized structures
-- Double-click results to open job folders
-- Right-click for context menu (copy path, open location)
+  - **Search All Folders** (Legacy mode) — full recursive search; handles inconsistent folder structures from legacy files; slower but comprehensive
+  - **Strict Format** (Faster) — only searches properly formatted job folders; filter by specific fields (customer, job #, description, drawings)
+- Click column headers to sort results
+- Double-click a result to open the job folder
+- Right-click for context menu (copy path, open location, print)
 
 ## File Structure
 
@@ -215,18 +223,18 @@ Customer Files Directory/
 ├── Customer Name/
 │   ├── 12345_Job Description/
 │   │   └── job documents/
-│   │       ├── blueprint1.pdf (hard link)
-│   │       └── other_file.doc (copy)
+│   │       ├── blueprint1.pdf  (hard link)
+│   │       └── other_file.doc  (copy)
 │   ├── 12346_Another Job/
 │   │   └── ...
 │   └── Quotes/
 │       └── Q12345_Quote Description/
-│           ├── blueprint1.pdf (hard link)
+│           ├── blueprint1.pdf  (hard link)
 │           └── ...
 
 Blueprints Directory/
 └── Customer Name/
-    ├── blueprint1.pdf (original)
+    ├── blueprint1.pdf  (original)
     ├── blueprint2.dwg
     └── ...
 ```
@@ -234,13 +242,15 @@ Blueprints Directory/
 ## Configuration
 
 Configuration files are stored in platform-specific locations:
+
 - **Windows**: `C:\Users\<Username>\AppData\Local\JobDocs`
+- **Linux (Flatpak)**: `~/.var/app/io.github.i_machine_things.JobDocs/data/JobDocs`
+- **Linux (source)**: `~/.local/share/JobDocs`
 - **macOS**: `~/Library/Application Support/JobDocs`
-- **Linux**: `~/.local/share/JobDocs`
 
 Files stored:
-- `settings.json` - Application settings
-- `history.json` - Recent jobs and customer history
+- `settings.json` — application settings
+- `history.json` — recent jobs and customer history
 
 ## Link Types
 
@@ -248,10 +258,10 @@ Files stored:
 - Same file appears in multiple locations
 - Takes no extra disk space
 - Files stay in sync automatically
-- **Limitation**: Only works on same drive/partition
+- **Limitation**: only works on the same drive/partition
 
 ### Symbolic Link
-- Creates a shortcut/reference to original file
+- Creates a shortcut/reference to the original file
 - Works across different drives
 - Original file must not be moved
 
@@ -264,15 +274,16 @@ Files stored:
 
 JobDocs uses a plugin-based architecture:
 
-### Available Modules
-1. **Create Quote** - Quote creation and management
-2. **Create Job** - Job folder creation with duplicate detection
-3. **Add to Job** - Add files to existing jobs
-4. **Bulk Create** - Bulk job creation from CSV
-5. **Search** - Advanced job search
-6. **Import Blueprints** - Import blueprints to customer folders
-7. **History** - View recent job history
-8. **Report Fixer** - Transform Excel job reports to match a template layout
+### Built-in Modules
+1. **Quote** — Quote creation and management
+2. **Job** — Job folder creation with duplicate detection
+3. **Bulk Create** — Bulk job creation from CSV
+4. **Search** — Advanced job search with column sorting and folder tree
+5. **Import Blueprints** — Import blueprints to customer folders
+6. **History** — View recent job history
+
+### Plugins
+- **Report Fixer** — Transforms Excel job reports to match a template layout (separate plugin, install via **File → Install Plugin**)
 
 ### Creating Custom Modules
 
@@ -283,62 +294,60 @@ See [modules/_template/README.md](modules/_template/README.md) for details on cr
 ### Project Structure
 ```
 JobDocs/
-├── main.py              # Main application
+├── main.py              # Application entry point
 ├── core/                # Core framework
 │   ├── base_module.py   # Module base class
 │   ├── app_context.py   # Shared application context
-│   ├── module_loader.py # Auto module discovery
+│   ├── module_loader.py # Dynamic module discovery
 │   └── settings_dialog.py # Settings UI
 ├── shared/              # Shared utilities
 │   ├── utils.py         # File operations, parsing
 │   ├── widgets.py       # Custom UI widgets
-│   └── remote_sync.py   # Remote settings synchronization
-├── modules/             # Plugin modules
-│   ├── quote/           # Quote module
-│   ├── job/             # Job module
-│   ├── add_to_job/      # Add to job module
-│   ├── bulk/            # Bulk creation module
-│   ├── search/          # Search module
-│   ├── import_bp/       # Import blueprints module
-│   ├── history/         # History module
-│   ├── reporting/       # Reporting module (experimental)
+│   └── remote_sync.py   # Remote settings synchronisation
+├── modules/             # Built-in plugin modules
+│   ├── quote/
+│   ├── job/
+│   ├── bulk/
+│   ├── search/
+│   ├── import_bp/
+│   ├── history/
 │   └── _template/       # Template for custom modules
-├── build_scripts/       # Build configuration
-├── windows/             # Windows installer files
-├── linux/               # Linux Debian package files
-├── old/                 # Legacy code (archived)
-└── README.md            # This file
+├── launcher/            # Windows C launcher source
+├── build_scripts/       # Inno Setup installer script
+├── linux/flatpak/       # Flatpak manifest and metadata
+└── .github/workflows/   # CI — build-release.yml produces Windows installer + Flatpak
 ```
 
 ### Building
 
-See [build_scripts/README.md](build_scripts/README.md) for instructions on creating standalone executables.
+Releases are built automatically by CI when a `v*` tag is pushed to `master`. To cut a release:
 
-For Windows installer packages, see [windows/README.md](windows/README.md).
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
 
-For Linux Debian packages, see [linux/README.md](linux/README.md).
+The workflow produces:
+- **Windows** — Inno Setup installer bundling the C launcher, embedded Python 3.12, and app source
+- **Linux** — Flatpak bundle
+
+Use `workflow_dispatch` on `build-release.yml` to test CI without tagging.
 
 ## License
 
-GNU General Public License v3 (GPL v3) - see [LICENSE](LICENSE) file for details.
+GNU General Public License v3 (GPL v3) — see [LICENSE](LICENSE) for details.
 
 ## Support
 
-For issues or questions, please visit:
-https://github.com/i-machine-things/JobDocs
+For issues or questions: https://github.com/i-machine-things-org/JobDocs/issues
 
 ## Contributing
 
-Contributions are welcome! Feel free to submit issues or pull requests.
-
-### Development Notes
-- The modular architecture allows for easy extension and customization
-- Each module is self-contained and can be developed independently
-- Use `modules/_template/` as a starting point for new modules
+Contributions are welcome. Please submit issues or pull requests.
 
 ---
 
-**Note**: ITAR (International Traffic in Arms Regulations) compliance is the user's responsibility. This tool only provides organizational separation of ITAR and non-ITAR files.
+**Note**: ITAR (International Traffic in Arms Regulations) compliance is the user's responsibility. This tool only provides organisational separation of ITAR and non-ITAR files.
 
 ## Acknowledgments
 
