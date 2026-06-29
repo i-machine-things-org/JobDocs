@@ -23,14 +23,19 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=commandline
+PrivilegesRequiredOverridesAllowed=dialog
 ChangesEnvironment=yes
 
 [Registry]
-; Add install directory to user PATH so JobDocs.exe is callable from the command line.
-; {olddata} expands to the current PATH value; NeedsAddPath guards against duplicates.
-Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
-  ValueData: "{olddata};{app}"; Check: NeedsAddPath(ExpandConstant('{app}'))
+; Add install directory to PATH so JobDocs.exe is callable from the command line.
+; Per-user install writes to HKCU; all-users (admin) install writes to HKLM.
+; Each entry is gated by its own check to prevent duplicates and wrong-hive writes.
+Root: HKCU; Subkey: "Environment"; \
+  ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; \
+  Check: NeedsAddPathUser(ExpandConstant('{app}'))
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \
+  ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; \
+  Check: NeedsAddPathAdmin(ExpandConstant('{app}'))
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -74,35 +79,63 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 var
   KeepSettings: Boolean;
 
-{ Returns True if AppDir is not already present in the user PATH. }
-function NeedsAddPath(AppDir: string): Boolean;
+const
+  SysEnvKey  = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';
+  UserEnvKey = 'Environment';
+
+{ True when AppDir is absent from HKCU PATH — used for per-user installs. }
+function NeedsAddPathUser(AppDir: string): Boolean;
 var
   EnvPath: string;
 begin
-  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', EnvPath) then
+  Result := False;
+  if IsAdminInstallMode then Exit;
+  if not RegQueryStringValue(HKEY_CURRENT_USER, UserEnvKey, 'Path', EnvPath) then
   begin
-    Result := True;
-    Exit;
+    Result := True; Exit;
   end;
-  Result := Pos(';' + Uppercase(AppDir) + ';',
-                ';' + Uppercase(EnvPath) + ';') = 0;
+  Result := Pos(';' + Uppercase(AppDir) + ';', ';' + Uppercase(EnvPath) + ';') = 0;
 end;
 
-{ Removes AppDir from the user PATH on uninstall. }
+{ True when AppDir is absent from HKLM PATH — used for all-users (admin) installs. }
+function NeedsAddPathAdmin(AppDir: string): Boolean;
+var
+  EnvPath: string;
+begin
+  Result := False;
+  if not IsAdminInstallMode then Exit;
+  if not RegQueryStringValue(HKEY_LOCAL_MACHINE, SysEnvKey, 'Path', EnvPath) then
+  begin
+    Result := True; Exit;
+  end;
+  Result := Pos(';' + Uppercase(AppDir) + ';', ';' + Uppercase(EnvPath) + ';') = 0;
+end;
+
+{ Removes AppDir from whichever PATH hive was used during install. }
 procedure RemoveFromPath(AppDir: string);
 var
+  RootKey: Integer;
+  SubKey: string;
   EnvPath: string;
   SearchStr: string;
   P: Integer;
 begin
-  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', EnvPath) then
-    Exit;
+  if IsAdminInstallMode then
+  begin
+    RootKey := HKEY_LOCAL_MACHINE;
+    SubKey  := SysEnvKey;
+  end else
+  begin
+    RootKey := HKEY_CURRENT_USER;
+    SubKey  := UserEnvKey;
+  end;
+  if not RegQueryStringValue(RootKey, SubKey, 'Path', EnvPath) then Exit;
   SearchStr := ';' + AppDir;
   P := Pos(LowerCase(SearchStr + ';'), LowerCase(EnvPath + ';'));
   if P > 0 then
   begin
     Delete(EnvPath, P, Length(SearchStr));
-    RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', EnvPath);
+    RegWriteExpandStringValue(RootKey, SubKey, 'Path', EnvPath);
   end;
 end;
 
@@ -118,16 +151,16 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  ConfigDir: String;
+  ConfigDir: string;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
+    RemoveFromPath(ExpandConstant('{app}'));
     if not KeepSettings then
     begin
       ConfigDir := ExpandConstant('{localappdata}\JobDocs');
       if DirExists(ConfigDir) then
         DelTree(ConfigDir, True, True, True);
     end;
-    RemoveFromPath(ExpandConstant('{app}'));
   end;
 end;
