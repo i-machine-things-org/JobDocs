@@ -161,6 +161,18 @@ class BaseModule(ABC):
         if self._app_context:
             self._app_context.show_info(title, message)
 
+    def prefill_fields(self, data: dict) -> None:
+        """Prefill form fields from CLI launch arguments.
+
+        Keys understood by built-in modules:
+          customer, j_no, po_no, desc, drawings (Job tab)
+          customer, q_no, desc, drawings        (Quote tab)
+
+        Override in modules that have a form to prefill; the default is a no-op
+        so existing modules that don't override are unaffected.
+        """
+        pass
+
     def _check_po_rfq_files(self, newly_added: List[str], files_store: List[str], list_widget) -> None:
         """Scan newly-added files for PO/RFQ signals and prompt the user for each flagged file.
 

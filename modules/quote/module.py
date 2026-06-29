@@ -959,6 +959,17 @@ class QuoteModule(BaseModule):
         dialog = BulkCreateDialog(self.app_context, self._widget)
         dialog.exec()
 
+    def prefill_fields(self, data: dict) -> None:
+        """Prefill Create New form fields from CLI launch arguments."""
+        if 'customer' in data and self.quote_customer_combo is not None:
+            self.quote_customer_combo.setCurrentText(data['customer'])
+        if 'q_no' in data and self.quote_number_edit is not None:
+            self.quote_number_edit.setText(data['q_no'])
+        if 'desc' in data and self.quote_description_edit is not None:
+            self.quote_description_edit.setText(data['desc'])
+        if 'drawings' in data and self.quote_drawings_edit is not None:
+            self.quote_drawings_edit.setText(data['drawings'])
+
     def cleanup(self):
         """Cleanup resources"""
         # Stop any running worker thread
