@@ -36,10 +36,29 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmd, int nShow)
     _snwprintf_s(script, MAX_PATH, _TRUNCATE,
                  L"%s\\app\\main.py", exe_path);
 
-    /* CreateProcess wants a mutable command-line buffer. */
-    wchar_t cmdline[MAX_PATH * 2];
-    _snwprintf_s(cmdline, MAX_PATH * 2, _TRUNCATE,
-                 L"\"%s\" \"%s\"", python, script);
+    /* Forward any args the user passed to JobDocs.exe by recovering them from
+     * the original wide-char command line.  GetCommandLineW() returns the full
+     * command line including the exe name, so skip past that first token. */
+    const wchar_t *cli = GetCommandLineW();
+    if (*cli == L'"') {
+        cli++;                              /* skip opening quote  */
+        while (*cli && *cli != L'"') cli++; /* skip exe path       */
+        if (*cli) cli++;                    /* skip closing quote  */
+    } else {
+        while (*cli && *cli != L' ') cli++; /* skip unquoted name  */
+    }
+    while (*cli == L' ') cli++;             /* skip whitespace     */
+
+    /* CreateProcess wants a mutable command-line buffer.
+     * 32 767 is the practical maximum for CreateProcessW. */
+    wchar_t cmdline[32767];
+    if (*cli) {
+        _snwprintf_s(cmdline, 32767, _TRUNCATE,
+                     L"\"%s\" \"%s\" %s", python, script, cli);
+    } else {
+        _snwprintf_s(cmdline, 32767, _TRUNCATE,
+                     L"\"%s\" \"%s\"", python, script);
+    }
 
     STARTUPINFOW si;
     ZeroMemory(&si, sizeof(si));
