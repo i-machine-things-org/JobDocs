@@ -338,8 +338,10 @@ class JobModule(BaseModule):
         customer = self.customer_combo.currentText().strip()
         job_input = self.job_number_edit.text().strip()
         po_number = self.po_number_edit.text().strip()
+        po_line = self.po_line_edit.text().strip()
         description = self.description_edit.text().strip()
         drawings_str = self.drawings_edit.text().strip()
+        revision = self.revision_edit.text().strip()
         is_itar = self.itar_check.isChecked()
 
         if not all([customer, job_input, description]):
@@ -385,7 +387,7 @@ class JobModule(BaseModule):
 
         created = 0
         for job_num in job_numbers:
-            if self.create_single_job(customer, job_num, po_number, description, drawings, is_itar, all_files):
+            if self.create_single_job(customer, job_num, po_number, po_line, description, drawings, revision, is_itar, all_files):
                 created += 1
 
         if created > 0:
@@ -402,8 +404,9 @@ class JobModule(BaseModule):
             self.show_error("Error", "Failed to create jobs")
 
     def create_single_job(
-            self, customer: str, job_number: str, po_number: str, description: str,
-            drawings: List[str], is_itar: bool, files: List[str]) -> bool:
+            self, customer: str, job_number: str, po_number: str, po_line: str,
+            description: str, drawings: List[str], revision: str,
+            is_itar: bool, files: List[str]) -> bool:
         """Create a single job folder"""
         try:
             bp_dir, cf_dir = self.app_context.get_directories(is_itar)
@@ -476,8 +479,10 @@ class JobModule(BaseModule):
                 'customer': customer,
                 'job_number': job_number,
                 'po_number': po_number,
+                'po_line': po_line,
                 'description': description,
                 'drawings': drawings,
+                'revision': revision,
                 'path': str(job_path)
             })
             self.app_context.save_history()
