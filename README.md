@@ -29,6 +29,7 @@ A modular tool for managing blueprint files and customer job directories with su
 - **Email Drag-and-Drop** - Drag emails directly onto any drop zone and attachments are extracted automatically. Supports Outlook / O365 (saves as `.msg`, requires `pywin32` on Windows), classic Outlook desktop, and Betterbird / Thunderbird on Linux (attachments extracted from the `.eml`). Image attachments (jpg, png, etc.) are skipped by default and can be toggled in Settings. Zip attachments are automatically extracted — the files inside are added directly to the file list.
 - **PDF Preview** - Drop zone file list shows a live preview of PDF files (requires `pymupdf`)
 - **Cross-Platform** - Works on Windows, macOS, and Linux
+- **CLI Pre-fill** - Launch with `--j_no`, `--desc`, `--customer` etc. to open with fields already populated — useful for integrating with external systems
 
 ## Installation
 
@@ -72,6 +73,46 @@ Run the application:
 ```bash
 python main.py
 ```
+
+### Command-Line Pre-fill
+
+External programs can launch JobDocs with form fields pre-populated. The app opens normally and the specified fields are filled in automatically.
+
+**Windows (installed build):**
+
+The installer adds `JobDocs.exe` to your user `PATH`, so you can call it directly:
+
+```powershell
+JobDocs.exe --j_no 12345 --desc "flange machining" --customer "Acme Corp"
+JobDocs.exe --q_no Q10042 --desc "shaft assembly"
+```
+
+You may need to open a new terminal after installing for `PATH` to take effect. External programs can also use `ShellExecute` / `CreateProcess` with the full install path (`%LOCALAPPDATA%\Programs\JobDocs\JobDocs.exe`).
+
+**Linux (Flatpak):**
+```bash
+flatpak run io.github.i_machine_things.JobDocs --j_no 12345 --desc "flange machining"
+flatpak run io.github.i_machine_things.JobDocs --q_no Q10042 --desc "shaft assembly"
+```
+
+**Development (source only):**
+```bash
+python main.py --j_no 12345 --desc "flange machining"
+```
+
+**Available arguments:**
+
+| Argument | Tab | Field |
+|---|---|---|
+| `--customer NAME` | Job / Quote | Customer name |
+| `--j_no NUMBER` | Job | Job number |
+| `--q_no NUMBER` | Quote | Quote number |
+| `--po_no NUMBER` | Job | PO number |
+| `--desc TEXT` | Job / Quote | Description |
+| `--drawings NUMS` | Job / Quote | Drawing numbers (comma-separated) |
+
+- If `--j_no` is present the app opens on the **Job** tab; if `--q_no` is present (and no `--j_no`) it opens on the **Quote** tab.
+- Unrecognised arguments are forwarded to Qt (e.g. `--platform`, `--style`).
 
 ### First Time Setup
 

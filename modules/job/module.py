@@ -1005,6 +1005,19 @@ class JobModule(BaseModule):
         dialog = BulkCreateDialog(self.app_context, self._widget)
         dialog.exec()
 
+    def prefill_fields(self, data: dict) -> None:
+        """Prefill Create New form fields from CLI launch arguments."""
+        if 'customer' in data and self.customer_combo is not None:
+            self.customer_combo.setCurrentText(data['customer'])
+        if 'j_no' in data and self.job_number_edit is not None:
+            self.job_number_edit.setText(data['j_no'])
+        if 'po_no' in data and self.po_number_edit is not None:
+            self.po_number_edit.setText(data['po_no'])
+        if 'desc' in data and self.description_edit is not None:
+            self.description_edit.setText(data['desc'])
+        if 'drawings' in data and self.drawings_edit is not None:
+            self.drawings_edit.setText(data['drawings'])
+
     def cleanup(self):
         """Cleanup resources"""
         # Stop any running worker thread
