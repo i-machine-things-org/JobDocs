@@ -26,16 +26,6 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ChangesEnvironment=yes
 
-[Registry]
-; Add install directory to PATH so JobDocs.exe is callable from the command line.
-; Per-user install writes to HKCU; all-users (admin) install writes to HKLM.
-; Each entry is gated by its own check to prevent duplicates and wrong-hive writes.
-Root: HKCU; Subkey: "Environment"; \
-  ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; \
-  Check: NeedsAddPathUser(ExpandConstant('{app}'))
-Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \
-  ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; \
-  Check: NeedsAddPathAdmin(ExpandConstant('{app}'))
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -83,36 +73,40 @@ const
   SysEnvKey  = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';
   UserEnvKey = 'Environment';
 
-{ True when AppDir is absent from HKCU PATH — used for per-user installs. }
-function NeedsAddPathUser(AppDir: string): Boolean;
+procedure AddToPath(AppDir: string);
+{ Append AppDir to the correct PATH hive (HKCU for per-user, HKLM for all-users).
+  Safe to call on upgrade — skipped when AppDir is already present. }
 var
+  RootKey: Integer;
+  SubKey: string;
   EnvPath: string;
 begin
-  Result := False;
-  if IsAdminInstallMode then Exit;
-  if not RegQueryStringValue(HKEY_CURRENT_USER, UserEnvKey, 'Path', EnvPath) then
+  if IsAdminInstallMode then
   begin
-    Result := True; Exit;
+    RootKey := HKEY_LOCAL_MACHINE;
+    SubKey  := SysEnvKey;
+  end else
+  begin
+    RootKey := HKEY_CURRENT_USER;
+    SubKey  := UserEnvKey;
   end;
-  Result := Pos(';' + Uppercase(AppDir) + ';', ';' + Uppercase(EnvPath) + ';') = 0;
+
+  if not RegQueryStringValue(RootKey, SubKey, 'Path', EnvPath) then
+    EnvPath := '';
+
+  if Pos(';' + Uppercase(AppDir) + ';', ';' + Uppercase(EnvPath) + ';') > 0 then
+    Exit; { already present }
+
+  if EnvPath = '' then
+    EnvPath := AppDir
+  else
+    EnvPath := EnvPath + ';' + AppDir;
+
+  RegWriteExpandStringValue(RootKey, SubKey, 'Path', EnvPath);
 end;
 
-{ True when AppDir is absent from HKLM PATH — used for all-users (admin) installs. }
-function NeedsAddPathAdmin(AppDir: string): Boolean;
-var
-  EnvPath: string;
-begin
-  Result := False;
-  if not IsAdminInstallMode then Exit;
-  if not RegQueryStringValue(HKEY_LOCAL_MACHINE, SysEnvKey, 'Path', EnvPath) then
-  begin
-    Result := True; Exit;
-  end;
-  Result := Pos(';' + Uppercase(AppDir) + ';', ';' + Uppercase(EnvPath) + ';') = 0;
-end;
-
-{ Removes AppDir from whichever PATH hive was used during install. }
 procedure RemoveFromPath(AppDir: string);
+{ Remove AppDir from whichever PATH hive was used during install. }
 var
   RootKey: Integer;
   SubKey: string;
@@ -137,6 +131,12 @@ begin
     Delete(EnvPath, P, Length(SearchStr));
     RegWriteExpandStringValue(RootKey, SubKey, 'Path', EnvPath);
   end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    AddToPath(ExpandConstant('{app}'));
 end;
 
 function InitializeUninstall(): Boolean;
