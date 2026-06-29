@@ -80,15 +80,14 @@ External programs can launch JobDocs with form fields pre-populated. The app ope
 
 **Windows (installed build):**
 
-JobDocs is not added to `PATH` by the installer. Use the full path — the default user install location is `%LOCALAPPDATA%\Programs\JobDocs\JobDocs.exe`:
+The installer adds `JobDocs.exe` to your user `PATH`, so you can call it directly:
 
 ```powershell
-# PowerShell
-& "$env:LOCALAPPDATA\Programs\JobDocs\JobDocs.exe" --j_no 12345 --desc "flange machining" --customer "Acme Corp"
-& "$env:LOCALAPPDATA\Programs\JobDocs\JobDocs.exe" --q_no Q10042 --desc "shaft assembly"
+JobDocs.exe --j_no 12345 --desc "flange machining" --customer "Acme Corp"
+JobDocs.exe --q_no Q10042 --desc "shaft assembly"
 ```
 
-External programs should use `ShellExecute` / `CreateProcess` with the full path to the exe.
+You may need to open a new terminal after installing for `PATH` to take effect. External programs can also use `ShellExecute` / `CreateProcess` with the full install path (`%LOCALAPPDATA%\Programs\JobDocs\JobDocs.exe`).
 
 **Linux (Flatpak):**
 ```bash

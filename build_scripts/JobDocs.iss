@@ -24,6 +24,13 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=commandline
+ChangesEnvironment=yes
+
+[Registry]
+; Add install directory to user PATH so JobDocs.exe is callable from the command line.
+; {olddata} expands to the current PATH value; NeedsAddPath guards against duplicates.
+Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
+  ValueData: "{olddata};{app}"; Check: NeedsAddPath(ExpandConstant('{app}'))
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -67,6 +74,38 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 var
   KeepSettings: Boolean;
 
+{ Returns True if AppDir is not already present in the user PATH. }
+function NeedsAddPath(AppDir: string): Boolean;
+var
+  EnvPath: string;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', EnvPath) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  Result := Pos(';' + Uppercase(AppDir) + ';',
+                ';' + Uppercase(EnvPath) + ';') = 0;
+end;
+
+{ Removes AppDir from the user PATH on uninstall. }
+procedure RemoveFromPath(AppDir: string);
+var
+  EnvPath: string;
+  SearchStr: string;
+  P: Integer;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', EnvPath) then
+    Exit;
+  SearchStr := ';' + AppDir;
+  P := Pos(LowerCase(SearchStr + ';'), LowerCase(EnvPath + ';'));
+  if P > 0 then
+  begin
+    Delete(EnvPath, P, Length(SearchStr));
+    RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', EnvPath);
+  end;
+end;
+
 function InitializeUninstall(): Boolean;
 begin
   KeepSettings := MsgBox(
@@ -89,5 +128,6 @@ begin
       if DirExists(ConfigDir) then
         DelTree(ConfigDir, True, True, True);
     end;
+    RemoveFromPath(ExpandConstant('{app}'));
   end;
 end;
