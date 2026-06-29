@@ -387,7 +387,9 @@ class JobModule(BaseModule):
 
         created = 0
         for job_num in job_numbers:
-            if self.create_single_job(customer, job_num, po_number, po_line, description, drawings, revision, is_itar, all_files):
+            if self.create_single_job(
+                    customer, job_num, po_number, po_line,
+                    description, drawings, revision, is_itar, all_files):
                 created += 1
 
         if created > 0:
