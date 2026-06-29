@@ -79,10 +79,16 @@ python main.py
 External programs can launch JobDocs with form fields pre-populated. The app opens normally and the specified fields are filled in automatically.
 
 **Windows (installed build):**
+
+JobDocs is not added to `PATH` by the installer. Use the full path — the default user install location is `%LOCALAPPDATA%\Programs\JobDocs\JobDocs.exe`:
+
+```powershell
+# PowerShell
+& "$env:LOCALAPPDATA\Programs\JobDocs\JobDocs.exe" --j_no 12345 --desc "flange machining" --customer "Acme Corp"
+& "$env:LOCALAPPDATA\Programs\JobDocs\JobDocs.exe" --q_no Q10042 --desc "shaft assembly"
 ```
-JobDocs.exe --j_no 12345 --desc "flange machining" --customer "Acme Corp" --po_no PO-9876
-JobDocs.exe --q_no Q10042 --desc "shaft assembly" --customer "Acme Corp"
-```
+
+External programs should use `ShellExecute` / `CreateProcess` with the full path to the exe.
 
 **Linux (Flatpak):**
 ```bash
@@ -90,7 +96,7 @@ flatpak run io.github.i_machine_things.JobDocs --j_no 12345 --desc "flange machi
 flatpak run io.github.i_machine_things.JobDocs --q_no Q10042 --desc "shaft assembly"
 ```
 
-**Development (source):**
+**Development (source only):**
 ```bash
 python main.py --j_no 12345 --desc "flange machining"
 ```
