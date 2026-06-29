@@ -103,6 +103,8 @@ class JobModule(BaseModule):
         self.customer_combo = None
         self.job_number_edit = None
         self.po_number_edit = None
+        self.po_line_edit = None
+        self.revision_edit = None
         self.job_status_label = None
         self.description_edit = None
         self.drawings_edit = None
@@ -157,9 +159,11 @@ class JobModule(BaseModule):
         self.customer_combo = widget.customer_combo
         self.job_number_edit = widget.job_number_edit
         self.po_number_edit = widget.po_number_edit
+        self.po_line_edit = widget.po_line_edit
         self.job_status_label = widget.job_status_label
         self.description_edit = widget.description_edit
         self.drawings_edit = widget.drawings_edit
+        self.revision_edit = widget.revision_edit
         self.itar_check = widget.itar_check
         self.job_files_list = widget.job_files_list
         self.job_files_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -524,8 +528,10 @@ class JobModule(BaseModule):
         self.customer_combo.setCurrentText("")
         self.job_number_edit.clear()
         self.po_number_edit.clear()
+        self.po_line_edit.clear()
         self.description_edit.clear()
         self.drawings_edit.clear()
+        self.revision_edit.clear()
         self.itar_check.setChecked(False)
         self.job_files.clear()
         self.job_files_list.clear()
@@ -1013,10 +1019,14 @@ class JobModule(BaseModule):
             self.job_number_edit.setText(data['j_no'])
         if 'po_no' in data and self.po_number_edit is not None:
             self.po_number_edit.setText(data['po_no'])
+        if 'po_line' in data and self.po_line_edit is not None:
+            self.po_line_edit.setText(data['po_line'])
         if 'desc' in data and self.description_edit is not None:
             self.description_edit.setText(data['desc'])
         if 'drawings' in data and self.drawings_edit is not None:
             self.drawings_edit.setText(data['drawings'])
+        if 'revision' in data and self.revision_edit is not None:
+            self.revision_edit.setText(data['revision'])
 
     def cleanup(self):
         """Cleanup resources"""

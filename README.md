@@ -137,8 +137,10 @@ python main.py --j_no 12345 --desc "flange machining"
 | `--j_no NUMBER` | Job | Job number |
 | `--q_no NUMBER` | Quote | Quote number |
 | `--po_no NUMBER` | Job | PO number |
+| `--po_line LINE` | Job | PO line |
 | `--desc TEXT` | Job / Quote | Description |
 | `--drawings NUMS` | Job / Quote | Drawing numbers (comma-separated) |
+| `--revision REV` | Job | Revision |
 
 - If `--j_no` is present the app opens on the **Job** tab; if `--q_no` is present (and no `--j_no`) it opens on the **Quote** tab.
 - Unrecognised arguments are forwarded to Qt (e.g. `--platform`, `--style`).
