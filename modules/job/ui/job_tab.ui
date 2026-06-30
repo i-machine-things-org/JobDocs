@@ -147,11 +147,32 @@
            </widget>
           </item>
           <item row="2" column="1">
-           <widget class="QLineEdit" name="po_number_edit">
-            <property name="placeholderText">
-             <string>Customer PO Number (Optional)</string>
-            </property>
-           </widget>
+           <layout class="QHBoxLayout" name="poRowLayout">
+            <item>
+             <widget class="QLineEdit" name="po_number_edit">
+              <property name="placeholderText">
+               <string>Customer PO Number (Optional)</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="poLineLabel">
+              <property name="text">
+               <string>PO Line:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLineEdit" name="po_line_edit">
+              <property name="placeholderText">
+               <string>Line</string>
+              </property>
+              <property name="maximumWidth">
+               <number>60</number>
+              </property>
+             </widget>
+            </item>
+           </layout>
           </item>
           <item row="3" column="0">
            <widget class="QLabel" name="descriptionLabel">
@@ -171,11 +192,32 @@
            </widget>
           </item>
           <item row="4" column="1">
-           <widget class="QLineEdit" name="drawings_edit">
-            <property name="placeholderText">
-             <string>comma-separated</string>
-            </property>
-           </widget>
+           <layout class="QHBoxLayout" name="drawingsRowLayout">
+            <item>
+             <widget class="QLineEdit" name="drawings_edit">
+              <property name="placeholderText">
+               <string>comma-separated</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="revisionLabel">
+              <property name="text">
+               <string>Rev.:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLineEdit" name="revision_edit">
+              <property name="placeholderText">
+               <string>Rev</string>
+              </property>
+              <property name="maximumWidth">
+               <number>60</number>
+              </property>
+             </widget>
+            </item>
+           </layout>
           </item>
           <item row="5" column="1">
            <widget class="QCheckBox" name="itar_check">
@@ -183,6 +225,19 @@
              <string>ITAR Job (uses separate directories)</string>
             </property>
            </widget>
+          </item>
+          <item row="6" column="0" colspan="2">
+           <spacer name="jobInfoSpacer">
+            <property name="orientation">
+             <enum>Qt::Vertical</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>20</width>
+              <height>0</height>
+             </size>
+            </property>
+           </spacer>
           </item>
          </layout>
         </widget>

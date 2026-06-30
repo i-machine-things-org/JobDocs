@@ -2389,3 +2389,21 @@ Actionable: 1  Nitpicks: 0
    - If a custom `doubleClicked` slot also calls `setExpanded(not isExpanded())`, the two toggles cancel out
    - Fix: call `self.folder_tree.setExpandsOnDoubleClick(False)` at widget construction time
    - Use `self.folder_tree.itemFromIndex(index)` in the slot (not `currentItem()`) to get the exact clicked item
+
+
+---
+
+## 2026-06-30 — `modules/job/module.py`, `modules/job/ui/job_tab.ui` (PO Line and Revision fields — PR #282)
+
+**Review:** CodeRabbit flagged two issues on the initial review.
+**Result:** Both resolved before merge.
+
+### Findings
+
+1. **New prefill fields must be wired into the job creation flow, not just the form**
+   - `po_line` and `revision` were set on the form via `prefill_fields` but not read from the widgets in `create_job()`/`create_single_job()`, so submitted jobs silently dropped them.
+   - Fix: read `po_line_edit.text()` and `revision_edit.text()` in `create_job()`; pass both through to `create_single_job()` and include in the job data dict.
+
+2. **QGroupBox max-height cap can clip new rows — use a zero-height spacer instead of removing the cap**
+   - `jobInfoGroup` had a 200 px max-height; adding PO Line and Revision rows risked clipping the bottom row.
+   - Fix: kept the 200 px cap (sufficient for 6 rows at 3 px spacing); added a `Qt::Vertical` spacer with `sizeHint height=0` at the last grid row to pin rows to the top without spreading them, preventing clip without removing the constraint.

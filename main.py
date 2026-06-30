@@ -321,9 +321,11 @@ def _parse_prefill_args(argv: list) -> tuple:
     parser.add_argument('--j_no', metavar='NUMBER')
     parser.add_argument('--q_no', metavar='NUMBER')
     parser.add_argument('--po_no', metavar='NUMBER')
+    parser.add_argument('--po_line', metavar='LINE')
     parser.add_argument('--desc', metavar='TEXT')
     parser.add_argument('--drawings', metavar='NUMS',
                         help='Comma-separated drawing numbers')
+    parser.add_argument('--revision', metavar='REV')
     known, remaining = parser.parse_known_args(argv)
 
     prefill = {k: v for k, v in vars(known).items() if v is not None}
