@@ -271,8 +271,10 @@ class BulkCreateDialog(QDialog):
                 skipped += 1
             else:
                 if job_module.create_single_job(
-                    customer, job['job_number'], job['po_number'],
-                    job['description'], job['drawings'], is_itar, []
+                    customer, job['job_number'],
+                    job.get('po_number', ''), job.get('po_line', ''),
+                    job['description'], job['drawings'],
+                    job.get('revision', ''), is_itar, []
                 ):
                     created += 1
 

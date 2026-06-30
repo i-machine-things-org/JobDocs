@@ -137,11 +137,63 @@ python main.py --j_no 12345 --desc "flange machining"
 | `--j_no NUMBER` | Job | Job number |
 | `--q_no NUMBER` | Quote | Quote number |
 | `--po_no NUMBER` | Job | PO number |
+| `--po_line LINE` | Job | PO line |
 | `--desc TEXT` | Job / Quote | Description |
 | `--drawings NUMS` | Job / Quote | Drawing numbers (comma-separated) |
+| `--revision REV` | Job | Revision |
 
 - If `--j_no` is present the app opens on the **Job** tab; if `--q_no` is present (and no `--j_no`) it opens on the **Quote** tab.
 - Unrecognised arguments are forwarded to Qt (e.g. `--platform`, `--style`).
+
+#### Integration examples
+
+**Python**
+
+```python
+import subprocess
+import os
+
+exe = os.path.expandvars(r"%LOCALAPPDATA%\Programs\JobDocs\JobDocs.exe")
+
+# Open Job tab with all fields pre-filled
+subprocess.Popen([
+    exe,
+    "--customer", "Acme Corp",
+    "--j_no",     "12345",
+    "--po_no",    "PO-9876",
+    "--po_line",  "1",
+    "--desc",     "flange machining",
+    "--drawings", "DWG-001,DWG-002",
+    "--revision", "A",
+])
+```
+
+**VBA (Excel / Access / JobBOSS)**
+
+```vba
+Sub OpenInJobDocs()
+    Dim wsh As Object
+    Dim exePath As String
+
+    Set wsh = CreateObject("WScript.Shell")
+    exePath = wsh.ExpandEnvironmentStrings("%LOCALAPPDATA%\Programs\JobDocs\JobDocs.exe")
+
+    ' Pull values from the current JobBOSS Job Entry record
+    wsh.Run """" & exePath & """" & _
+             " --customer """ & Forms!Jobs!Customer_ID    & """" & _
+             " --j_no """     & Forms!Jobs!Job_Number     & """" & _
+             " --po_no """    & Forms!Jobs!Cust_PO        & """" & _
+             " --po_line """  & Forms!Jobs!PO_Line        & """" & _
+             " --desc """     & Forms!Jobs!Description    & """" & _
+             " --revision """ & Forms!Jobs!Revision       & """", _
+             1, False
+
+    Set wsh = Nothing
+End Sub
+```
+
+Both callers launch JobDocs as a non-blocking GUI process and return immediately.
+For an all-users install replace `%LOCALAPPDATA%\Programs` with `%ProgramFiles%`.
 
 ### Creating Quotes
 

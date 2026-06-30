@@ -103,6 +103,8 @@ class JobModule(BaseModule):
         self.customer_combo = None
         self.job_number_edit = None
         self.po_number_edit = None
+        self.po_line_edit = None
+        self.revision_edit = None
         self.job_status_label = None
         self.description_edit = None
         self.drawings_edit = None
@@ -157,9 +159,11 @@ class JobModule(BaseModule):
         self.customer_combo = widget.customer_combo
         self.job_number_edit = widget.job_number_edit
         self.po_number_edit = widget.po_number_edit
+        self.po_line_edit = widget.po_line_edit
         self.job_status_label = widget.job_status_label
         self.description_edit = widget.description_edit
         self.drawings_edit = widget.drawings_edit
+        self.revision_edit = widget.revision_edit
         self.itar_check = widget.itar_check
         self.job_files_list = widget.job_files_list
         self.job_files_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -334,8 +338,10 @@ class JobModule(BaseModule):
         customer = self.customer_combo.currentText().strip()
         job_input = self.job_number_edit.text().strip()
         po_number = self.po_number_edit.text().strip()
+        po_line = self.po_line_edit.text().strip()
         description = self.description_edit.text().strip()
         drawings_str = self.drawings_edit.text().strip()
+        revision = self.revision_edit.text().strip()
         is_itar = self.itar_check.isChecked()
 
         if not all([customer, job_input, description]):
@@ -381,7 +387,9 @@ class JobModule(BaseModule):
 
         created = 0
         for job_num in job_numbers:
-            if self.create_single_job(customer, job_num, po_number, description, drawings, is_itar, all_files):
+            if self.create_single_job(
+                    customer, job_num, po_number, po_line,
+                    description, drawings, revision, is_itar, all_files):
                 created += 1
 
         if created > 0:
@@ -398,8 +406,9 @@ class JobModule(BaseModule):
             self.show_error("Error", "Failed to create jobs")
 
     def create_single_job(
-            self, customer: str, job_number: str, po_number: str, description: str,
-            drawings: List[str], is_itar: bool, files: List[str]) -> bool:
+            self, customer: str, job_number: str, po_number: str, po_line: str,
+            description: str, drawings: List[str], revision: str,
+            is_itar: bool, files: List[str]) -> bool:
         """Create a single job folder"""
         try:
             bp_dir, cf_dir = self.app_context.get_directories(is_itar)
@@ -472,8 +481,10 @@ class JobModule(BaseModule):
                 'customer': customer,
                 'job_number': job_number,
                 'po_number': po_number,
+                'po_line': po_line,
                 'description': description,
                 'drawings': drawings,
+                'revision': revision,
                 'path': str(job_path)
             })
             self.app_context.save_history()
@@ -524,8 +535,10 @@ class JobModule(BaseModule):
         self.customer_combo.setCurrentText("")
         self.job_number_edit.clear()
         self.po_number_edit.clear()
+        self.po_line_edit.clear()
         self.description_edit.clear()
         self.drawings_edit.clear()
+        self.revision_edit.clear()
         self.itar_check.setChecked(False)
         self.job_files.clear()
         self.job_files_list.clear()
@@ -1013,10 +1026,14 @@ class JobModule(BaseModule):
             self.job_number_edit.setText(data['j_no'])
         if 'po_no' in data and self.po_number_edit is not None:
             self.po_number_edit.setText(data['po_no'])
+        if 'po_line' in data and self.po_line_edit is not None:
+            self.po_line_edit.setText(data['po_line'])
         if 'desc' in data and self.description_edit is not None:
             self.description_edit.setText(data['desc'])
         if 'drawings' in data and self.drawings_edit is not None:
             self.drawings_edit.setText(data['drawings'])
+        if 'revision' in data and self.revision_edit is not None:
+            self.revision_edit.setText(data['revision'])
 
     def cleanup(self):
         """Cleanup resources"""
