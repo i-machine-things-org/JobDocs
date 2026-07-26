@@ -58,7 +58,8 @@ def main():
     for line in added_lines:
         if re.search(r"^\+\s{8,}def\s+_\w+", line):
             warnings.append(
-                "Private helper function defined inside a method — move to class or module level. [CODING_NOTES 2026-04-06]"
+                "Private helper function defined inside a method — move to class or "
+                "module level. [CODING_NOTES 2026-04-06]"
             )
             break
 
