@@ -2,7 +2,7 @@
 Pre-commit coding-notes pattern checker for Claude Code (Windows-compatible).
 Triggered via PreToolUse hook on Bash tool calls.
 Reads tool input JSON from stdin, skips non-commit commands,
-then checks the staged diff against known CODING_NOTES.md anti-patterns.
+then checks the staged diff against known .claude/CODING_NOTES.md anti-patterns.
 """
 
 import sys
@@ -80,7 +80,8 @@ def main():
         for w in warnings:
             print(f"  * {w}")
         print()
-        print("Review CODING_NOTES.md before proceeding. Commit is NOT blocked — fix on next commit if intentional.")
+        print("Review .claude/CODING_NOTES.md before proceeding. Commit is NOT blocked — "
+              "fix on next commit if intentional.")
         print()
 
     sys.exit(0)
