@@ -1,8 +1,8 @@
 """
-Pre-commit S&P.md pattern checker for Claude Code (Windows-compatible).
+Pre-commit coding-notes pattern checker for Claude Code (Windows-compatible).
 Triggered via PreToolUse hook on Bash tool calls.
 Reads tool input JSON from stdin, skips non-commit commands,
-then checks the staged diff against known S&P.md anti-patterns.
+then checks the staged diff against known .claude/CODING_NOTES.md anti-patterns.
 """
 
 import sys
@@ -42,7 +42,7 @@ def main():
     warnings = []
 
     # ---------------------------------------------------------------
-    # S&P checks — add new entries here as CodeRabbit reviews land
+    # Coding-notes checks — add new entries here as CodeRabbit reviews land
     # ---------------------------------------------------------------
 
     # [2026-04-06] Broad except Exception
@@ -50,7 +50,7 @@ def main():
         if re.search(r"except\s+Exception\b", line):
             warnings.append(
                 "Broad 'except Exception' detected — use specific exceptions "
-                "(e.g. OSError, AttributeError). [S&P 2026-04-06]"
+                "(e.g. OSError, AttributeError). [CODING_NOTES 2026-04-06]"
             )
             break
 
@@ -58,7 +58,8 @@ def main():
     for line in added_lines:
         if re.search(r"^\+\s{8,}def\s+_\w+", line):
             warnings.append(
-                "Private helper function defined inside a method — move to class or module level. [S&P 2026-04-06]"
+                "Private helper function defined inside a method — move to class or "
+                "module level. [CODING_NOTES 2026-04-06]"
             )
             break
 
@@ -67,7 +68,7 @@ def main():
         if re.search(r"key\s*=\s*lambda.*os\.path\.isdir", line) and not re.search(r"not\s+os\.path\.isdir", line):
             warnings.append(
                 "Sort key may put files before directories — "
-                "use 'not os.path.isdir(...)' to sort dirs first. [S&P 2026-04-06]"
+                "use 'not os.path.isdir(...)' to sort dirs first. [CODING_NOTES 2026-04-06]"
             )
             break
 
@@ -75,11 +76,12 @@ def main():
 
     if warnings:
         print()
-        print(f"S&P.md Pre-commit Check — {len(warnings)} issue(s) found:")
+        print(f"Coding Notes Pre-commit Check — {len(warnings)} issue(s) found:")
         for w in warnings:
             print(f"  * {w}")
         print()
-        print("Review S&P.md before proceeding. Commit is NOT blocked — fix on next commit if intentional.")
+        print("Review .claude/CODING_NOTES.md before proceeding. Commit is NOT blocked — "
+              "fix on next commit if intentional.")
         print()
 
     sys.exit(0)
