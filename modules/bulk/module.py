@@ -167,6 +167,16 @@ class BulkCreateDialog(QDialog):
             if job.get('job_number', '').lower() == job_number_lower:
                 return True, job.get('customer', 'Unknown')
 
+        # Fast path: query the SQLite search index instead of walking every
+        # customer folder on disk. Falls back to a live filesystem scan below
+        # if the index isn't available/populated yet.
+        search_index = self.app_context.get_search_index()
+        if search_index is not None and search_index.is_populated():
+            match = search_index.find_job_by_number(job_number)
+            if match:
+                return True, match['customer']
+            return False, None
+
         for dir_key in ['customer_files_dir', 'itar_customer_files_dir']:
             cf_dir = self.app_context.get_setting(dir_key, '')
             if not cf_dir or not os.path.exists(cf_dir):
