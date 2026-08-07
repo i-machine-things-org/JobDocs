@@ -723,19 +723,20 @@ class SearchIndex:
 
     def find_job_by_number(self, job_number: str) -> Optional[Dict]:
         """Return the most recently indexed job with an exact (case-insensitive)
-        job_number match, or None. Used for duplicate-job checks, where a
-        substring match (as in search_jobs) would be wrong.
+        job_number match, or None if there is confirmed no match. Used for
+        duplicate-job checks, where a substring match (as in search_jobs)
+        would be wrong.
+
+        Raises sqlite3.Error on query failure so callers can distinguish a
+        failed lookup (fall back to a filesystem scan) from a confirmed
+        no-match (safe to treat as "not a duplicate").
         """
-        try:
-            with closing(self._connect(timeout=5.0)) as conn:
-                row = conn.execute(
-                    "SELECT * FROM jobs WHERE job_number = ? COLLATE NOCASE"
-                    " ORDER BY mtime DESC LIMIT 1",
-                    (job_number,),
-                ).fetchone()
-        except sqlite3.Error as exc:
-            logger.warning("find_job_by_number: query failed: %s", exc)
-            return None
+        with closing(self._connect(timeout=5.0)) as conn:
+            row = conn.execute(
+                "SELECT * FROM jobs WHERE job_number = ? COLLATE NOCASE"
+                " ORDER BY mtime DESC LIMIT 1",
+                (job_number,),
+            ).fetchone()
 
         if row is None:
             return None
