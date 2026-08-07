@@ -2,6 +2,8 @@
 
 import sqlite3
 
+import pytest
+
 from core.search_index import SearchIndex
 
 
@@ -56,6 +58,15 @@ class TestFindJobByNumber:
         _insert_job(index, job_number='12345', customer='New', path='C:/New/12345', mtime=2.0)
         match = index.find_job_by_number('12345')
         assert match['customer'] == 'New'
+
+    def test_query_failure_raises_instead_of_returning_none(self, tmp_path):
+        # Callers rely on this to distinguish a failed lookup (fall back to a
+        # filesystem scan) from a confirmed no-match (safe to treat as unique).
+        index = _make_index(tmp_path)
+        with sqlite3.connect(str(index._db_path)) as conn:
+            conn.execute("DROP TABLE jobs")
+        with pytest.raises(sqlite3.Error):
+            index.find_job_by_number('12345')
 
 
 class TestIsPopulated:
