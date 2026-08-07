@@ -60,6 +60,8 @@
 - **Flatpak's `/app` is read-only at runtime.** Per-user writable state (installed plugins, deps) must go under `$XDG_DATA_HOME` / `~/.var/app/<id>/data`, gated on `FLATPAK_ID`.
 - **When switching PyInstaller onefile to onedir, update every downstream consumer.** Flatpak staging, manifests, and verify steps all reference the old single-binary path and need updating together.
 - **Manual recovery commands must use `sys.executable`, quoted.** Bare `pip` may resolve to the wrong interpreter; unquoted paths with spaces break copy-pasted commands.
+- **Never run a built Inno Setup installer against a real machine's default paths to test it.** `[Setup] AppId` keys the Uninstall/Previous-Data registry entries regardless of `/DIR=`; a throwaway test install can still clobber a real install's registry data or PATH. Test with `iscc` syntax-compile only, or in an isolated VM/container.
+- **Inno Setup: use `WizardIsTaskSelected`/task checkboxes, not `[Types]`+`TypesCombo`, for a simple binary install-variant choice.** `WizardForm.TypesComboChange` isn't a scriptable identifier in current Inno Setup; a Tasks-section checkbox plus `GetPreviousData`/`RegisterPreviousData` (not a global `PreviousDataKey`) is simpler and remembers the choice across updates.
 
 ## CI / GitHub Actions
 

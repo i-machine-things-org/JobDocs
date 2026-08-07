@@ -32,6 +32,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "readonly";    Description: "Read-Only (Search Only) — only install the Search tab"; GroupDescription: "Installation Type:"
 
 [Dirs]
 Name: "{app}\plugins"
@@ -133,10 +134,65 @@ begin
   end;
 end;
 
+function FindTaskListIndex(const ItemText: String): Integer;
+{ WizardForm.TasksList mixes group-header rows and task rows; searching by
+  the task's own Description text is robust regardless of position/grouping. }
+var
+  i: Integer;
+begin
+  Result := -1;
+  for i := 0 to WizardForm.TasksList.Items.Count - 1 do
+  begin
+    if WizardForm.TasksList.Items[i] = ItemText then
+    begin
+      Result := i;
+      Exit;
+    end;
+  end;
+end;
+
+procedure InitializeWizard();
+{ Pre-check the Read-Only task if that's what was selected on a previous
+  install of this app, so an update installer defaults to the same variant
+  instead of silently reverting a read-only (search-only) machine to full. }
+var
+  Idx: Integer;
+begin
+  if GetPreviousData('InstallType', 'full') = 'readonly' then
+  begin
+    Idx := FindTaskListIndex('Read-Only (Search Only) — only install the Search tab');
+    if Idx >= 0 then
+      WizardForm.TasksList.Checked[Idx] := True;
+  end;
+end;
+
+procedure RegisterPreviousData(PreviousDataKey: Integer);
+{ Setup calls this automatically to persist "previous data" for this AppId
+  (keyed by PreviousDataKey, independent of install path) so the next
+  install/update of this app can recall the chosen install type. }
+begin
+  if WizardIsTaskSelected('readonly') then
+    SetPreviousData(PreviousDataKey, 'InstallType', 'readonly')
+  else
+    SetPreviousData(PreviousDataKey, 'InstallType', 'full');
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  MarkerFile: String;
 begin
   if CurStep = ssPostInstall then
+  begin
     AddToPath(ExpandConstant('{app}'));
+
+    { Drop a marker file the app itself reads at startup to switch into
+      read-only (search-only) mode. }
+    MarkerFile := ExpandConstant('{app}\readonly.marker');
+    if WizardIsTaskSelected('readonly') then
+      SaveStringToFile(MarkerFile, 'search-only' + #13#10, False)
+    else if FileExists(MarkerFile) then
+      DeleteFile(MarkerFile);
+  end;
 end;
 
 function InitializeUninstall(): Boolean;
