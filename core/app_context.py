@@ -66,6 +66,8 @@ class AppContext:
         self._add_to_history = add_to_history_callback
         self._main_window = main_window
         self._print_provider = None
+        self._search_index = None
+        self._search_index_failed = False
 
     @property
     def settings(self) -> Dict[str, Any]:
@@ -99,6 +101,23 @@ class AppContext:
     def get_print_provider(self):
         """Return the registered print provider, or None."""
         return self._print_provider
+
+    def get_search_index(self):
+        """Return the shared SearchIndex instance (lazily opened), or None if it
+        could not be opened. Points at the same DB file the Search tab's
+        background indexer maintains, so callers should check is_populated()
+        before relying on results being complete.
+        """
+        if self._search_index is None and not self._search_index_failed:
+            try:
+                from core.search_index import SearchIndex
+                self._search_index = SearchIndex(self._config_dir / 'search_index.db')
+            except Exception as exc:
+                logger.warning(
+                    "get_search_index: could not open index DB (%s): %s", type(exc).__name__, exc
+                )
+                self._search_index_failed = True
+        return self._search_index
 
     def save_settings(self):
         """Save application settings to disk"""
