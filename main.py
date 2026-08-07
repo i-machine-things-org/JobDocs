@@ -57,6 +57,21 @@ def _get_app_version() -> str:
     return "dev"
 
 
+def _is_readonly_install() -> bool:
+    """True for a read-only (search-only) install — see build_scripts/JobDocs.iss.
+
+    Detected via a marker file the installer drops next to app/runtime/plugins
+    when the "Read-Only (Search Only)" setup type is chosen. Windows-only;
+    always False in dev checkouts, Flatpak, and full installs.
+    """
+    if os.getenv('FLATPAK_ID'):
+        return False
+    app_dir = Path(__file__).resolve().parent
+    if not (app_dir.parent / 'runtime').is_dir():
+        return False  # dev checkout, not an embedded install
+    return (app_dir.parent / 'readonly.marker').exists()
+
+
 APP_VERSION = _get_app_version()
 _GITHUB_REPO = "i-machine-things-org/JobDocs"
 
@@ -652,8 +667,12 @@ class JobDocsMainWindow(QMainWindow):
         self.history = self.load_history()
         self.modules = []  # Store loaded modules
 
+        # Read-only (search-only) install: only the Search tab loads, and the
+        # menu bar (Settings, Install Plugin, etc.) is hidden entirely.
+        self.readonly_mode = _is_readonly_install()
+
         # Setup UI
-        self.setWindowTitle("JobDocs")
+        self.setWindowTitle("JobDocs — Search" if self.readonly_mode else "JobDocs")
         self.resize(700, 600)
         self._set_window_icon()
 
@@ -679,8 +698,10 @@ class JobDocsMainWindow(QMainWindow):
         # Load modules
         self.load_modules()
 
-        # Setup menu
-        self.setup_menu()
+        # Setup menu (read-only installs hide the menu bar entirely — there's
+        # nothing behind it to reach: Settings, Install Plugin, other tabs)
+        if not self.readonly_mode:
+            self.setup_menu()
 
         # Apply UI style
         self.apply_ui_style()
@@ -860,7 +881,14 @@ class JobDocsMainWindow(QMainWindow):
         try:
             # Load modules with experimental flag and disabled modules list
             experimental_enabled = self.settings.get('experimental_features', False)
-            disabled_modules = self.settings.get('disabled_modules', [])
+            if self.readonly_mode:
+                # Only the search module loads; ignore the user's disabled_modules
+                # setting entirely so a synced settings.json can't re-enable tabs.
+                disabled_modules = [
+                    name for name in loader.discover_modules() if name != 'search'
+                ]
+            else:
+                disabled_modules = self.settings.get('disabled_modules', [])
             self.modules = loader.load_all_modules(self.app_context, experimental_enabled, disabled_modules)
 
             if not self.modules:
