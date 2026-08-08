@@ -31,7 +31,7 @@
 - **Cross-thread signals need a real `QObject` receiver.** A plain function connected to a `QThread` signal runs on the worker thread; use a `QObject` with `@pyqtSlot` methods so Qt queues delivery to the main thread.
 - **Stream results per-item instead of buffering all in memory.** Emit one `page_ready(QImage)` per page rather than building the full list first, to avoid exhausting memory on large documents.
 - **Always emit a "done" signal from try/finally.** If an exception escapes a worker's `run()`, the receiver can wait forever for completion.
-- **Block dialog Save/Cancel/close during an in-flight async operation.** Otherwise the user can race a background worker callback against disposed UI state.
+- **Block dialog Save/Cancel/close during an in-flight async operation.** Otherwise the user can race a background worker callback against disposed UI state. Applies equally to a manual `QApplication.processEvents()` loop on the GUI thread, not just real `QThread` workers — override `closeEvent`/`reject()` to ignore while a busy flag is set.
 - **Persist settings through the real settings store, not a dialog-local copy.** Writing to `self.settings` inside a dialog is lost on Cancel if that object is a local copy rather than the live settings store.
 - **Escape untrusted strings before interpolating into RichText labels.** A crafted version string could inject HTML into a `QLabel`; use `html.escape()`.
 - **Keep a live reference to non-modal dialogs.** Store on a longer-lived owner (e.g. `window._dialog = dlg`) and clear it on `finished`, or the dialog is garbage-collected and disappears immediately.
