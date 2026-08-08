@@ -524,75 +524,137 @@ class DropZone(QFrame):
 
     @staticmethod
     def _handle_classic_outlook_drop(mime_data) -> list:
-        """Handle drag from the classic Outlook desktop app.
+        """Handle drag from the classic Outlook desktop app — including
+        multiple selected emails dragged at once.
 
         Classic Outlook provides RenPrivateMessages (binary MAPI entry IDs) and a
-        Csv format containing the same entry ID as a UTF-16LE hex string.  FileContents
-        is typically 0 bytes when dropped on non-Shell targets, so we retrieve the email
-        via MAPI COM using the entry ID directly.
+        Csv format containing the same entry ID(s) as UTF-16LE hex strings, one
+        per line for a multi-select drag (mirroring the row-per-item layout the
+        neighbouring text/plain subject data already uses). FileContents is
+        typically 0 bytes when dropped on non-Shell targets, so we retrieve each
+        email via MAPI COM using its entry ID directly.
         """
-        # Entry ID is stored in the Csv format as a UTF-16LE hex string —
-        # exactly the format GetItemFromID expects, no conversion needed.
-        raw_id = ''
+        # Entry ID(s) are stored in the Csv format as UTF-16LE hex strings, one
+        # per line for a multi-select drag — exactly the format GetItemFromID
+        # expects, no conversion needed.
+        raw_ids: list = []
         try:
             csv_bytes = bytes(mime_data.data('application/x-qt-windows-mime;value="Csv"'))
             if csv_bytes:
-                raw_id = csv_bytes.decode('utf-16-le').rstrip('\x00').strip()
-                print(f"[DropZone] Classic Outlook entry ID: {raw_id[:40]}...", flush=True)
+                csv_text = csv_bytes.decode('utf-16-le').rstrip('\x00')
+                raw_ids = [ln.strip() for ln in csv_text.splitlines() if ln.strip()]
+                print(f"[DropZone] Classic Outlook entry ID(s): {len(raw_ids)}", flush=True)
         except Exception as e:
-            print(f"[DropZone] Could not read Csv entry ID: {e}", flush=True)
+            print(f"[DropZone] Could not read Csv entry ID(s): {e}", flush=True)
 
-        # Subject from text/plain tab-delimited: header row then data row
-        # "From\tSubject\tReceived\tSize\tCategories\t\nSender\tSubject..."
-        subject = ''
+        # Subjects from text/plain tab-delimited: header row then one data row
+        # per selected email — "From\tSubject\tReceived\tSize\tCategories\t\n
+        # Sender1\tSubject1...\nSender2\tSubject2...".
+        subjects: list = []
         try:
             plain_bytes = bytes(mime_data.data('text/plain'))
             plain = plain_bytes.decode('utf-8', errors='replace')
             lines = [ln for ln in plain.splitlines() if ln.strip()]
             for line in lines:
                 cols = line.split('\t')
-                if cols[0].strip().lower() not in ('from', ''):
-                    if len(cols) >= 2:
-                        subject = cols[1].strip()
-                        break
-            print(f"[DropZone] Classic Outlook subject: {subject!r}", flush=True)
+                if cols[0].strip().lower() in ('from', ''):
+                    continue
+                subjects.append(cols[1].strip() if len(cols) >= 2 else '')
+            print(f"[DropZone] Classic Outlook subject(s): {subjects}", flush=True)
         except Exception as e:
-            print(f"[DropZone] Could not parse subject from text/plain: {e}", flush=True)
+            print(f"[DropZone] Could not parse subjects from text/plain: {e}", flush=True)
 
-        # Fallback: read subject from FileGroupDescriptorW filename (strip .msg)
-        if not subject:
+        # Fallback: read subject from the FileGroupDescriptor(W) filename(s) (strip .msg)
+        if not subjects:
             descriptor_fmt = DropZone._outlook_descriptor_format(mime_data)
             if descriptor_fmt:
                 try:
                     descriptor_bytes = bytes(mime_data.data(descriptor_fmt))
                     is_unicode = descriptor_fmt.upper().endswith('W')
-                    name_offset = 4 + 72
-                    if is_unicode:
-                        name_bytes = descriptor_bytes[name_offset:name_offset + 520]
-                        parsed = name_bytes.decode('utf-16-le').split('\x00')[0]
-                    else:
-                        name_bytes = descriptor_bytes[name_offset:name_offset + 260]
-                        parsed = name_bytes.decode('latin-1').split('\x00')[0]
-                    if parsed:
-                        subject = os.path.splitext(parsed)[0]
-                        print(f"[DropZone] Classic Outlook subject (from descriptor): {subject!r}", flush=True)
+                    subjects = [
+                        os.path.splitext(name)[0]
+                        for name in DropZone._parse_descriptor_filenames(descriptor_bytes, is_unicode)
+                    ]
+                    if subjects:
+                        print(f"[DropZone] Classic Outlook subject(s) (from descriptor): {subjects}", flush=True)
                 except Exception as e:
-                    print(f"[DropZone] Could not parse descriptor for subject: {e}", flush=True)
+                    print(f"[DropZone] Could not parse descriptor for subject(s): {e}", flush=True)
 
-        if not raw_id and not subject:
+        if not raw_ids and not subjects:
             print('[DropZone] Classic Outlook: no entry ID or subject — cannot retrieve email', flush=True)
             return []
 
+        # At least one email is identified either by ID or by subject alone —
+        # process every one found by either signal, matching them by position.
+        item_count = max(len(raw_ids), len(subjects))
         tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
         _dropzone_tmp_dirs.append(tmp_dir)
-        return DropZone._mapi_save_email(raw_id, subject, tmp_dir, 0)
+
+        files: list = []
+        for idx in range(item_count):
+            raw_id = raw_ids[idx] if idx < len(raw_ids) else ''
+            subject = subjects[idx] if idx < len(subjects) else ''
+            results = DropZone._mapi_save_email(raw_id, subject, tmp_dir, idx)
+            files.extend(results)
+
+        print(f"[DropZone] Classic Outlook: retrieved {len(files)} file(s) from {item_count} email(s)", flush=True)
+        return files
+
+    # Fixed-size fields of a FILEDESCRIPTOR(W) struct before cFileName (dwFlags,
+    # clsid, sizel, pointl, dwFileAttributes, 3x FILETIME, nFileSizeHigh/Low).
+    _FILEDESCRIPTOR_HEADER_SIZE = 72
+    _FILEDESCRIPTORW_NAME_SIZE = 520   # WCHAR[260]
+    _FILEDESCRIPTORA_NAME_SIZE = 260   # CHAR[260]
+
+    @classmethod
+    def _parse_descriptor_filenames(cls, descriptor_bytes: bytes, is_unicode: bool) -> list:
+        """Parse every filename out of a FILEGROUPDESCRIPTOR(W) blob.
+
+        The struct is a 4-byte count followed by `count` fixed-size
+        FILEDESCRIPTOR(W) entries — this walks all of them, not just the
+        first, so callers know the true size of a multi-file virtual drop
+        even though FileContents (below) can only ever retrieve entry 0.
+        """
+        name_size = cls._FILEDESCRIPTORW_NAME_SIZE if is_unicode else cls._FILEDESCRIPTORA_NAME_SIZE
+        entry_size = cls._FILEDESCRIPTOR_HEADER_SIZE + name_size
+        encoding = 'utf-16-le' if is_unicode else 'latin-1'
+
+        filenames = []
+        try:
+            count = struct.unpack_from('<I', descriptor_bytes, 0)[0]
+        except struct.error as e:
+            print(f"[DropZone] Could not read descriptor count: {e}", flush=True)
+            return filenames
+
+        for i in range(count):
+            name_offset = 4 + i * entry_size + cls._FILEDESCRIPTOR_HEADER_SIZE
+            name_bytes = descriptor_bytes[name_offset:name_offset + name_size]
+            if len(name_bytes) < name_size:
+                print(f"[DropZone] descriptor entry {i} truncated — stopping at {len(filenames)}", flush=True)
+                break
+            try:
+                parsed = name_bytes.decode(encoding).split('\x00')[0]
+            except UnicodeDecodeError as e:
+                print(f"[DropZone] Could not decode descriptor entry {i} name: {e}", flush=True)
+                continue
+            if parsed:
+                filenames.append(parsed)
+        return filenames
 
     @staticmethod
     def _handle_outlook_drop(mime_data, descriptor_fmt: str) -> list:
-        """Save the Outlook virtual-file bytes to a temp file, then extract attachments."""
+        """Save the Outlook virtual-file bytes to a temp file, then extract attachments.
+
+        CFSTR_FILECONTENTS (FileContents) is retrieved through Qt's QMimeData,
+        which has no way to request a specific FORMATETC.lindex — it always
+        returns the stream for entry 0 of the FILEGROUPDESCRIPTOR. When the
+        descriptor lists more than one file, entries 1..N-1's *content* is
+        genuinely unreachable through this API; the user is warned explicitly
+        instead of silently emitting only the first file as if the whole
+        drop had succeeded.
+        """
         try:
             descriptor_bytes = bytes(mime_data.data(descriptor_fmt))
-            # CFSTR_FILECONTENTS has no W variant per Windows OLE spec — always 'FileContents'
             content_bytes = bytes(mime_data.data('FileContents'))
         except Exception as e:
             print(f"[DropZone] Could not read Outlook mime data: {e}", flush=True)
@@ -605,25 +667,27 @@ class DropZone(QFrame):
             )
             return []
 
-        # Parse FILEGROUPDESCRIPTOR(W): 4-byte count, then FILEDESCRIPTOR structs.
         is_unicode = descriptor_fmt.upper().endswith('W')
-        filename = 'email.eml'
-        try:
-            count = struct.unpack_from('<I', descriptor_bytes, 0)[0]
-            print(f"[DropZone] descriptor count={count}, is_unicode={is_unicode}", flush=True)
-            if count > 0:
-                name_offset = 4 + 72
-                if is_unicode:
-                    name_bytes = descriptor_bytes[name_offset:name_offset + 520]
-                    parsed = name_bytes.decode('utf-16-le').split('\x00')[0]
-                else:
-                    name_bytes = descriptor_bytes[name_offset:name_offset + 260]
-                    parsed = name_bytes.decode('latin-1').split('\x00')[0]
-                if parsed:
-                    filename = parsed
-                    print(f"[DropZone] Parsed filename: {filename}", flush=True)
-        except Exception as e:
-            print(f"[DropZone] Could not parse descriptor: {e}", flush=True)
+        filenames = DropZone._parse_descriptor_filenames(descriptor_bytes, is_unicode)
+        filename = filenames[0] if filenames else 'email.eml'
+        print(
+            f"[DropZone] descriptor lists {len(filenames)} file(s): {filenames}; "
+            f"only entry 0 ({filename!r}) is retrievable via this drop path",
+            flush=True,
+        )
+
+        if len(filenames) > 1:
+            from PyQt6.QtWidgets import QMessageBox
+            missed = ', '.join(filenames[1:])
+            QMessageBox.warning(
+                None, 'Only First File Retrieved',
+                f"This drop contains {len(filenames)} files, but only "
+                f"'{filename}' could be retrieved.\n\n"
+                f"Not retrieved: {missed}\n\n"
+                'This is a Windows drag-and-drop limitation for virtual '
+                '(non-file) sources — drag the remaining files individually, '
+                'or save them to disk first and drop the saved files.'
+            )
 
         tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
         _dropzone_tmp_dirs.append(tmp_dir)
