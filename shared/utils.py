@@ -10,6 +10,7 @@ import os
 import platform
 import shutil
 import re
+import stat
 import subprocess
 import tempfile
 from collections import OrderedDict
@@ -22,17 +23,49 @@ logger = logging.getLogger(__name__)
 def atomic_write_json(path: Path, data: Any) -> None:
     """Write data as JSON to path atomically.
 
-    Writes to a temp file in the same directory, then os.replace()s it into
-    place (atomic on both POSIX and Windows). A process kill, crash, or
-    interrupted write on a flaky path leaves the original file untouched
-    instead of truncated/empty — plain `open(path, 'w')` truncates the file
-    the instant it's opened, before any new content is written.
+    Writes to a temp file in the same directory, fsyncs it, then
+    os.replace()s it into place. This gives torn-write visibility
+    atomicity — no reader ever observes a half-written file — and a
+    process kill or crash between the write and the rename leaves the
+    original file untouched instead of truncated/empty, unlike plain
+    `open(path, 'w')` which truncates the file the instant it's opened,
+    before any new content is written.
+
+    Two caveats worth being explicit about:
+    - `os.replace()`'s atomicity is best-effort, not an absolute
+      guarantee, on the kind of target this is often used for (a network
+      share): older SMB/exFAT-backed NAS exports don't uniformly support
+      atomic replace-over-existing-file semantics, and on Windows a
+      sharing violation from AV/backup/indexing software holding the
+      destination open can make the replace itself fail (raised as
+      OSError — callers already handle that).
+    - This only makes a single write internally consistent. It adds no
+      locking or versioning across writers, so two app instances (or an
+      instance racing the remote sync path) can still last-writer-wins at
+      the load-mutate-save level. That's a pre-existing limitation, not
+      something atomic writes solve.
     """
     path = Path(path)
     fd, tmp_path = tempfile.mkstemp(dir=path.parent, prefix=f'.{path.name}.', suffix='.tmp')
     try:
+        # mkstemp() hardcodes mode 0o600 on POSIX regardless of the process
+        # umask, which would silently narrow permissions on every save once
+        # os.replace() swaps the temp file's inode in. Restore the original
+        # file's mode if it exists (preserving whatever was already set),
+        # otherwise fall back to what a plain open(path, 'w') would have
+        # produced under the current umask.
+        try:
+            desired_mode = stat.S_IMODE(os.stat(path).st_mode)
+        except OSError:
+            current_umask = os.umask(0)
+            os.umask(current_umask)
+            desired_mode = 0o666 & ~current_umask
+        os.chmod(tmp_path, desired_mode)
+
         with os.fdopen(fd, 'w') as f:
             json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp_path, path)
     finally:
         # os.replace() already removed tmp_path on success; only cleans up
