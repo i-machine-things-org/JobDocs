@@ -291,15 +291,37 @@ class AppContext:
                 suffix = parts[1].strip('/')
 
                 if '{po_number}' in prefix:
-                    po_parts = prefix.split('{po_number}')
-                    pre_po = po_parts[0].strip('/')
-                    post_po = po_parts[1].strip('/') if len(po_parts) > 1 else ''
-                    base_path = os.path.join(customer_path, pre_po) if pre_po else customer_path
+                    # {po_number} may share a path segment with literal text
+                    # (e.g. "job documents/PO-{po_number}"), so the text before
+                    # it can be part of a directory name, not a full directory
+                    # of its own. Split on the last '/' before the placeholder
+                    # to separate the real directory path from the per-folder
+                    # name prefix/suffix that must be matched against each
+                    # PO directory's name rather than joined onto base_path.
+                    po_idx = prefix.index('{po_number}')
+                    dir_part = prefix[:po_idx]
+                    suffix_part = prefix[po_idx + len('{po_number}'):]
+
+                    if '/' in dir_part:
+                        base_dir_part, po_name_prefix = dir_part.rsplit('/', 1)
+                    else:
+                        base_dir_part, po_name_prefix = '', dir_part
+
+                    if '/' in suffix_part:
+                        po_name_suffix, post_po = suffix_part.split('/', 1)
+                    else:
+                        po_name_suffix, post_po = suffix_part, ''
+
+                    base_path = os.path.join(customer_path, base_dir_part) if base_dir_part else customer_path
                     if os.path.exists(base_path):
                         try:
                             for po_dir in sorted(os.listdir(base_path)):
                                 po_path = os.path.join(base_path, po_dir)
                                 if not os.path.isdir(po_path):
+                                    continue
+                                if po_name_prefix and not po_dir.startswith(po_name_prefix):
+                                    continue
+                                if po_name_suffix and not po_dir.endswith(po_name_suffix):
                                     continue
                                 sub_path = os.path.join(po_path, post_po) if post_po else po_path
                                 if not os.path.exists(sub_path):
