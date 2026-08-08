@@ -8,6 +8,7 @@
 - **Avoid broad `except Exception`.** Catch specific exceptions (`OSError`, `AttributeError`, `shutil.Error`, etc.) so unexpected errors aren't silently masked.
 - **Don't leave silent `except Exception: pass`.** Log at debug/warning level so failures stay traceable without breaking the fallback behavior.
 - **Drop f-string prefixes with no placeholders.** Ruff flags these (F541); use plain string literals instead.
+- **A hardcoded `if entry_type == 'x':` special-case silently drops every other type.** `add_to_history()` only had a `'job'` branch though the plugin template documents it as a generic mechanism; quote entries vanished with no error. Prefer a generic `history[f'recent_{entry_type}s']` keying over enumerating known types, or add an explicit `else: log a warning`.
 - **Escape backslashes in non-raw docstrings.** A bare backslash (e.g. `runtime\python.exe`) is an invalid escape sequence.
 - **Grep-based dead-code checks give false positives on dynamic dispatch and Qt overrides.** `main.py`'s `populate_customer_lists()` calls `populate_*_customer_list` methods via `dir()`/`getattr()` naming convention, not a literal call site; `dragEnterEvent`/`closeEvent`-style Qt overrides are invoked by the framework, not Python source. Verify a method has no *reachable* caller (including reflection/framework dispatch) before removing it as dead code.
 

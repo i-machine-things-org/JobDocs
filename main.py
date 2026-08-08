@@ -1491,27 +1491,34 @@ near-instant even across thousands of jobs.</p>""",
         return sorted(customers)
 
     def add_to_history(self, entry_type: str, data: Dict[str, Any]):
-        """Add an entry to history"""
-        if entry_type == 'job':
-            recent_jobs = self.history.get('recent_jobs', [])
+        """Add an entry to history.
 
-            # Add timestamp
-            data['date'] = datetime.now().isoformat()
+        Generic across entry types: recorded under history['recent_{entry_type}s']
+        (e.g. 'job' -> 'recent_jobs', 'quote' -> 'recent_quotes'), matching what
+        modules/_template/module.py's plugin-authoring example documents. Capped
+        at the last 100 entries per type, with a timestamp and customer-history
+        update.
+        """
+        history_key = f'recent_{entry_type}s'
+        recent_entries = self.history.get(history_key, [])
 
-            # Add to front of list
-            recent_jobs.insert(0, data)
+        # Add timestamp
+        data['date'] = datetime.now().isoformat()
 
-            # Keep only last 100 entries
-            self.history['recent_jobs'] = recent_jobs[:100]
+        # Add to front of list
+        recent_entries.insert(0, data)
 
-            # Update customer history
-            customer = data.get('customer', '')
-            if customer:
-                if 'customers' not in self.history:
-                    self.history['customers'] = {}
-                self.history['customers'][customer] = datetime.now().isoformat()
+        # Keep only last 100 entries
+        self.history[history_key] = recent_entries[:100]
 
-            self.save_history()
+        # Update customer history
+        customer = data.get('customer', '')
+        if customer:
+            if 'customers' not in self.history:
+                self.history['customers'] = {}
+            self.history['customers'][customer] = datetime.now().isoformat()
+
+        self.save_history()
 
     def populate_customer_lists(self):
         """Refresh customer lists in all *already-built* modules (called after
