@@ -35,6 +35,7 @@
 - **Persist settings through the real settings store, not a dialog-local copy.** Writing to `self.settings` inside a dialog is lost on Cancel if that object is a local copy rather than the live settings store.
 - **Escape untrusted strings before interpolating into RichText labels.** A crafted version string could inject HTML into a `QLabel`; use `html.escape()`.
 - **Keep a live reference to non-modal dialogs.** Store on a longer-lived owner (e.g. `window._dialog = dlg`) and clear it on `finished`, or the dialog is garbage-collected and disappears immediately.
+- **A mode flag (e.g. `readonly_mode`) only enforces anything once it's on `AppContext`, not just `main.py`.** Skipping module *loading* isn't a write guarantee — audit every still-loaded module's write paths and gate each on `app_context.readonly_mode`.
 
 ## Print & Rendering
 
@@ -62,6 +63,7 @@
 - **Manual recovery commands must use `sys.executable`, quoted.** Bare `pip` may resolve to the wrong interpreter; unquoted paths with spaces break copy-pasted commands.
 - **Never run a built Inno Setup installer against a real machine's default paths to test it.** `[Setup] AppId` keys the Uninstall/Previous-Data registry entries regardless of `/DIR=`; a throwaway test install can still clobber a real install's registry data or PATH. Test with `iscc` syntax-compile only, or in an isolated VM/container.
 - **Inno Setup: use `WizardIsTaskSelected`/task checkboxes, not `[Types]`+`TypesCombo`, for a simple binary install-variant choice.** `WizardForm.TypesComboChange` isn't a scriptable identifier in current Inno Setup; a Tasks-section checkbox plus `GetPreviousData`/`RegisterPreviousData` (not a global `PreviousDataKey`) is simpler and remembers the choice across updates.
+- **Pre-select a `[Tasks]` entry via `WizardSelectTasks('name')`, never by matching its Description text.** Description strings get duplicated across `[Tasks]` and `[Code]`; if they drift, the match silently fails. `WizardSelectTasks`/`WizardIsTaskSelected` key off the stable `Name`.
 
 ## CI / GitHub Actions
 
