@@ -58,6 +58,10 @@ class BulkCreateDialog(QDialog):
         self.bulk_table = inner.bulk_table
         self.bulk_status_label = inner.bulk_status_label
         self.bulk_progress = inner.bulk_progress
+        self.import_btn = inner.import_btn
+        self.clear_bulk_btn = inner.clear_bulk_btn
+        self.validate_btn = inner.validate_btn
+        self.create_bulk_btn = inner.create_bulk_btn
 
         self.bulk_table.horizontalHeader().setStretchLastSection(True)
 
@@ -65,6 +69,24 @@ class BulkCreateDialog(QDialog):
         inner.clear_bulk_btn.clicked.connect(lambda: self.bulk_text.clear())
         inner.validate_btn.clicked.connect(self.validate_bulk_data)
         inner.create_bulk_btn.clicked.connect(self.create_bulk_jobs)
+
+        # Guards the in-flight create_bulk_jobs() loop, which pumps the event
+        # queue via QApplication.processEvents() instead of a QThread. Without
+        # this, closing the dialog (or Esc) mid-loop lets Qt process the close
+        # event, and the loop's subsequent widget accesses then run against a
+        # disposed dialog ("wrapped C/C++ object has been deleted").
+        self._bulk_create_in_progress = False
+
+    def closeEvent(self, event):
+        if self._bulk_create_in_progress:
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def reject(self):
+        if self._bulk_create_in_progress:
+            return
+        super().reject()
 
     # ==================== CSV Import ====================
 
@@ -280,24 +302,36 @@ class BulkCreateDialog(QDialog):
         created = 0
         skipped = 0
 
-        for i, job in enumerate(jobs):
-            customer = job['customer']
-            if customer not in existing_customers and customer not in new_customers:
-                new_customers.add(customer)
+        controls = [
+            self.import_btn, self.clear_bulk_btn, self.validate_btn,
+            self.create_bulk_btn, self.bulk_itar_check, self.bulk_text,
+        ]
+        self._bulk_create_in_progress = True
+        for control in controls:
+            control.setEnabled(False)
+        try:
+            for i, job in enumerate(jobs):
+                customer = job['customer']
+                if customer not in existing_customers and customer not in new_customers:
+                    new_customers.add(customer)
 
-            if self.job_exists(customer, job['job_number'], is_itar):
-                skipped += 1
-            else:
-                if job_module.create_single_job(
-                    customer, job['job_number'],
-                    job.get('po_number', ''), job.get('po_line', ''),
-                    job['description'], job['drawings'],
-                    job.get('revision', ''), is_itar, []
-                ):
-                    created += 1
+                if self.job_exists(customer, job['job_number'], is_itar):
+                    skipped += 1
+                else:
+                    if job_module.create_single_job(
+                        customer, job['job_number'],
+                        job.get('po_number', ''), job.get('po_line', ''),
+                        job['description'], job['drawings'],
+                        job.get('revision', ''), is_itar, []
+                    ):
+                        created += 1
 
-            self.bulk_progress.setValue(i + 1)
-            QApplication.processEvents()
+                self.bulk_progress.setValue(i + 1)
+                QApplication.processEvents()
+        finally:
+            self._bulk_create_in_progress = False
+            for control in controls:
+                control.setEnabled(True)
 
         self.bulk_progress.hide()
         msg = f"Created {created}/{len(jobs)} jobs"
