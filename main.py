@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import (
 
 from core.module_loader import ModuleLoader
 from core.app_context import AppContext
-from shared.utils import get_config_dir, get_os_text
+from shared.utils import atomic_write_json, get_config_dir, get_os_text
 from shared.remote_sync import RemoteSyncManager
 
 logger = logging.getLogger(__name__)
@@ -729,9 +729,8 @@ class JobDocsMainWindow(QMainWindow):
                 merged.update(remote_settings)
                 # Save to local to keep in sync
                 try:
-                    with open(self.settings_file, 'w') as f:
-                        json.dump(merged, f, indent=2)
-                except IOError:
+                    atomic_write_json(self.settings_file, merged)
+                except OSError:
                     pass
                 return merged
 
@@ -747,14 +746,13 @@ class JobDocsMainWindow(QMainWindow):
         """Save settings to file and sync to remote server if configured"""
         try:
             # Save locally first
-            with open(self.settings_file, 'w') as f:
-                json.dump(self.settings, f, indent=2)
+            atomic_write_json(self.settings_file, self.settings)
 
             # Sync to remote if configured
             if self.remote_sync.is_enabled():
                 self.remote_sync.save_json_to_remote('settings.json', self.settings)
 
-        except IOError as e:
+        except OSError as e:
             self.show_error_dialog("Error", f"Failed to save settings: {e}")
 
     def load_history(self) -> Dict[str, Any]:
@@ -765,9 +763,8 @@ class JobDocsMainWindow(QMainWindow):
             if remote_history:
                 # Save to local to keep in sync
                 try:
-                    with open(self.history_file, 'w') as f:
-                        json.dump(remote_history, f, indent=2)
-                except IOError:
+                    atomic_write_json(self.history_file, remote_history)
+                except OSError:
                     pass
                 return remote_history
 
@@ -785,14 +782,13 @@ class JobDocsMainWindow(QMainWindow):
         """Save history to file and sync to remote server if configured"""
         try:
             # Save locally first
-            with open(self.history_file, 'w') as f:
-                json.dump(self.history, f, indent=2)
+            atomic_write_json(self.history_file, self.history)
 
             # Sync to remote if configured
             if self.remote_sync.is_enabled():
                 self.remote_sync.save_json_to_remote('history.json', self.history)
 
-        except IOError as e:
+        except OSError as e:
             self.show_error_dialog("Error", f"Failed to save history: {e}")
 
     # ==================== Window Icon ====================
