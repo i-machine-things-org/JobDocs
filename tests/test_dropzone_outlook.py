@@ -187,3 +187,157 @@ class TestHandleClassicOutlookDropMultiSelect:
     def test_no_id_or_subject_returns_empty(self, qapp):
         mime = _FakeMime({})
         assert DropZone._handle_classic_outlook_drop(mime) == []
+
+    def test_warns_by_name_on_partial_failure(self, qapp, monkeypatch):
+        """One of three selected emails fails to retrieve — the user must be
+        told which one, not just get a silently-shorter result (review finding 1:
+        mirrors the FileGroupDescriptor path's per-item warning)."""
+        csv_text = "ID-AAAA\r\nID-BBBB\r\nID-CCCC\r\n"
+        plain_text = (
+            "From\tSubject\tReceived\tSize\tCategories\t\n"
+            "Alice\tFirst email\t2026-01-01\t1KB\t\t\n"
+            "Bob\tSecond email\t2026-01-02\t2KB\t\t\n"
+            "Carol\tThird email\t2026-01-03\t3KB\t\t\n"
+        )
+        mime = _FakeMime({
+            'application/x-qt-windows-mime;value="Csv"': csv_text.encode('utf-16-le'),
+            'text/plain': plain_text.encode('utf-8'),
+        })
+
+        def _fake_mapi_save_email(raw_id, subject, tmp_dir, idx=0):
+            if idx == 1:
+                return []  # simulate a failed lookup for the second email
+            return [f"{tmp_dir}/email_{idx}.msg"]
+
+        monkeypatch.setattr(DropZone, '_mapi_save_email', staticmethod(_fake_mapi_save_email))
+
+        warnings = []
+        monkeypatch.setattr(
+            QMessageBox, 'warning',
+            lambda *a, **k: warnings.append(a) or QMessageBox.StandardButton.Ok,
+        )
+
+        files = DropZone._handle_classic_outlook_drop(mime, parent="fake-parent")
+
+        assert len(files) == 2  # only the two successful emails
+        assert len(warnings) == 1
+        parent_arg = warnings[0][0]
+        warning_text = str(warnings[0])
+        assert parent_arg == "fake-parent"  # parented, not None (review finding 3)
+        assert 'Second email' in warning_text
+
+    def test_no_warning_when_all_items_succeed(self, qapp, monkeypatch):
+        csv_text = "ID-AAAA\r\nID-BBBB\r\n"
+        plain_text = (
+            "From\tSubject\tReceived\tSize\tCategories\t\n"
+            "Alice\tFirst email\t2026-01-01\t1KB\t\t\n"
+            "Bob\tSecond email\t2026-01-02\t2KB\t\t\n"
+        )
+        mime = _FakeMime({
+            'application/x-qt-windows-mime;value="Csv"': csv_text.encode('utf-16-le'),
+            'text/plain': plain_text.encode('utf-8'),
+        })
+        monkeypatch.setattr(
+            DropZone, '_mapi_save_email',
+            staticmethod(lambda raw_id, subject, tmp_dir, idx=0: [f'{tmp_dir}/e_{idx}.msg']),
+        )
+        warnings = []
+        monkeypatch.setattr(
+            QMessageBox, 'warning',
+            lambda *a, **k: warnings.append(a) or QMessageBox.StandardButton.Ok,
+        )
+
+        files = DropZone._handle_classic_outlook_drop(mime)
+
+        assert len(files) == 2
+        assert warnings == []
+
+    def test_no_double_warning_when_all_items_fail(self, qapp, monkeypatch):
+        """Total failure is already reported by dropEvent()'s own 'Email Not
+        Retrieved' check — this function must not also pop its own dialog."""
+        csv_text = "ID-AAAA\r\nID-BBBB\r\n"
+        plain_text = (
+            "From\tSubject\tReceived\tSize\tCategories\t\n"
+            "Alice\tFirst email\t2026-01-01\t1KB\t\t\n"
+            "Bob\tSecond email\t2026-01-02\t2KB\t\t\n"
+        )
+        mime = _FakeMime({
+            'application/x-qt-windows-mime;value="Csv"': csv_text.encode('utf-16-le'),
+            'text/plain': plain_text.encode('utf-8'),
+        })
+        monkeypatch.setattr(
+            DropZone, '_mapi_save_email',
+            staticmethod(lambda raw_id, subject, tmp_dir, idx=0: []),
+        )
+        warnings = []
+        monkeypatch.setattr(
+            QMessageBox, 'warning',
+            lambda *a, **k: warnings.append(a) or QMessageBox.StandardButton.Ok,
+        )
+
+        files = DropZone._handle_classic_outlook_drop(mime)
+
+        assert files == []
+        assert warnings == []
+
+
+class TestClassicOutlookIdSubjectLengthMismatch:
+    """Review finding 2: raw_ids and subjects are two independently-filtered
+    parses zipped purely by index. A length mismatch must not be silently
+    zipped (which would mis-pair IDs with the wrong subject and risk the MAPI
+    subject-search fallback retrieving the wrong email) — subjects must be
+    discarded instead, falling back to ID-only retrieval."""
+
+    def test_mismatched_lengths_discard_subjects_not_mispair(self, qapp, monkeypatch):
+        # 3 entry IDs but only 2 subject rows (e.g. a blank-sender row got
+        # filtered out of the text/plain parse but not out of the Csv parse).
+        csv_text = "ID-AAAA\r\nID-BBBB\r\nID-CCCC\r\n"
+        plain_text = (
+            "From\tSubject\tReceived\tSize\tCategories\t\n"
+            "Alice\tFirst email\t2026-01-01\t1KB\t\t\n"
+            "Carol\tThird email\t2026-01-03\t3KB\t\t\n"
+        )
+        mime = _FakeMime({
+            'application/x-qt-windows-mime;value="Csv"': csv_text.encode('utf-16-le'),
+            'text/plain': plain_text.encode('utf-8'),
+        })
+
+        calls = []
+
+        def _fake_mapi_save_email(raw_id, subject, tmp_dir, idx=0):
+            calls.append((raw_id, subject, idx))
+            return [f"{tmp_dir}/email_{idx}.msg"]
+
+        monkeypatch.setattr(DropZone, '_mapi_save_email', staticmethod(_fake_mapi_save_email))
+
+        files = DropZone._handle_classic_outlook_drop(mime)
+
+        # All 3 IDs are still processed (raw_id is authoritative)...
+        assert [c[0] for c in calls] == ['ID-AAAA', 'ID-BBBB', 'ID-CCCC']
+        # ...but NOT paired with the (unreliable) subjects list — every
+        # subject must be empty rather than silently mis-paired.
+        assert [c[1] for c in calls] == ['', '', '']
+        assert len(files) == 3
+
+    def test_matched_lengths_still_pair_normally(self, qapp, monkeypatch):
+        csv_text = "ID-AAAA\r\nID-BBBB\r\n"
+        plain_text = (
+            "From\tSubject\tReceived\tSize\tCategories\t\n"
+            "Alice\tFirst email\t2026-01-01\t1KB\t\t\n"
+            "Bob\tSecond email\t2026-01-02\t2KB\t\t\n"
+        )
+        mime = _FakeMime({
+            'application/x-qt-windows-mime;value="Csv"': csv_text.encode('utf-16-le'),
+            'text/plain': plain_text.encode('utf-8'),
+        })
+
+        calls = []
+        monkeypatch.setattr(
+            DropZone, '_mapi_save_email',
+            staticmethod(lambda raw_id, subject, tmp_dir, idx=0: calls.append((raw_id, subject, idx)) or ['x.msg']),
+        )
+
+        DropZone._handle_classic_outlook_drop(mime)
+
+        assert [c[0] for c in calls] == ['ID-AAAA', 'ID-BBBB']
+        assert [c[1] for c in calls] == ['First email', 'Second email']
