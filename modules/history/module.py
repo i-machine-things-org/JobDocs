@@ -87,7 +87,7 @@ class HistoryModule(BaseModule):
             _kind, data = entry
             try:
                 return datetime.fromisoformat(data.get('date', ''))
-            except ValueError:
+            except (ValueError, TypeError):
                 return datetime.min
 
         entries.sort(key=_sort_key, reverse=True)
