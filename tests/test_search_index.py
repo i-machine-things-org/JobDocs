@@ -175,3 +175,94 @@ class TestIsFullyCoveredDoesNotWalk:
 
         _assert_no_recursive_walk_needed(monkeypatch)
         assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+
+class TestAddJobAndAddQuote:
+    """Regression coverage for review finding 1 (#298): a job/quote created
+    mid-session must be searchable immediately, not just after the next full
+    index build. is_fully_covered() only proves a customer dir was indexed
+    *once*, not that it's fresh, so search_jobs()/search_quotes() finding the
+    new row directly is what actually closes the gap — add_job()/add_quote()
+    are what job/quote creation call to make that happen.
+    """
+
+    def test_add_job_makes_new_job_immediately_searchable(self, tmp_path):
+        index = _make_index(tmp_path)
+        assert index.search_jobs('99999') == []
+
+        index.add_job('', 'Acme', '99999', 'New Widget', ['DWG-A'], 'C:/Acme/99999_NewWidget')
+
+        results = index.search_jobs('99999')
+        assert len(results) == 1
+        assert results[0]['customer'] == 'Acme'
+        assert results[0]['job_number'] == '99999'
+        assert results[0]['path'] == 'C:/Acme/99999_NewWidget'
+
+    def test_add_job_reproduces_and_fixes_mid_session_scenario(self, tmp_path):
+        """The exact scenario from the review finding: a customer directory
+        is fully indexed once, then a new job is created for that same
+        customer later in the same session (no second background index
+        run). Before add_job() was wired into job creation, search_jobs()
+        would return 0 results for the new job's number and (in
+        modules/search/module.py) is_fully_covered() would then
+        incorrectly report the search as trustworthy, since it only checks
+        that 'Acme' was indexed at some point — never that a new job
+        folder was added afterwards.
+        """
+        cf_root = tmp_path / 'customer_files'
+        (cf_root / 'Acme' / '12345_Bracket').mkdir(parents=True)
+        ctx = _make_app_context()
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+
+        # Sanity check: the pre-existing job is indexed, and the customer
+        # dir is (correctly) reported as fully covered at this point.
+        assert index.search_jobs('12345') != []
+        assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+        # A new job for the same, already-indexed customer is created mid-
+        # session — mirroring create_single_job() calling add_job() right
+        # after making the folder on disk, without waiting for a re-index.
+        (cf_root / 'Acme' / '99999_NewWidget').mkdir(parents=True)
+        index.add_job('', 'Acme', '99999', 'New Widget', [], str(cf_root / 'Acme' / '99999_NewWidget'))
+
+        # The new job is found directly via search_jobs() now — the search
+        # module never even reaches the is_fully_covered() 0-result check
+        # for this query, so the staleness in is_fully_covered() itself no
+        # longer matters for this case.
+        results = index.search_jobs('99999')
+        assert len(results) == 1
+        assert results[0]['job_number'] == '99999'
+
+    def test_add_job_upserts_on_reindex(self, tmp_path):
+        # A later full re-index shouldn't produce a duplicate row for a job
+        # that was already added incrementally at the same path.
+        index = _make_index(tmp_path)
+        index.add_job('', 'Acme', '99999', 'New Widget', [], 'C:/Acme/99999_NewWidget', mtime=1.0)
+        index.add_job('', 'Acme', '99999', 'New Widget', [], 'C:/Acme/99999_NewWidget', mtime=2.0)
+        results = index.search_jobs('99999')
+        assert len(results) == 1
+
+    def test_add_job_query_failure_does_not_raise(self, tmp_path):
+        # Creating a job must never fail because the index write failed —
+        # add_job() logs and swallows sqlite3.Error rather than propagating it.
+        index = _make_index(tmp_path)
+        with sqlite3.connect(str(index._db_path)) as conn:
+            conn.execute("DROP TABLE jobs")
+        index.add_job('', 'Acme', '99999', 'New Widget', [], 'C:/Acme/99999_NewWidget')  # must not raise
+
+    def test_add_quote_makes_new_quote_immediately_searchable(self, tmp_path):
+        index = _make_index(tmp_path)
+        assert index.search_quotes('55555') == []
+
+        index.add_quote('', 'Acme', '55555_NewQuote', 'C:/Acme/Quotes/55555_NewQuote')
+
+        results = index.search_quotes('55555')
+        assert len(results) == 1
+        assert results[0]['job_number'] == '55555_NewQuote'
+
+    def test_add_quote_query_failure_does_not_raise(self, tmp_path):
+        index = _make_index(tmp_path)
+        with sqlite3.connect(str(index._db_path)) as conn:
+            conn.execute("DROP TABLE quotes")
+        index.add_quote('', 'Acme', '55555_NewQuote', 'C:/Acme/Quotes/55555_NewQuote')  # must not raise

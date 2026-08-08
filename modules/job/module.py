@@ -493,6 +493,19 @@ class JobModule(BaseModule):
             })
             self.app_context.save_history()
 
+            # Make the new job searchable this session immediately — the
+            # background indexer only runs once per app launch, so without
+            # this a job created mid-session would be invisible to search
+            # until the app restarts (see is_fully_covered() in
+            # core/search_index.py for why a zero-result search can't be
+            # trusted to fall back to a filesystem walk otherwise).
+            search_index = self.app_context.get_search_index()
+            if search_index is not None:
+                search_index.add_job(
+                    'ITAR' if is_itar else '', customer, job_number,
+                    description, drawings, str(job_path),
+                )
+
             self.log_message(f"Created: {job_path}")
             return True
 
