@@ -228,6 +228,16 @@ Beta Inc, 54321, PO-2025-002, Custom Part</string>
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="bulk_cancel_btn">
+       <property name="text">
+        <string>Cancel</string>
+       </property>
+       <property name="visible">
+        <bool>false</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QLabel" name="bulk_status_label">
        <property name="text">
         <string/>
