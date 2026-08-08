@@ -32,15 +32,21 @@ class TestFindJobFoldersWithPoNumber:
 
         assert sorted(name for name, _ in jobs) == ['12345_Bracket', '67890_Shaft']
 
-    def test_non_po_directories_are_excluded_by_name_prefix(self, tmp_path):
+    def test_legacy_job_folders_without_a_po_wrapper_are_still_found(self, tmp_path):
+        # Regression test for #295's actual root cause: once PO folders were
+        # introduced, older job folders that were never moved under a PO
+        # folder stopped being found at all, because every entry under the
+        # base dir was assumed to be a PO container. A folder that doesn't
+        # match the PO naming convention must be treated as a job folder in
+        # its own right, not silently skipped.
         customer_path = tmp_path / 'Acme'
-        (customer_path / 'job documents' / 'PO-1001' / '12345_Bracket').mkdir(parents=True)
-        (customer_path / 'job documents' / 'NotAPO' / '99999_ShouldBeExcluded').mkdir(parents=True)
+        (customer_path / 'job documents' / '11111_LegacyJob').mkdir(parents=True)
+        (customer_path / 'job documents' / 'PO-1001' / '22222_NewJob').mkdir(parents=True)
 
         ctx = _make_context('{customer}/job documents/PO-{po_number}/{job_folder}')
         jobs = ctx.find_job_folders(str(customer_path))
 
-        assert [name for name, _ in jobs] == ['12345_Bracket']
+        assert sorted(name for name, _ in jobs) == ['11111_LegacyJob', '22222_NewJob']
 
     def test_po_number_as_its_own_path_segment_still_works(self, tmp_path):
         customer_path = tmp_path / 'Acme'

@@ -319,22 +319,39 @@ class AppContext:
                                 po_path = os.path.join(base_path, po_dir)
                                 if not os.path.isdir(po_path):
                                     continue
-                                if po_name_prefix and not po_dir.startswith(po_name_prefix):
-                                    continue
-                                if po_name_suffix and not po_dir.endswith(po_name_suffix):
-                                    continue
-                                sub_path = os.path.join(po_path, post_po) if post_po else po_path
-                                if not os.path.exists(sub_path):
-                                    continue
-                                for item in sorted(os.listdir(sub_path)):
-                                    item_path = os.path.join(sub_path, item)
-                                    if os.path.isdir(item_path):
-                                        if suffix:
-                                            expected_docs_path = os.path.join(item_path, suffix)
-                                            if os.path.exists(expected_docs_path):
-                                                jobs.append((item, expected_docs_path))
-                                        else:
-                                            jobs.append((item, item_path))
+
+                                matches_po_name = (
+                                    (not po_name_prefix or po_dir.startswith(po_name_prefix))
+                                    and (not po_name_suffix or po_dir.endswith(po_name_suffix))
+                                )
+                                handled_as_po_container = False
+                                if matches_po_name:
+                                    sub_path = os.path.join(po_path, post_po) if post_po else po_path
+                                    if os.path.exists(sub_path):
+                                        handled_as_po_container = True
+                                        for item in sorted(os.listdir(sub_path)):
+                                            item_path = os.path.join(sub_path, item)
+                                            if os.path.isdir(item_path):
+                                                if suffix:
+                                                    expected_docs_path = os.path.join(item_path, suffix)
+                                                    if os.path.exists(expected_docs_path):
+                                                        jobs.append((item, expected_docs_path))
+                                                else:
+                                                    jobs.append((item, item_path))
+
+                                if not handled_as_po_container:
+                                    # Doesn't match the PO folder's naming convention (or its
+                                    # expected sub-path is missing) — datasets that predate PO
+                                    # folders being added have job folders sitting directly here
+                                    # instead of nested one level down. Treat this entry as a job
+                                    # folder itself so it isn't silently skipped. Still just the
+                                    # two shallow os.listdir() calls above, no recursive walk.
+                                    if suffix:
+                                        expected_docs_path = os.path.join(po_path, suffix)
+                                        if os.path.exists(expected_docs_path):
+                                            jobs.append((po_dir, expected_docs_path))
+                                    else:
+                                        jobs.append((po_dir, po_path))
                         except OSError as e:
                             logger.debug("find_job_folders: OSError enumerating PO dirs: %s", e)
                             if errors is not None:
