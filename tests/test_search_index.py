@@ -192,3 +192,53 @@ class TestMigrationToV4AddsPoNumber:
         assert version == 4
         assert cf_dirs_remaining == 0  # forced re-index so po_number gets backfilled
         assert job_row == ('12345', '')
+
+    def test_v3_database_with_po_number_already_present_still_forces_reindex(self, tmp_path):
+        # Edge case: a database somehow reached user_version=3 with the
+        # po_number column already present (e.g. state reached outside the
+        # normal migration path). The "column already exists" branch must
+        # still clear cf indexed_dirs markers — otherwise customers indexed
+        # before po_number existed keep an empty value forever, since
+        # update()'s mtime precheck would skip re-scanning them.
+        db_path = tmp_path / 'search_index.db'
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript("""
+            CREATE TABLE jobs (
+                id          INTEGER PRIMARY KEY,
+                prefix      TEXT    NOT NULL DEFAULT '',
+                customer    TEXT    NOT NULL,
+                job_number  TEXT    NOT NULL DEFAULT '',
+                description TEXT    NOT NULL DEFAULT '',
+                drawings    TEXT    NOT NULL DEFAULT '',
+                po_number   TEXT    NOT NULL DEFAULT '',
+                path        TEXT    NOT NULL,
+                mtime       REAL    NOT NULL,
+                UNIQUE(prefix, path)
+            );
+            CREATE TABLE indexed_dirs (
+                dir_path    TEXT    NOT NULL,
+                prefix      TEXT    NOT NULL DEFAULT '',
+                kind        TEXT    NOT NULL DEFAULT '',
+                mtime       REAL    NOT NULL,
+                indexed_at  REAL    NOT NULL,
+                PRIMARY KEY (dir_path, prefix, kind)
+            );
+            INSERT INTO jobs (prefix, customer, job_number, description, drawings, po_number, path, mtime)
+                VALUES ('', 'Acme', '12345', 'Bracket', '', '', 'C:/Acme/12345', 1.0);
+            INSERT INTO indexed_dirs (dir_path, prefix, kind, mtime, indexed_at)
+                VALUES ('C:/Acme', '', 'cf', 1.0, 1.0);
+            PRAGMA user_version = 3;
+        """)
+        conn.commit()
+        conn.close()
+
+        SearchIndex(db_path)
+
+        conn = sqlite3.connect(str(db_path))
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        cf_dirs_remaining = conn.execute(
+            "SELECT COUNT(*) FROM indexed_dirs WHERE kind='cf'"
+        ).fetchone()[0]
+
+        assert version == 4
+        assert cf_dirs_remaining == 0  # forced re-index despite column already existing
