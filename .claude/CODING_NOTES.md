@@ -7,6 +7,7 @@
 - **Hoist helper functions out of methods.** Defining a helper (e.g. `_is_hidden`) inside a method recreates it on every call — move it to module or class level.
 - **Avoid broad `except Exception`.** Catch specific exceptions (`OSError`, `AttributeError`, `shutil.Error`, etc.) so unexpected errors aren't silently masked.
 - **Don't leave silent `except Exception: pass`.** Log at debug/warning level so failures stay traceable without breaking the fallback behavior.
+- **This repo has no logging config anywhere (no `basicConfig`/handlers).** Default root level is WARNING, so `logger.debug(...)` never fires at runtime. Use `logger.warning` (or higher) for anything that should actually be visible until real logging setup exists.
 - **Drop f-string prefixes with no placeholders.** Ruff flags these (F541); use plain string literals instead.
 - **Escape backslashes in non-raw docstrings.** A bare backslash (e.g. `runtime\python.exe`) is an invalid escape sequence.
 
@@ -17,6 +18,7 @@
 - **Wrap directory scans in `OSError`/`PermissionError` handlers.** Log per-item/per-dir and continue — never let one bad entry abort discovery (e.g. plugin dir scans).
 - **Use atomic swap for install/update operations.** Copy to a temp dir, then backup-then-rename into place, with rollback on failure, so a partial write never corrupts the live install.
 - **Gate link creation on copy success.** In "copy then link" flows, track a `*_ready` flag; only create the link if the copy succeeded or the destination already existed.
+- **Check `create_file_link`'s boolean return at every call site.** It returns `False` on failure instead of raising; ignoring it (or incrementing a success counter unconditionally) reports failed links as successful adds in a windowed GUI app with no visible console.
 
 ## ITAR / Filter Consistency (JobDocs)
 
