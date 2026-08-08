@@ -228,7 +228,8 @@ def create_file_link(source: Path, dest: Path, link_type: str = 'hard') -> bool:
         else:
             shutil.copy2(source, dest)
         return True
-    except OSError:
+    except OSError as e:
+        logger.warning("create_file_link: failed to link %s -> %s (%s): %s", source, dest, link_type, e)
         return False
 
 
