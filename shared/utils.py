@@ -4,17 +4,41 @@ Shared utility functions for JobDocs
 Common helper functions used across multiple modules.
 """
 
+import json
 import logging
 import os
 import platform
 import shutil
 import re
 import subprocess
+import tempfile
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def atomic_write_json(path: Path, data: Any) -> None:
+    """Write data as JSON to path atomically.
+
+    Writes to a temp file in the same directory, then os.replace()s it into
+    place (atomic on both POSIX and Windows). A process kill, crash, or
+    interrupted write on a flaky path leaves the original file untouched
+    instead of truncated/empty — plain `open(path, 'w')` truncates the file
+    the instant it's opened, before any new content is written.
+    """
+    path = Path(path)
+    fd, tmp_path = tempfile.mkstemp(dir=path.parent, prefix=f'.{path.name}.', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, path)
+    finally:
+        # os.replace() already removed tmp_path on success; only cleans up
+        # the leftover temp file if the write or replace failed partway.
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 def get_config_dir() -> Path:
