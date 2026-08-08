@@ -266,3 +266,151 @@ class TestAddJobAndAddQuote:
         with sqlite3.connect(str(index._db_path)) as conn:
             conn.execute("DROP TABLE quotes")
         index.add_quote('', 'Acme', '55555_NewQuote', 'C:/Acme/Quotes/55555_NewQuote')  # must not raise
+
+
+class TestSearchJobsFindsPoAndNonPoFolders:
+    """End-to-end: real AppContext.find_job_folders() feeding a real SearchIndex.update(),
+    over an on-disk tree that mixes PO-nested and non-PO job folders. Regression coverage
+    for #295 — search_jobs() must return a job regardless of whether it lives inside a PO
+    folder or directly under the customer's job-documents dir.
+    """
+
+    def test_search_jobs_returns_jobs_in_and_out_of_po_folders(self, tmp_path):
+        cf_root = tmp_path / 'customer_files'
+        customer_path = cf_root / 'Acme'
+        (customer_path / 'job documents' / '11111_LegacyBracket').mkdir(parents=True)
+        (customer_path / 'job documents' / 'PO-1001' / '22222_NewShaft').mkdir(parents=True)
+
+        ctx = _make_app_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+
+        legacy_results = index.search_jobs('11111', search_customer=False)
+        new_results = index.search_jobs('22222', search_customer=False)
+
+        assert [r['job_number'] for r in legacy_results] == ['11111']
+        assert [r['job_number'] for r in new_results] == ['22222']
+        assert legacy_results[0]['path'].endswith('11111_LegacyBracket')
+        assert new_results[0]['path'].endswith('22222_NewShaft')
+        # A job outside any PO folder has no PO number; a job nested inside
+        # "PO-1001" reports '1001' with the literal "PO-" prefix stripped.
+        assert legacy_results[0]['po_number'] == ''
+        assert new_results[0]['po_number'] == '1001'
+
+    def test_job_number_search_after_update(self, tmp_path):
+        # search_jobs by job number (not just customer) picks up both kinds of folder.
+        cf_root = tmp_path / 'customer_files'
+        customer_path = cf_root / 'Acme'
+        (customer_path / 'job documents' / '33333_Widget').mkdir(parents=True)
+        (customer_path / 'job documents' / 'PO-2002' / '44444_Gadget').mkdir(parents=True)
+
+        ctx = _make_app_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+
+        assert index.find_job_by_number('33333') is not None
+        assert index.find_job_by_number('44444') is not None
+
+
+class TestMigrationToV4AddsPoNumber:
+    def test_existing_v3_database_gains_po_number_column(self, tmp_path):
+        # Simulate a database created before the po_number column existed
+        # (schema v3: quotes table present, no po_number) and confirm opening
+        # it with the current SearchIndex adds the column, preserves existing
+        # rows (defaulting po_number to ''), and forces a re-index so already
+        # -indexed customers pick up po_number on the next update() call.
+        db_path = tmp_path / 'search_index.db'
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript("""
+            CREATE TABLE jobs (
+                id          INTEGER PRIMARY KEY,
+                prefix      TEXT    NOT NULL DEFAULT '',
+                customer    TEXT    NOT NULL,
+                job_number  TEXT    NOT NULL DEFAULT '',
+                description TEXT    NOT NULL DEFAULT '',
+                drawings    TEXT    NOT NULL DEFAULT '',
+                path        TEXT    NOT NULL,
+                mtime       REAL    NOT NULL,
+                UNIQUE(prefix, path)
+            );
+            CREATE TABLE indexed_dirs (
+                dir_path    TEXT    NOT NULL,
+                prefix      TEXT    NOT NULL DEFAULT '',
+                kind        TEXT    NOT NULL DEFAULT '',
+                mtime       REAL    NOT NULL,
+                indexed_at  REAL    NOT NULL,
+                PRIMARY KEY (dir_path, prefix, kind)
+            );
+            INSERT INTO jobs (prefix, customer, job_number, description, drawings, path, mtime)
+                VALUES ('', 'Acme', '12345', 'Bracket', '', 'C:/Acme/12345', 1.0);
+            INSERT INTO indexed_dirs (dir_path, prefix, kind, mtime, indexed_at)
+                VALUES ('C:/Acme', '', 'cf', 1.0, 1.0);
+            PRAGMA user_version = 3;
+        """)
+        conn.commit()
+        conn.close()
+
+        SearchIndex(db_path)
+
+        conn = sqlite3.connect(str(db_path))
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        cf_dirs_remaining = conn.execute(
+            "SELECT COUNT(*) FROM indexed_dirs WHERE kind='cf'"
+        ).fetchone()[0]
+        job_row = conn.execute("SELECT job_number, po_number FROM jobs").fetchone()
+
+        assert 'po_number' in cols
+        assert version == 4
+        assert cf_dirs_remaining == 0  # forced re-index so po_number gets backfilled
+        assert job_row == ('12345', '')
+
+    def test_v3_database_with_po_number_already_present_still_forces_reindex(self, tmp_path):
+        # Edge case: a database somehow reached user_version=3 with the
+        # po_number column already present (e.g. state reached outside the
+        # normal migration path). The "column already exists" branch must
+        # still clear cf indexed_dirs markers — otherwise customers indexed
+        # before po_number existed keep an empty value forever, since
+        # update()'s mtime precheck would skip re-scanning them.
+        db_path = tmp_path / 'search_index.db'
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript("""
+            CREATE TABLE jobs (
+                id          INTEGER PRIMARY KEY,
+                prefix      TEXT    NOT NULL DEFAULT '',
+                customer    TEXT    NOT NULL,
+                job_number  TEXT    NOT NULL DEFAULT '',
+                description TEXT    NOT NULL DEFAULT '',
+                drawings    TEXT    NOT NULL DEFAULT '',
+                po_number   TEXT    NOT NULL DEFAULT '',
+                path        TEXT    NOT NULL,
+                mtime       REAL    NOT NULL,
+                UNIQUE(prefix, path)
+            );
+            CREATE TABLE indexed_dirs (
+                dir_path    TEXT    NOT NULL,
+                prefix      TEXT    NOT NULL DEFAULT '',
+                kind        TEXT    NOT NULL DEFAULT '',
+                mtime       REAL    NOT NULL,
+                indexed_at  REAL    NOT NULL,
+                PRIMARY KEY (dir_path, prefix, kind)
+            );
+            INSERT INTO jobs (prefix, customer, job_number, description, drawings, po_number, path, mtime)
+                VALUES ('', 'Acme', '12345', 'Bracket', '', '', 'C:/Acme/12345', 1.0);
+            INSERT INTO indexed_dirs (dir_path, prefix, kind, mtime, indexed_at)
+                VALUES ('C:/Acme', '', 'cf', 1.0, 1.0);
+            PRAGMA user_version = 3;
+        """)
+        conn.commit()
+        conn.close()
+
+        SearchIndex(db_path)
+
+        conn = sqlite3.connect(str(db_path))
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        cf_dirs_remaining = conn.execute(
+            "SELECT COUNT(*) FROM indexed_dirs WHERE kind='cf'"
+        ).fetchone()[0]
+
+        assert version == 4
+        assert cf_dirs_remaining == 0  # forced re-index despite column already existing

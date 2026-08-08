@@ -52,6 +52,7 @@
 - **Let index-query failures propagate, don't collapse them into "no match."** A caught `sqlite3.Error` returned as `None` is indistinguishable from a confirmed no-match; callers need to fall back to a filesystem scan on failure but trust `None` otherwise.
 - **Don't treat a zero-result index query as automatic grounds for a filesystem fallback.** Check `indexed_dirs` coverage (shallow `os.listdir()`) to tell "confirmed zero matches" from "not caught up yet." Caveat: proves indexed *once*, not fresh — pair with the incremental-update note below.
 - **Update the index incrementally on job/quote creation, don't rely on the background indexer alone.** It runs once per launch only. `SearchIndex.add_job()`/`add_quote()` insert one row right after a successful create so it's searchable immediately.
+- **Every branch of a schema migration must force the same re-index, not just the "normal" path.** (CodeRabbit, PR #297) A v4 migration's "column already exists" fallback bumped `user_version` without clearing `indexed_dirs`, so already-indexed customers would never get the new column backfilled. Both branches of a conditional migration need the same side effects unless there's a real reason they shouldn't.
 
 ## Performance / Redundant Work (JobDocs)
 
