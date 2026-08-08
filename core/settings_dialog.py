@@ -9,7 +9,7 @@ Provides a UI for configuring application settings including:
 - Experimental features
 """
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -27,14 +27,12 @@ class SettingsDialog(QDialog):
 
     def __init__(self, settings: Dict[str, Any], parent=None,
                  available_modules: Optional[List[tuple]] = None,
-                 save_callback: Optional[Callable[..., Any]] = None,
                  active_keys: Optional[set] = None):
         super().__init__(parent)
         self.settings = settings.copy()
         self._active_keys = active_keys  # keys present in DEFAULT_SETTINGS; None means show all
         self.available_modules = available_modules or []  # List of (module_name, display_name) tuples
         self.module_checkboxes = {}  # Store module checkboxes
-        self._save_callback = save_callback  # Called to persist settings to disk mid-dialog
         self.setWindowTitle("Settings")
         self.setMinimumWidth(600)
         self.resize(630, 500)
