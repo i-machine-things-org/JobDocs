@@ -661,9 +661,14 @@ class SearchModule(BaseModule):
                 search_desc, search_drawing, include_blueprints,
             ):
                 return
-            # Index returned 0 results — fall back to filesystem strict search.
-            # The index may not have indexed all customer directories (e.g. when
-            # the folder structure doesn't match the configured template).
+            # Index returned 0 results. Trust it — and skip the slow filesystem
+            # walk entirely — if every customer directory currently on disk has
+            # actually been indexed. Otherwise the index may just not have
+            # caught up yet (e.g. a customer folder added after the last
+            # background run), so fall back to a live filesystem search.
+            if self._index.is_fully_covered(customer_dirs, bp_dirs):
+                self.search_status_label.setText("Found 0 result(s)")
+                return
 
         # --- Fallback: live filesystem walk ---
         dirs_to_search = list(customer_dirs) + bp_dirs
