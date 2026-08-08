@@ -63,6 +63,16 @@ class BaseModule(ABC):
         """
         self._app_context = app_context
 
+    def is_widget_built(self) -> bool:
+        """Return True if get_widget() has already built the real widget.
+
+        Every module follows the same `if self._widget is None: self._widget
+        = self._create_widget()` convention in get_widget(), so this is safe
+        to check generically. Used by the main window to know whether a lazily
+        -constructed tab's data (e.g. customer lists) needs populating yet.
+        """
+        return self._widget is not None
+
     def is_tab_module(self) -> bool:
         """
         Indicate whether this module should appear as a top-level tab.

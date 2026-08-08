@@ -23,6 +23,7 @@
 - **Search must mirror browse/refresh filter logic.** `search_jobs`/`search_quotes` need the same customer + ITAR filtering as `refresh_*_tree`, or search results silently ignore active filters.
 - **Detect ITAR prefixes consistently.** Use `startswith(('[ITAR] ', '[ITAR-BP] '))` everywhere a customer label is checked, not a bare `'[ITAR]'` substring.
 - **Cancel the active tree worker before a synchronous search.** Otherwise queued `customer_loaded` emissions can repopulate the tree after the search clears it, mixing stale and fresh results.
+- **Lazy top-level QTabWidget construction needs a force-build hook for the initially-shown tab.** `setCurrentIndex()` only emits `currentChanged` if the index actually changes — the tab that's already current at startup (or after a CLI-prefill tab switch) never fires it. Call the build handler explicitly for the current index after any programmatic `setCurrentIndex()`.
 
 ## Qt / PyQt6 UI Patterns
 
