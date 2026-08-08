@@ -102,6 +102,12 @@ class JobModule(BaseModule):
         self.add_files: List[str] = []  # For "Add to Existing" tab
         self._widget = None
         self._worker = None  # Background thread worker
+        self._job_tab_widget = None
+        self._add_to_job_tab = None
+        # The Add to Existing tab's job tree isn't built until that sub-tab is
+        # actually activated — avoids an eager full customer-directory walk at
+        # startup. True means a refresh is owed the next time it's shown.
+        self._add_tree_stale = True
 
         # Create New tab widget references
         self.customer_combo = None
@@ -158,6 +164,10 @@ class JobModule(BaseModule):
         # Load UI file
         ui_file = self._get_ui_path('job/ui/job_tab.ui')
         uic.loadUi(ui_file, widget)
+
+        self._job_tab_widget = widget.job_tab_widget
+        self._add_to_job_tab = widget.addToJobTab
+        self._job_tab_widget.currentChanged.connect(self._on_job_subtab_changed)
 
         # ===== Setup "Create New" Tab =====
         self.customer_combo = widget.customer_combo
@@ -658,8 +668,26 @@ class JobModule(BaseModule):
 
     # ==================== Add to Existing Tab: Job Tree Management ====================
 
+    def _is_add_tab_active(self) -> bool:
+        return (
+            self._job_tab_widget is not None
+            and self._job_tab_widget.currentWidget() is self._add_to_job_tab
+        )
+
+    def _on_job_subtab_changed(self, index: int):
+        """Load the job tree the first time the Add to Existing sub-tab is shown
+        (or the next time it's shown after data went stale), instead of walking
+        the whole customer directory tree eagerly at startup."""
+        if self._add_tree_stale and self._is_add_tab_active():
+            self.refresh_job_tree()
+
     def refresh_job_tree(self):
         """Refresh the job tree with current filter settings (async with background thread)"""
+        if not self._is_add_tab_active():
+            self._add_tree_stale = True
+            return
+        self._add_tree_stale = False
+
         # Cancel any existing worker
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
