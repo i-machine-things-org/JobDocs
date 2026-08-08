@@ -117,9 +117,11 @@ class SearchWorker(QThread):
 
                 # Find job folders
                 scan_errors: List[OSError] = []
-                jobs = self.app_context.find_job_folders(customer_path, errors=scan_errors)
+                jobs = self.app_context.find_job_folders(
+                    customer_path, errors=scan_errors, include_po_number=True,
+                )
 
-                for dir_name, job_docs_path in jobs:
+                for dir_name, job_docs_path, po_number in jobs:
                     if self._is_cancelled:
                         break
 
@@ -155,6 +157,7 @@ class SearchWorker(QThread):
                             'job_number': job_num,
                             'description': desc,
                             'drawings': drawings,
+                            'po_number': po_number,
                             'path': job_docs_path
                         }
                         self.result_found.emit(result)
@@ -194,6 +197,7 @@ class SearchWorker(QThread):
                                 'job_number': job_num,
                                 'description': desc,
                                 'drawings': drawings,
+                                'po_number': '',
                                 'path': item_path,
                             })
                             self.result_count += 1
@@ -220,6 +224,7 @@ class SearchWorker(QThread):
                         'job_number': quote_name,
                         'description': '',
                         'drawings': [],
+                        'po_number': '',
                         'path': quote_path,
                     })
                     self.result_count += 1
@@ -263,6 +268,7 @@ class SearchWorker(QThread):
                             'job_number': name_no_ext,
                             'description': rel_path if rel_path != '.' else '',
                             'drawings': [],
+                            'po_number': '',
                             'path': root
                         }
                         self.result_found.emit(result)
@@ -329,6 +335,7 @@ class SearchWorker(QThread):
                         'job_number': job_num if job_num else "(no job #)",
                         'description': desc,
                         'drawings': drawings,
+                        'po_number': '',
                         'path': root
                     }
                     self.result_found.emit(result)
@@ -722,8 +729,9 @@ class SearchModule(BaseModule):
         0: lambda x: x['date'],
         1: lambda x: x['customer'].lower(),
         2: lambda x: x['job_number'].lower(),
-        3: lambda x: x['description'].lower(),
-        4: lambda x: ', '.join(x['drawings']).lower(),
+        3: lambda x: x['po_number'].lower(),
+        4: lambda x: x['description'].lower(),
+        5: lambda x: ', '.join(x['drawings']).lower(),
     })
 
     def _on_header_clicked(self, column: int):
@@ -759,8 +767,9 @@ class SearchModule(BaseModule):
                 self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
                 self.search_table.setItem(row, 1, QTableWidgetItem(result['customer']))
                 self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
-                self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
-                self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
+                self.search_table.setItem(row, 3, QTableWidgetItem(result['po_number']))
+                self.search_table.setItem(row, 4, QTableWidgetItem(result['description']))
+                self.search_table.setItem(row, 5, QTableWidgetItem(', '.join(result['drawings'])))
         finally:
             self.search_table.blockSignals(False)
         if selected_path is not None:
@@ -787,8 +796,9 @@ class SearchModule(BaseModule):
         self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
         self.search_table.setItem(row, 1, QTableWidgetItem(result['customer']))
         self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
-        self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
-        self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
+        self.search_table.setItem(row, 3, QTableWidgetItem(result['po_number']))
+        self.search_table.setItem(row, 4, QTableWidgetItem(result['description']))
+        self.search_table.setItem(row, 5, QTableWidgetItem(', '.join(result['drawings'])))
 
     def _on_progress_update(self, status: str):
         """Slot called with progress updates"""
