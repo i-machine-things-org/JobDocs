@@ -62,6 +62,7 @@ class BulkCreateDialog(QDialog):
         self.clear_bulk_btn = inner.clear_bulk_btn
         self.validate_btn = inner.validate_btn
         self.create_bulk_btn = inner.create_bulk_btn
+        self.bulk_cancel_btn = inner.bulk_cancel_btn
 
         self.bulk_table.horizontalHeader().setStretchLastSection(True)
 
@@ -69,24 +70,69 @@ class BulkCreateDialog(QDialog):
         inner.clear_bulk_btn.clicked.connect(lambda: self.bulk_text.clear())
         inner.validate_btn.clicked.connect(self.validate_bulk_data)
         inner.create_bulk_btn.clicked.connect(self.create_bulk_jobs)
+        inner.bulk_cancel_btn.clicked.connect(self.request_bulk_cancel)
 
         # Guards the in-flight create_bulk_jobs() loop, which pumps the event
         # queue via QApplication.processEvents() instead of a QThread. Without
         # this, closing the dialog (or Esc) mid-loop lets Qt process the close
         # event, and the loop's subsequent widget accesses then run against a
         # disposed dialog ("wrapped C/C++ object has been deleted").
+        #
+        # IMPORTANT: any new way to tear down this dialog (a future
+        # QDialogButtonBox, etc.) must also be guarded like closeEvent()/
+        # reject()/done() below, or it silently bypasses this.
         self._bulk_create_in_progress = False
+        # Set by the Cancel button (or a confirmed close-while-busy prompt)
+        # and checked between jobs in create_bulk_jobs(), so a runaway batch
+        # can always be stopped instead of the dialog being unclosable.
+        self._bulk_cancel_requested = False
 
     def closeEvent(self, event):
         if self._bulk_create_in_progress:
             event.ignore()
+            self._confirm_bulk_cancel()
             return
         super().closeEvent(event)
 
     def reject(self):
         if self._bulk_create_in_progress:
+            self._confirm_bulk_cancel()
             return
         super().reject()
+
+    def done(self, result):
+        # No QDialogButtonBox/accept() path exists today, but done() is the
+        # common choke point accept()/reject() both funnel through, so
+        # guarding it here future-proofs against one being added later.
+        if self._bulk_create_in_progress:
+            self._confirm_bulk_cancel()
+            return
+        super().done(result)
+
+    def _confirm_bulk_cancel(self):
+        """A close/Esc/done() attempt while busy needs a way out, not just a
+        silent block: ask whether to cancel the batch rather than ignoring
+        the attempt with no feedback at all."""
+        if self._bulk_cancel_requested:
+            return
+        reply = QMessageBox.question(
+            self, "Bulk Create In Progress",
+            "A bulk job creation is still in progress.\n\n"
+            "Cancel the remaining jobs and stop?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.request_bulk_cancel()
+
+    def request_bulk_cancel(self):
+        """Ask the in-flight create_bulk_jobs() loop to stop after the job
+        it's currently on. Wired to the Cancel button and to a confirmed
+        close-while-busy prompt."""
+        if not self._bulk_create_in_progress or self._bulk_cancel_requested:
+            return
+        self._bulk_cancel_requested = True
+        self.bulk_cancel_btn.setEnabled(False)
+        self.bulk_status_label.setText("Cancelling after current job...")
 
     # ==================== CSV Import ====================
 
@@ -307,13 +353,24 @@ class BulkCreateDialog(QDialog):
             self.create_bulk_btn, self.bulk_itar_check, self.bulk_text,
         ]
         self._bulk_create_in_progress = True
+        self._bulk_cancel_requested = False
         for control in controls:
             control.setEnabled(False)
+        self.bulk_cancel_btn.setEnabled(True)
+        self.bulk_cancel_btn.setVisible(True)
         try:
             for i, job in enumerate(jobs):
+                # Checked between jobs (not mid-job) so a cancel always lets
+                # the job already underway finish cleanly instead of leaving
+                # partial state.
+                if self._bulk_cancel_requested:
+                    break
+
                 customer = job['customer']
                 if customer not in existing_customers and customer not in new_customers:
                     new_customers.add(customer)
+
+                self.bulk_status_label.setText(f"Processing job {i + 1} of {len(jobs)}...")
 
                 if self.job_exists(customer, job['job_number'], is_itar):
                     skipped += 1
@@ -329,7 +386,11 @@ class BulkCreateDialog(QDialog):
                 self.bulk_progress.setValue(i + 1)
                 QApplication.processEvents()
         finally:
+            cancelled = self._bulk_cancel_requested
             self._bulk_create_in_progress = False
+            self._bulk_cancel_requested = False
+            self.bulk_cancel_btn.setVisible(False)
+            self.bulk_cancel_btn.setEnabled(True)
             for control in controls:
                 control.setEnabled(True)
 
@@ -337,7 +398,10 @@ class BulkCreateDialog(QDialog):
         msg = f"Created {created}/{len(jobs)} jobs"
         if skipped > 0:
             msg += f" (Skipped {skipped} duplicates)"
-        QMessageBox.information(self, "Complete", msg)
+        if cancelled:
+            msg += f"\n\nCancelled before all {len(jobs)} jobs were processed."
+        self.bulk_status_label.setText("")
+        QMessageBox.information(self, "Cancelled" if cancelled else "Complete", msg)
 
         main_window = self.app_context.main_window
         if main_window:
