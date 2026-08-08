@@ -608,6 +608,11 @@ class QuoteModule(BaseModule):
         """Refresh the quote tree with current filter settings (async with background thread)"""
         if not self._is_add_tab_active():
             self._add_tree_stale = True
+            # Don't let a walk started while the tab was active keep running
+            # in the background after the user has switched away from it.
+            if self._worker and self._worker.isRunning():
+                self._worker.cancel()
+                self._worker.wait()
             return
         self._add_tree_stale = False
 
