@@ -15,7 +15,7 @@
 - **`shutil.copy2` overwrites silently — check existence first.** Guard with `if not dest.exists()` before copying; `FileExistsError` handlers around `copy2` are dead code since it never raises that.
 - **Sort directories before files in listings.** Use `key=lambda n: (not os.path.isdir(...), n.lower())` so dirs come first, matching OS file-browser conventions.
 - **Wrap directory scans in `OSError`/`PermissionError` handlers.** Log per-item/per-dir and continue — never let one bad entry abort discovery (e.g. plugin dir scans).
-- **Use atomic swap for install/update operations.** Copy to a temp dir, then backup-then-rename into place, with rollback on failure, so a partial write never corrupts the live install.
+- **Use atomic swap for install/update operations.** Copy to a temp dir, then backup-then-rename into place, with rollback on failure, so a partial write never corrupts the live install. Same applies to any JSON persistence (settings/history): `open(path, 'w')` truncates before writing, so a crash mid-write leaves an empty/corrupt file. Use `shared.utils.atomic_write_json()` (write to a same-dir temp file, `os.replace()` into place) instead.
 - **Gate link creation on copy success.** In "copy then link" flows, track a `*_ready` flag; only create the link if the copy succeeded or the destination already existed.
 
 ## ITAR / Filter Consistency (JobDocs)
