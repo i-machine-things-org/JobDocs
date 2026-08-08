@@ -24,6 +24,7 @@
 - **Detect ITAR prefixes consistently.** Use `startswith(('[ITAR] ', '[ITAR-BP] '))` everywhere a customer label is checked, not a bare `'[ITAR]'` substring.
 - **Cancel the active tree worker before a synchronous search.** Otherwise queued `customer_loaded` emissions can repopulate the tree after the search clears it, mixing stale and fresh results.
 - **Lazy top-level QTabWidget construction needs a force-build hook for the initially-shown tab.** `setCurrentIndex()` only emits `currentChanged` if the index actually changes — the tab that's already current at startup (or after a CLI-prefill tab switch) never fires it. Call the build handler explicitly for the current index after any programmatic `setCurrentIndex()`.
+- **Don't remove a lazy-construction item from its pending/retry tracking dict until the build actually succeeds.** Popping before the `try` around `get_widget()` permanently bricks that tab as a blank placeholder if construction fails once; pop only in the success path so a later click can retry.
 
 ## Qt / PyQt6 UI Patterns
 
@@ -76,6 +77,7 @@
 - **Register a plugin's parent package in `sys.modules` before `exec_module`.** External plugins using relative imports (`from .helpers import ...`) fail without a registered parent package with `__path__` set.
 - **Move blocking I/O off the GUI thread.** Network downloads and zip extraction during plugin install must run in a `QThread` worker, not the main thread.
 - **In frozen apps, try the bundled interpreter before falling back to system Python.** ABI mismatches between bundled and system Python can break binary wheels.
+- **Invalidate any startup-computed module cache on install/uninstall.** A `discover_modules()` result cached once at startup (e.g. for a Settings dialog list) goes stale the moment a plugin is installed/uninstalled mid-session; recompute it in both success handlers, not just at launch.
 
 ## Update Checker
 
