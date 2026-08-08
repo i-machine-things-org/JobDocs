@@ -120,6 +120,10 @@ class TestSearchJobsFindsPoAndNonPoFolders:
         assert [r['job_number'] for r in new_results] == ['22222']
         assert legacy_results[0]['path'].endswith('11111_LegacyBracket')
         assert new_results[0]['path'].endswith('22222_NewShaft')
+        # A job outside any PO folder has no PO number; a job nested inside
+        # "PO-1001" reports '1001' with the literal "PO-" prefix stripped.
+        assert legacy_results[0]['po_number'] == ''
+        assert new_results[0]['po_number'] == '1001'
 
     def test_job_number_search_after_update(self, tmp_path):
         # search_jobs by job number (not just customer) picks up both kinds of folder.
@@ -134,3 +138,57 @@ class TestSearchJobsFindsPoAndNonPoFolders:
 
         assert index.find_job_by_number('33333') is not None
         assert index.find_job_by_number('44444') is not None
+
+
+class TestMigrationToV4AddsPoNumber:
+    def test_existing_v3_database_gains_po_number_column(self, tmp_path):
+        # Simulate a database created before the po_number column existed
+        # (schema v3: quotes table present, no po_number) and confirm opening
+        # it with the current SearchIndex adds the column, preserves existing
+        # rows (defaulting po_number to ''), and forces a re-index so already
+        # -indexed customers pick up po_number on the next update() call.
+        db_path = tmp_path / 'search_index.db'
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript("""
+            CREATE TABLE jobs (
+                id          INTEGER PRIMARY KEY,
+                prefix      TEXT    NOT NULL DEFAULT '',
+                customer    TEXT    NOT NULL,
+                job_number  TEXT    NOT NULL DEFAULT '',
+                description TEXT    NOT NULL DEFAULT '',
+                drawings    TEXT    NOT NULL DEFAULT '',
+                path        TEXT    NOT NULL,
+                mtime       REAL    NOT NULL,
+                UNIQUE(prefix, path)
+            );
+            CREATE TABLE indexed_dirs (
+                dir_path    TEXT    NOT NULL,
+                prefix      TEXT    NOT NULL DEFAULT '',
+                kind        TEXT    NOT NULL DEFAULT '',
+                mtime       REAL    NOT NULL,
+                indexed_at  REAL    NOT NULL,
+                PRIMARY KEY (dir_path, prefix, kind)
+            );
+            INSERT INTO jobs (prefix, customer, job_number, description, drawings, path, mtime)
+                VALUES ('', 'Acme', '12345', 'Bracket', '', 'C:/Acme/12345', 1.0);
+            INSERT INTO indexed_dirs (dir_path, prefix, kind, mtime, indexed_at)
+                VALUES ('C:/Acme', '', 'cf', 1.0, 1.0);
+            PRAGMA user_version = 3;
+        """)
+        conn.commit()
+        conn.close()
+
+        SearchIndex(db_path)
+
+        conn = sqlite3.connect(str(db_path))
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        cf_dirs_remaining = conn.execute(
+            "SELECT COUNT(*) FROM indexed_dirs WHERE kind='cf'"
+        ).fetchone()[0]
+        job_row = conn.execute("SELECT job_number, po_number FROM jobs").fetchone()
+
+        assert 'po_number' in cols
+        assert version == 4
+        assert cf_dirs_remaining == 0  # forced re-index so po_number gets backfilled
+        assert job_row == ('12345', '')
