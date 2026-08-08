@@ -75,27 +75,44 @@ class HistoryModule(BaseModule):
     # ==================== History Management ====================
 
     def refresh_history(self):
-        """Refresh history table from history data"""
+        """Refresh history table from history data (jobs and quotes, newest first)"""
         self.history_table.setRowCount(0)
 
-        for job in self.app_context.history.get('recent_jobs', []):
+        entries = (
+            [('Job', job) for job in self.app_context.history.get('recent_jobs', [])]
+            + [('Quote', quote) for quote in self.app_context.history.get('recent_quotes', [])]
+        )
+
+        def _sort_key(entry):
+            _kind, data = entry
+            try:
+                return datetime.fromisoformat(data.get('date', ''))
+            except ValueError:
+                return datetime.min
+
+        entries.sort(key=_sort_key, reverse=True)
+
+        for kind, entry in entries:
             row = self.history_table.rowCount()
             self.history_table.insertRow(row)
 
             try:
-                date = datetime.fromisoformat(job['date']).strftime("%Y-%m-%d %H:%M")
+                date = datetime.fromisoformat(entry['date']).strftime("%Y-%m-%d %H:%M")
             except Exception:
                 date = "Unknown"
 
+            number = entry.get('job_number', '') or entry.get('quote_number', '')
+
             self.history_table.setItem(row, 0, QTableWidgetItem(date))
-            self.history_table.setItem(row, 1, QTableWidgetItem(job.get('customer', '')))
-            self.history_table.setItem(row, 2, QTableWidgetItem(job.get('job_number', '')))
-            self.history_table.setItem(row, 3, QTableWidgetItem(job.get('po_number', '')))
-            self.history_table.setItem(row, 4, QTableWidgetItem(job.get('description', '')))
-            self.history_table.setItem(row, 5, QTableWidgetItem(', '.join(job.get('drawings', []))))
+            self.history_table.setItem(row, 1, QTableWidgetItem(kind))
+            self.history_table.setItem(row, 2, QTableWidgetItem(entry.get('customer', '')))
+            self.history_table.setItem(row, 3, QTableWidgetItem(number))
+            self.history_table.setItem(row, 4, QTableWidgetItem(entry.get('po_number', '')))
+            self.history_table.setItem(row, 5, QTableWidgetItem(entry.get('description', '')))
+            self.history_table.setItem(row, 6, QTableWidgetItem(', '.join(entry.get('drawings', []))))
 
     def clear_history(self):
-        """Clear all job history after confirmation"""
+        """Clear all job and quote history after confirmation"""
         reply = QMessageBox.question(
             self._widget,
             "Confirm",
@@ -107,6 +124,7 @@ class HistoryModule(BaseModule):
             # Clear history
             self.app_context.history['customers'] = {}
             self.app_context.history['recent_jobs'] = []
+            self.app_context.history['recent_quotes'] = []
             self.app_context.save_history()
             self.refresh_history()
             self.show_info("History", "History cleared")
