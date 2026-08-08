@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QWidget, QSplitter, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, pyqtSlot, QSize, QThread
-from PyQt6.QtGui import QBrush, QColor, QDragEnterEvent, QDropEvent, QImage, QPixmap
+from PyQt6.QtGui import QBrush, QColor, QDragEnterEvent, QDropEvent, QImage, QImageReader, QPixmap
 from pathlib import Path
 import atexit
 import logging
@@ -1112,6 +1112,11 @@ class FilePreviewWidget(QWidget):
     _CAD_EXTS = {'.step', '.stp', '.iges', '.igs', '.x_t', '.x_b', '.prt', '.asm'}
     _MESH_EXTS = {'.stl', '.obj', '.ply', '.3mf'}
 
+    # Cap decoded size to this many pixels on the longer side — a full-res
+    # decode of a high-res scan/photo can run tens of MB for what's ultimately
+    # shown in a ~200-400px preview pane. Shared with the PDF render path below.
+    _PREVIEW_MAX_DIM = 600
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._pixmap: QPixmap | None = None
@@ -1149,8 +1154,8 @@ class FilePreviewWidget(QWidget):
             size_str = ""
 
         if ext in self._IMAGE_EXTS:
-            pix = QPixmap(file_path)
-            if not pix.isNull():
+            pix = self._load_bounded_image(file_path)
+            if pix is not None and not pix.isNull():
                 self._set_pixmap(pix, path.name, size_str)
                 return
 
@@ -1176,6 +1181,28 @@ class FilePreviewWidget(QWidget):
         type_label = (ext.upper().lstrip('.') + " file") if ext else "File"
         self._set_text(type_label, f"{path.name}\n{size_str}")
 
+    def _load_bounded_image(self, file_path: str) -> QPixmap | None:
+        """Decode file_path bounded to _PREVIEW_MAX_DIM on the longer side.
+
+        Uses QImageReader.setScaledSize() so the decoder itself produces a
+        small image instead of decoding the original at full resolution and
+        scaling it down afterward — mirrors the PDF render path's MAX_DIM cap.
+        """
+        reader = QImageReader(file_path)
+        reader.setAutoTransform(True)  # respect EXIF orientation
+        size = reader.size()
+        if size.isValid() and size.width() > 0 and size.height() > 0:
+            scale = min(self._PREVIEW_MAX_DIM / size.width(), self._PREVIEW_MAX_DIM / size.height(), 1.0)
+            if scale < 1.0:
+                reader.setScaledSize(QSize(
+                    max(1, round(size.width() * scale)),
+                    max(1, round(size.height() * scale)),
+                ))
+        image = reader.read()
+        if image.isNull():
+            return None
+        return QPixmap.fromImage(image)
+
     def _try_pdf_preview(self, file_path: str) -> bool:
         try:
             import fitz  # pymupdf
@@ -1187,7 +1214,7 @@ class FilePreviewWidget(QWidget):
                 # Cap rendered size: a fixed 1.5× scale can exceed Qt's 256 MB
                 # allocation limit for high-res embedded images. Scale to fit
                 # within MAX_DIM × MAX_DIM pixels instead.
-                MAX_DIM = 600
+                MAX_DIM = self._PREVIEW_MAX_DIM
                 rect = page.rect
                 scale = min(MAX_DIM / rect.width, MAX_DIM / rect.height, 1.5)
                 pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))

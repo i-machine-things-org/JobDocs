@@ -36,6 +36,7 @@
 - **Persist settings through the real settings store, not a dialog-local copy.** Writing to `self.settings` inside a dialog is lost on Cancel if that object is a local copy rather than the live settings store.
 - **Escape untrusted strings before interpolating into RichText labels.** A crafted version string could inject HTML into a `QLabel`; use `html.escape()`.
 - **Keep a live reference to non-modal dialogs.** Store on a longer-lived owner (e.g. `window._dialog = dlg`) and clear it on `finished`, or the dialog is garbage-collected and disappears immediately.
+- **Bound image decode size before loading, don't scale after.** `QPixmap(path)` decodes at full resolution even if only shown in a small preview. Use `QImageReader.setScaledSize()` (checked against `reader.size()` first) so the decoder itself produces a small image — mirrors the MAX_DIM cap already used for PDF preview rendering.
 
 ## Print & Rendering
 
