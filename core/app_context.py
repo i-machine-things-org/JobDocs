@@ -255,18 +255,32 @@ class AppContext:
 
         return Path(base_dir) / path_str
 
-    def find_job_folders(self, customer_path: str, *, errors: Optional[List[OSError]] = None) -> List[Tuple[str, str]]:
+    def find_job_folders(
+        self,
+        customer_path: str,
+        *,
+        errors: Optional[List[OSError]] = None,
+        include_po_number: bool = False,
+    ) -> List[Tuple[str, str]]:
         """
         Find all job folders in a customer directory.
 
         Args:
             customer_path: Path to customer directory
+            include_po_number: If True, each returned tuple is extended with
+                the job's PO number (or '' if the structure has no PO folder,
+                or the job doesn't sit inside one), i.e.
+                (job_name, job_docs_path, po_number).
 
         Returns:
-            List of (job_name, job_docs_path) tuples
+            List of (job_name, job_docs_path) tuples, or (job_name,
+            job_docs_path, po_number) tuples if include_po_number is True.
         """
         structure = self._settings.get('job_folder_structure', '{customer}/{job_folder}/job documents')
         logger.debug("find_job_folders: customer=%s structure=%s", customer_path, structure)
+
+        def _job(name: str, path: str, po_number: str = '') -> Tuple:
+            return (name, path, po_number) if include_po_number else (name, path)
 
         after_customer = structure.split('{customer}/', 1)[-1] if '{customer}/' in structure else structure
         jobs = []
@@ -279,7 +293,7 @@ class AppContext:
                     if os.path.isdir(item_path):
                         expected_docs_path = os.path.join(item_path, suffix)
                         if os.path.exists(expected_docs_path):
-                            jobs.append((item, expected_docs_path))
+                            jobs.append(_job(item, expected_docs_path))
             except OSError as e:
                 logger.debug("find_job_folders: OSError %s", e)
                 if errors is not None:
@@ -329,15 +343,19 @@ class AppContext:
                                     sub_path = os.path.join(po_path, post_po) if post_po else po_path
                                     if os.path.exists(sub_path):
                                         handled_as_po_container = True
+                                        po_number_end = (
+                                            len(po_dir) - len(po_name_suffix) if po_name_suffix else len(po_dir)
+                                        )
+                                        po_number = po_dir[len(po_name_prefix):po_number_end]
                                         for item in sorted(os.listdir(sub_path)):
                                             item_path = os.path.join(sub_path, item)
                                             if os.path.isdir(item_path):
                                                 if suffix:
                                                     expected_docs_path = os.path.join(item_path, suffix)
                                                     if os.path.exists(expected_docs_path):
-                                                        jobs.append((item, expected_docs_path))
+                                                        jobs.append(_job(item, expected_docs_path, po_number))
                                                 else:
-                                                    jobs.append((item, item_path))
+                                                    jobs.append(_job(item, item_path, po_number))
 
                                 if not handled_as_po_container:
                                     # Doesn't match the PO folder's naming convention (or its
@@ -349,9 +367,9 @@ class AppContext:
                                     if suffix:
                                         expected_docs_path = os.path.join(po_path, suffix)
                                         if os.path.exists(expected_docs_path):
-                                            jobs.append((po_dir, expected_docs_path))
+                                            jobs.append(_job(po_dir, expected_docs_path))
                                     else:
-                                        jobs.append((po_dir, po_path))
+                                        jobs.append(_job(po_dir, po_path))
                         except OSError as e:
                             logger.debug("find_job_folders: OSError enumerating PO dirs: %s", e)
                             if errors is not None:
@@ -366,9 +384,9 @@ class AppContext:
                                     if suffix:
                                         expected_docs_path = os.path.join(item_path, suffix)
                                         if os.path.exists(expected_docs_path):
-                                            jobs.append((item, expected_docs_path))
+                                            jobs.append(_job(item, expected_docs_path))
                                     else:
-                                        jobs.append((item, item_path))
+                                        jobs.append(_job(item, item_path))
                         except OSError as e:
                             logger.debug("find_job_folders: OSError: %s", e)
                             if errors is not None:
