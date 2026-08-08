@@ -2,6 +2,8 @@
 kept separate from test_utils.py's pure-function scope."""
 
 import json
+import os
+import stat
 
 import pytest
 
@@ -58,3 +60,48 @@ class TestAtomicWriteJson:
 
         assert not target.exists()
         assert list(tmp_path.iterdir()) == []
+
+    def test_new_file_permissions_respect_umask_not_hardcoded_0600(self, tmp_path):
+        # tempfile.mkstemp() hardcodes 0o600 on POSIX regardless of umask.
+        # A new atomic_write_json() target must match what plain
+        # open(path, 'w') would have produced under the same umask, not be
+        # silently narrowed to owner-only.
+        old_umask = os.umask(0o022)
+        try:
+            target = tmp_path / 'settings.json'
+            atomic_write_json(target, {'a': 1})
+            actual_mode = stat.S_IMODE(target.stat().st_mode)
+
+            control = tmp_path / 'control.json'
+            with open(control, 'w') as f:
+                f.write('{}')
+            expected_mode = stat.S_IMODE(control.stat().st_mode)
+        finally:
+            os.umask(old_umask)
+
+        assert actual_mode == expected_mode
+        assert actual_mode != 0o600
+
+    def test_preserves_existing_file_permissions(self, tmp_path):
+        target = tmp_path / 'settings.json'
+        target.write_text('{"old": true}')
+        os.chmod(target, 0o640)
+
+        atomic_write_json(target, {'new': True})
+
+        assert stat.S_IMODE(target.stat().st_mode) == 0o640
+
+    def test_fsync_called_before_replace(self, tmp_path, monkeypatch):
+        calls = []
+        original_fsync = os.fsync
+
+        def _tracking_fsync(fd):
+            calls.append(fd)
+            return original_fsync(fd)
+
+        monkeypatch.setattr(os, 'fsync', _tracking_fsync)
+
+        target = tmp_path / 'settings.json'
+        atomic_write_json(target, {'a': 1})
+
+        assert len(calls) == 1

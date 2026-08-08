@@ -17,6 +17,7 @@
 - **Wrap directory scans in `OSError`/`PermissionError` handlers.** Log per-item/per-dir and continue — never let one bad entry abort discovery (e.g. plugin dir scans).
 - **Use atomic swap for install/update operations.** Copy to a temp dir, then backup-then-rename into place, with rollback on failure, so a partial write never corrupts the live install. Same applies to any JSON persistence (settings/history): `open(path, 'w')` truncates before writing, so a crash mid-write leaves an empty/corrupt file. Use `shared.utils.atomic_write_json()` (write to a same-dir temp file, `os.replace()` into place) instead.
 - **Gate link creation on copy success.** In "copy then link" flows, track a `*_ready` flag; only create the link if the copy succeeded or the destination already existed.
+- **`tempfile.mkstemp()` hardcodes `0o600` on POSIX, ignoring umask.** After `os.replace()` swaps it into place, this silently narrows a shared file's permissions. `os.chmod()` the temp file first — to the original file's mode if it exists, else `0o666 & ~umask` — before replacing. Also `os.fsync(fd)` before `os.replace()`: the rename alone is torn-write-safe but not crash-durable.
 
 ## ITAR / Filter Consistency (JobDocs)
 
