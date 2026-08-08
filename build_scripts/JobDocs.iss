@@ -134,36 +134,18 @@ begin
   end;
 end;
 
-function FindTaskListIndex(const ItemText: String): Integer;
-{ WizardForm.TasksList mixes group-header rows and task rows; searching by
-  the task's own Description text is robust regardless of position/grouping. }
-var
-  i: Integer;
-begin
-  Result := -1;
-  for i := 0 to WizardForm.TasksList.Items.Count - 1 do
-  begin
-    if WizardForm.TasksList.Items[i] = ItemText then
-    begin
-      Result := i;
-      Exit;
-    end;
-  end;
-end;
-
 procedure InitializeWizard();
 { Pre-check the Read-Only task if that's what was selected on a previous
   install of this app, so an update installer defaults to the same variant
-  instead of silently reverting a read-only (search-only) machine to full. }
-var
-  Idx: Integer;
+  instead of silently reverting a read-only (search-only) machine to full.
+
+  Selects by the task's [Tasks] Name ("readonly"), the stable identifier,
+  via WizardSelectTasks — not by matching the Description text shown in
+  WizardForm.TasksList, which would silently stop matching if that text
+  ever changes. }
 begin
   if GetPreviousData('InstallType', 'full') = 'readonly' then
-  begin
-    Idx := FindTaskListIndex('Read-Only (Search Only) — only install the Search tab');
-    if Idx >= 0 then
-      WizardForm.TasksList.Checked[Idx] := True;
-  end;
+    WizardSelectTasks('readonly');
 end;
 
 procedure RegisterPreviousData(PreviousDataKey: Integer);

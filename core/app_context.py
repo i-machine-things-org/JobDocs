@@ -36,7 +36,8 @@ class AppContext:
         show_info_callback: Callable[[str, str], None],
         get_customer_list_callback: Callable[[], List[str]],
         add_to_history_callback: Callable[[str, Dict[str, Any]], None],
-        main_window: Optional[Any] = None
+        main_window: Optional[Any] = None,
+        readonly_mode: bool = False
     ):
         """
         Initialize the application context.
@@ -53,6 +54,11 @@ class AppContext:
             get_customer_list_callback: Function to get customer list
             add_to_history_callback: Function to add to history
             main_window: Optional reference to main window for advanced use
+            readonly_mode: True for a read-only (search-only) install — see
+                main.py's _is_readonly_install(). Modules must check this
+                (via the readonly_mode property or is_readonly()) before
+                performing any filesystem write or persisted settings change,
+                since a read-only install still loads the Search module.
         """
         self._settings = settings
         self._history = history
@@ -66,6 +72,21 @@ class AppContext:
         self._add_to_history = add_to_history_callback
         self._main_window = main_window
         self._print_provider = None
+        self._readonly_mode = readonly_mode
+
+    @property
+    def readonly_mode(self) -> bool:
+        """True if this is a read-only (search-only) install.
+
+        Modules must not perform filesystem writes (e.g. creating/linking
+        files into shop directories) or persist settings changes when this
+        is True.
+        """
+        return self._readonly_mode
+
+    def is_readonly(self) -> bool:
+        """Same as the readonly_mode property; provided for call-site clarity."""
+        return self._readonly_mode
 
     @property
     def settings(self) -> Dict[str, Any]:

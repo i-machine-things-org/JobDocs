@@ -692,7 +692,8 @@ class JobDocsMainWindow(QMainWindow):
             show_info_callback=self.show_info_dialog,
             get_customer_list_callback=self.get_customer_list,
             add_to_history_callback=self.add_to_history,
-            main_window=self
+            main_window=self,
+            readonly_mode=self.readonly_mode
         )
 
         # Load modules
