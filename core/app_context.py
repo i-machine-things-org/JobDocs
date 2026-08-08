@@ -73,6 +73,8 @@ class AppContext:
         self._main_window = main_window
         self._print_provider = None
         self._readonly_mode = readonly_mode
+        self._search_index = None
+        self._search_index_failed = False
 
     @property
     def readonly_mode(self) -> bool:
@@ -120,6 +122,23 @@ class AppContext:
     def get_print_provider(self):
         """Return the registered print provider, or None."""
         return self._print_provider
+
+    def get_search_index(self):
+        """Return the shared SearchIndex instance (lazily opened), or None if it
+        could not be opened. Points at the same DB file the Search tab's
+        background indexer maintains, so callers should check is_populated()
+        before relying on results being complete.
+        """
+        if self._search_index is None and not self._search_index_failed:
+            try:
+                from core.search_index import SearchIndex
+                self._search_index = SearchIndex(self._config_dir / 'search_index.db')
+            except Exception as exc:
+                logger.warning(
+                    "get_search_index: could not open index DB (%s): %s", type(exc).__name__, exc
+                )
+                self._search_index_failed = True
+        return self._search_index
 
     def save_settings(self):
         """Save application settings to disk"""
@@ -257,18 +276,32 @@ class AppContext:
 
         return Path(base_dir) / path_str
 
-    def find_job_folders(self, customer_path: str, *, errors: Optional[List[OSError]] = None) -> List[Tuple[str, str]]:
+    def find_job_folders(
+        self,
+        customer_path: str,
+        *,
+        errors: Optional[List[OSError]] = None,
+        include_po_number: bool = False,
+    ) -> List[Tuple[str, str]]:
         """
         Find all job folders in a customer directory.
 
         Args:
             customer_path: Path to customer directory
+            include_po_number: If True, each returned tuple is extended with
+                the job's PO number (or '' if the structure has no PO folder,
+                or the job doesn't sit inside one), i.e.
+                (job_name, job_docs_path, po_number).
 
         Returns:
-            List of (job_name, job_docs_path) tuples
+            List of (job_name, job_docs_path) tuples, or (job_name,
+            job_docs_path, po_number) tuples if include_po_number is True.
         """
         structure = self._settings.get('job_folder_structure', '{customer}/{job_folder}/job documents')
         logger.debug("find_job_folders: customer=%s structure=%s", customer_path, structure)
+
+        def _job(name: str, path: str, po_number: str = '') -> Tuple:
+            return (name, path, po_number) if include_po_number else (name, path)
 
         after_customer = structure.split('{customer}/', 1)[-1] if '{customer}/' in structure else structure
         jobs = []
@@ -281,7 +314,7 @@ class AppContext:
                     if os.path.isdir(item_path):
                         expected_docs_path = os.path.join(item_path, suffix)
                         if os.path.exists(expected_docs_path):
-                            jobs.append((item, expected_docs_path))
+                            jobs.append(_job(item, expected_docs_path))
             except OSError as e:
                 logger.debug("find_job_folders: OSError %s", e)
                 if errors is not None:
@@ -293,28 +326,71 @@ class AppContext:
                 suffix = parts[1].strip('/')
 
                 if '{po_number}' in prefix:
-                    po_parts = prefix.split('{po_number}')
-                    pre_po = po_parts[0].strip('/')
-                    post_po = po_parts[1].strip('/') if len(po_parts) > 1 else ''
-                    base_path = os.path.join(customer_path, pre_po) if pre_po else customer_path
+                    # {po_number} may share a path segment with literal text
+                    # (e.g. "job documents/PO-{po_number}"), so the text before
+                    # it can be part of a directory name, not a full directory
+                    # of its own. Split on the last '/' before the placeholder
+                    # to separate the real directory path from the per-folder
+                    # name prefix/suffix that must be matched against each
+                    # PO directory's name rather than joined onto base_path.
+                    po_idx = prefix.index('{po_number}')
+                    dir_part = prefix[:po_idx]
+                    suffix_part = prefix[po_idx + len('{po_number}'):]
+
+                    if '/' in dir_part:
+                        base_dir_part, po_name_prefix = dir_part.rsplit('/', 1)
+                    else:
+                        base_dir_part, po_name_prefix = '', dir_part
+
+                    if '/' in suffix_part:
+                        po_name_suffix, post_po = suffix_part.split('/', 1)
+                    else:
+                        po_name_suffix, post_po = suffix_part, ''
+
+                    base_path = os.path.join(customer_path, base_dir_part) if base_dir_part else customer_path
                     if os.path.exists(base_path):
                         try:
                             for po_dir in sorted(os.listdir(base_path)):
                                 po_path = os.path.join(base_path, po_dir)
                                 if not os.path.isdir(po_path):
                                     continue
-                                sub_path = os.path.join(po_path, post_po) if post_po else po_path
-                                if not os.path.exists(sub_path):
-                                    continue
-                                for item in sorted(os.listdir(sub_path)):
-                                    item_path = os.path.join(sub_path, item)
-                                    if os.path.isdir(item_path):
-                                        if suffix:
-                                            expected_docs_path = os.path.join(item_path, suffix)
-                                            if os.path.exists(expected_docs_path):
-                                                jobs.append((item, expected_docs_path))
-                                        else:
-                                            jobs.append((item, item_path))
+
+                                matches_po_name = (
+                                    (not po_name_prefix or po_dir.startswith(po_name_prefix))
+                                    and (not po_name_suffix or po_dir.endswith(po_name_suffix))
+                                )
+                                handled_as_po_container = False
+                                if matches_po_name:
+                                    sub_path = os.path.join(po_path, post_po) if post_po else po_path
+                                    if os.path.exists(sub_path):
+                                        handled_as_po_container = True
+                                        po_number_end = (
+                                            len(po_dir) - len(po_name_suffix) if po_name_suffix else len(po_dir)
+                                        )
+                                        po_number = po_dir[len(po_name_prefix):po_number_end]
+                                        for item in sorted(os.listdir(sub_path)):
+                                            item_path = os.path.join(sub_path, item)
+                                            if os.path.isdir(item_path):
+                                                if suffix:
+                                                    expected_docs_path = os.path.join(item_path, suffix)
+                                                    if os.path.exists(expected_docs_path):
+                                                        jobs.append(_job(item, expected_docs_path, po_number))
+                                                else:
+                                                    jobs.append(_job(item, item_path, po_number))
+
+                                if not handled_as_po_container:
+                                    # Doesn't match the PO folder's naming convention (or its
+                                    # expected sub-path is missing) — datasets that predate PO
+                                    # folders being added have job folders sitting directly here
+                                    # instead of nested one level down. Treat this entry as a job
+                                    # folder itself so it isn't silently skipped. Still just the
+                                    # two shallow os.listdir() calls above, no recursive walk.
+                                    if suffix:
+                                        expected_docs_path = os.path.join(po_path, suffix)
+                                        if os.path.exists(expected_docs_path):
+                                            jobs.append(_job(po_dir, expected_docs_path))
+                                    else:
+                                        jobs.append(_job(po_dir, po_path))
                         except OSError as e:
                             logger.debug("find_job_folders: OSError enumerating PO dirs: %s", e)
                             if errors is not None:
@@ -329,9 +405,9 @@ class AppContext:
                                     if suffix:
                                         expected_docs_path = os.path.join(item_path, suffix)
                                         if os.path.exists(expected_docs_path):
-                                            jobs.append((item, expected_docs_path))
+                                            jobs.append(_job(item, expected_docs_path))
                                     else:
-                                        jobs.append((item, item_path))
+                                        jobs.append(_job(item, item_path))
                         except OSError as e:
                             logger.debug("find_job_folders: OSError: %s", e)
                             if errors is not None:

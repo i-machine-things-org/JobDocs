@@ -40,9 +40,10 @@ This is how the user explicitly asks you to check in on the project.
 ## Rule 1: Git Is Mandatory
 
 - If the project is not a git repository, run `git init` and create an initial commit before doing anything else.
-- Never work directly on `master`. Always create a feature branch first then merge into `master`.
+- Never work directly on `master` or `staging`. Always create a feature branch first.
 - Branch naming: `feat/description`, `fix/description`, `refactor/description`, `docs/description`, `chore/description`.
-- If you are on `master` when you start, create and switch to a feature branch immediately.
+- If you are on `master` or `staging` when you start, create and switch to a feature branch immediately.
+- **PRs target `staging`, not `master`.** `staging` is the integration/test branch — see `BRANCHES.md`. Only a `staging` → `master` promotion PR may target `master` directly; `.github/workflows/require-staging-base.yml` enforces this.
 
 ## Rule 2: Conventional Commits
 
@@ -103,7 +104,6 @@ fix release without a local build test first.
 Report Fixer is a standalone plugin maintained at `H:\Jobdocs\jobdocs-report-fixer`. It is loaded at runtime from the `plugins/` directory alongside the installed executable.
 
 - Do **not** add Report Fixer code to this repo (`modules/`, `psm_modules/`, or anywhere else).
-- `PSM-stable` is deprecated and must not be used or merged from.
 - `modules/reporting/` in this repo is a lightweight stub for experimental use only — it is not Report Fixer.
 
 ---
@@ -175,7 +175,7 @@ Check this threshold after every merge to master. Do not wait for the user to as
 
 When a pull request is open or being prepared:
 
-- Always open PRs via `gh pr create` — never merge directly to `master` without a PR.
+- Always open PRs via `gh pr create --base staging` — never merge directly to `master` or `staging` without a PR.
 - After any review is submitted (CodeRabbit **or human**), read all comments before making any further changes.
 - For each finding, regardless of source:
   1. If it matches an existing `.claude/CODING_NOTES.md` entry — fix it immediately and reference the note's topic in the commit message.
