@@ -97,6 +97,12 @@ class QuoteModule(BaseModule):
         self.add_files: List[str] = []  # For "Add to Existing" tab
         self._widget = None
         self._worker = None  # Background thread worker
+        self._quote_tab_widget = None
+        self._add_to_quote_tab = None
+        # The Add to Existing tab's quote tree isn't built until that sub-tab
+        # is actually activated — avoids an eager full customer-directory
+        # walk at startup. True means a refresh is owed the next time it's shown.
+        self._add_tree_stale = True
 
         # Preview panels
         self.quote_preview: FilePreviewWidget | None = None
@@ -149,6 +155,10 @@ class QuoteModule(BaseModule):
         # Load UI file
         ui_file = self._get_ui_path('quote/ui/quote_tab.ui')
         uic.loadUi(ui_file, widget)
+
+        self._quote_tab_widget = widget.quote_tab_widget
+        self._add_to_quote_tab = widget.addToQuoteTab
+        self._quote_tab_widget.currentChanged.connect(self._on_quote_subtab_changed)
 
         # ===== Setup "Create New" Tab =====
         self.quote_customer_combo = widget.quote_customer_combo
@@ -574,8 +584,26 @@ class QuoteModule(BaseModule):
 
     # ==================== Add to Existing Tab: Quote Tree Management ====================
 
+    def _is_add_tab_active(self) -> bool:
+        return (
+            self._quote_tab_widget is not None
+            and self._quote_tab_widget.currentWidget() is self._add_to_quote_tab
+        )
+
+    def _on_quote_subtab_changed(self, index: int):
+        """Load the quote tree the first time the Add to Existing sub-tab is
+        shown (or the next time it's shown after data went stale), instead of
+        walking the whole customer directory tree eagerly at startup."""
+        if self._add_tree_stale and self._is_add_tab_active():
+            self.refresh_quote_tree()
+
     def refresh_quote_tree(self):
         """Refresh the quote tree with current filter settings (async with background thread)"""
+        if not self._is_add_tab_active():
+            self._add_tree_stale = True
+            return
+        self._add_tree_stale = False
+
         # Cancel any existing worker
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
