@@ -50,6 +50,11 @@
 - **Track staleness recursively, not just on the top directory.** A single `getmtime` on a customer dir misses nested subdirectory changes; walk dirs (not files) for a lightweight recursive mtime check.
 - **Don't commit partial index data from a cancelled walk.** Collect rows into a local list first; only delete + insert + mark-indexed after the walk actually completes.
 - **Let index-query failures propagate, don't collapse them into "no match."** A caught `sqlite3.Error` returned as `None` is indistinguishable from a confirmed no-match; callers need to fall back to a filesystem scan on failure but trust `None` otherwise.
+- **Don't treat a zero-result index query as automatic grounds for a filesystem fallback.** Check `indexed_dirs` coverage (shallow `os.listdir()` per configured base dir, no recursive walk) to tell "confirmed zero matches" apart from "index hasn't caught up yet" before paying for the slow walk.
+
+## Performance / Redundant Work (JobDocs)
+
+- **Memoize a filesystem scan's result instead of re-running it with identical args later in the same operation.** E.g. bulk create's duplicate-check pass and creation pass both queried the same (customer, job_number) — cache the first pass's result set and reuse it, tracking newly-created keys locally for intra-batch duplicates.
 
 ## Build & Packaging
 
