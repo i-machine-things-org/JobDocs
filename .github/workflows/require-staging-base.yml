@@ -1,0 +1,24 @@
+name: Require staging before master
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches:
+      - master
+
+jobs:
+  check-base:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only allow staging to merge into master
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+        run: |
+          if [ "$HEAD_REF" != "staging" ] || [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+            echo "PRs into master must come from staging (integration branch) in this repository."
+            echo "This PR's head branch is '$HEAD_REF' from repository '$HEAD_REPO'."
+            echo "Open it against 'staging' instead: gh pr edit <number> --base staging"
+            exit 1
+          fi

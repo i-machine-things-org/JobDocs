@@ -9,6 +9,8 @@ Loaded as a support module (not a standalone tab); accessed via the
 import os
 import sys
 import csv
+import logging
+import sqlite3
 from io import StringIO
 from pathlib import Path
 from typing import List, Dict, Any
@@ -19,6 +21,8 @@ from PyQt6.QtWidgets import (
 from PyQt6 import uic
 
 from core.base_module import BaseModule
+
+logger = logging.getLogger(__name__)
 
 
 def _get_bulk_ui_path() -> Path:
@@ -166,6 +170,20 @@ class BulkCreateDialog(QDialog):
         for job in recent_jobs:
             if job.get('job_number', '').lower() == job_number_lower:
                 return True, job.get('customer', 'Unknown')
+
+        # Fast path: query the SQLite search index instead of walking every
+        # customer folder on disk. Falls back to a live filesystem scan below
+        # if the index isn't available/populated yet.
+        search_index = self.app_context.get_search_index()
+        if search_index is not None and search_index.is_populated():
+            try:
+                match = search_index.find_job_by_number(job_number)
+            except sqlite3.Error as exc:
+                logger.warning("_check_duplicate_job: index query failed, falling back to filesystem scan: %s", exc)
+            else:
+                if match:
+                    return True, match['customer']
+                return False, None
 
         for dir_key in ['customer_files_dir', 'itar_customer_files_dir']:
             cf_dir = self.app_context.get_setting(dir_key, '')

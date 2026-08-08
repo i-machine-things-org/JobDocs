@@ -10,6 +10,8 @@ This module handles:
 import os
 import sys
 import shutil
+import logging
+import sqlite3
 from pathlib import Path
 from typing import List
 from PyQt6.QtWidgets import (
@@ -29,6 +31,8 @@ from shared.utils import (
     is_blueprint_file, parse_job_numbers, create_file_link,
     sanitize_filename, open_folder, get_next_number
 )
+
+logger = logging.getLogger(__name__)
 
 
 class JobTreeWorker(QThread):
@@ -501,12 +505,28 @@ class JobModule(BaseModule):
         """Check if a job number already exists"""
         job_number_lower = job_number.lower()
 
-        # Check history first
+        # Check history first (catches jobs created this session that may
+        # predate the last background index update)
         recent_jobs = self.app_context.history.get('recent_jobs', [])
         for job in recent_jobs:
             if job.get('job_number', '').lower() == job_number_lower:
                 existing_customer = job.get('customer', 'Unknown')
                 return True, f"{existing_customer}: {job.get('path', 'Unknown')}"
+
+        # Fast path: query the SQLite search index instead of walking every
+        # customer folder on disk. Falls back to a live filesystem scan below
+        # if the index isn't available/populated yet (e.g. first launch,
+        # before the background indexer has completed a pass).
+        search_index = self.app_context.get_search_index()
+        if search_index is not None and search_index.is_populated():
+            try:
+                match = search_index.find_job_by_number(job_number)
+            except sqlite3.Error as exc:
+                logger.warning("_check_duplicate_job: index query failed, falling back to filesystem scan: %s", exc)
+            else:
+                if match:
+                    return True, f"{match['customer']}: {match['path']}"
+                return False, None
 
         # Check file system
         for dir_key in ['customer_files_dir', 'itar_customer_files_dir']:

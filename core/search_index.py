@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     job_number  TEXT    NOT NULL DEFAULT '',
     description TEXT    NOT NULL DEFAULT '',
     drawings    TEXT    NOT NULL DEFAULT '',
+    po_number   TEXT    NOT NULL DEFAULT '',
     path        TEXT    NOT NULL,
     mtime       REAL    NOT NULL,
     UNIQUE(prefix, path)
@@ -143,6 +144,14 @@ PRAGMA user_version = 3;
 COMMIT;
 """
 
+_MIGRATION_V4 = """
+BEGIN;
+ALTER TABLE jobs ADD COLUMN po_number TEXT NOT NULL DEFAULT '';
+DELETE FROM indexed_dirs WHERE kind='cf';
+PRAGMA user_version = 4;
+COMMIT;
+"""
+
 _MAX_RESULTS = 500
 
 
@@ -226,7 +235,7 @@ class SearchIndex:
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version >= 3:
+        if version >= 4:
             return
         if version < 1:
             row = conn.execute(
@@ -240,8 +249,21 @@ class SearchIndex:
         if version < 2:
             logger.info("search_index: migrating schema to v2 (kind-aware indexed_dirs)")
             conn.executescript(_MIGRATION_V2)
-        logger.info("search_index: migrating schema to v3 (quotes table, force re-index)")
-        conn.executescript(_MIGRATION_V3)
+        if version < 3:
+            logger.info("search_index: migrating schema to v3 (quotes table, force re-index)")
+            conn.executescript(_MIGRATION_V3)
+        if version < 4:
+            cols = [row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+            if 'po_number' not in cols:
+                logger.info("search_index: migrating schema to v4 (po_number column, force re-index)")
+                conn.executescript(_MIGRATION_V4)
+            else:
+                # Column already present (e.g. a database that reached this
+                # state outside the normal migration path) — still force a
+                # re-index so any customers indexed before po_number existed
+                # get backfilled, not left with an empty value forever.
+                conn.execute("DELETE FROM indexed_dirs WHERE kind='cf'")
+                conn.execute("PRAGMA user_version = 4")
 
     def _dir_mtime(self, path: str) -> float:
         try:
@@ -448,7 +470,9 @@ class SearchIndex:
                         # root — detects new/deleted jobs inside existing subdirs.
                         scan_errors: List[Exception] = []
                         try:
-                            jobs = app_context.find_job_folders(customer_path, errors=scan_errors)
+                            jobs = app_context.find_job_folders(
+                                customer_path, errors=scan_errors, include_po_number=True,
+                            )
                         except OSError as exc:
                             logger.warning("search_index: find_job_folders(%s): %s", customer_path, exc)
                             continue  # preserve existing rows on scan failure
@@ -469,7 +493,7 @@ class SearchIndex:
                         # re-indexing even when no job folders changed.
                         customer_p = Path(customer_path)
                         container_dirs: set = {customer_path}
-                        for _, job_docs_path in jobs:
+                        for _, job_docs_path, _ in jobs:
                             for p in Path(job_docs_path).parents:
                                 if p == customer_p:
                                     break
@@ -491,7 +515,7 @@ class SearchIndex:
                         scan_cancelled = False
                         scan_failed = False
 
-                        for dir_name, job_docs_path in jobs:
+                        for dir_name, job_docs_path, po_number in jobs:
                             if not dir_name or not dir_name[0].isdigit():
                                 continue
                             job_number, desc, drawings = _parse_job_folder(dir_name)
@@ -501,7 +525,7 @@ class SearchIndex:
                                 continue
                             new_job_rows.append((
                                 prefix, customer, job_number, desc,
-                                ','.join(drawings), job_docs_path, mtime,
+                                ','.join(drawings), po_number, job_docs_path, mtime,
                             ))
 
                         if not jobs:
@@ -525,7 +549,7 @@ class SearchIndex:
                                         continue
                                     new_job_rows.append((
                                         prefix, customer, job_number, desc,
-                                        ','.join(drawings), item_path, mtime,
+                                        ','.join(drawings), '', item_path, mtime,
                                     ))
                             except OSError as exc:
                                 scan_failed = True
@@ -538,8 +562,8 @@ class SearchIndex:
                             )
                             conn.executemany(
                                 """INSERT OR REPLACE INTO jobs
-                                   (prefix, customer, job_number, description, drawings, path, mtime)
-                                   VALUES(?,?,?,?,?,?,?)""",
+                                   (prefix, customer, job_number, description, drawings, po_number, path, mtime)
+                                   VALUES(?,?,?,?,?,?,?,?)""",
                                 new_job_rows,
                             )
 
@@ -721,6 +745,29 @@ class SearchIndex:
         except sqlite3.Error:
             return False
 
+    def find_job_by_number(self, job_number: str) -> Optional[Dict]:
+        """Return the most recently indexed job with an exact (case-insensitive)
+        job_number match, or None if there is confirmed no match. Used for
+        duplicate-job checks, where a substring match (as in search_jobs)
+        would be wrong.
+
+        Raises sqlite3.Error on query failure so callers can distinguish a
+        failed lookup (fall back to a filesystem scan) from a confirmed
+        no-match (safe to treat as "not a duplicate").
+        """
+        with closing(self._connect(timeout=5.0)) as conn:
+            row = conn.execute(
+                "SELECT * FROM jobs WHERE job_number = ? COLLATE NOCASE"
+                " ORDER BY mtime DESC LIMIT 1",
+                (job_number,),
+            ).fetchone()
+
+        if row is None:
+            return None
+        prefix = row['prefix']
+        display_customer = f"[ITAR] {row['customer']}" if prefix == 'ITAR' else row['customer']
+        return {'customer': display_customer, 'path': row['path']}
+
     def search_jobs(
         self,
         term: str,
@@ -766,6 +813,7 @@ class SearchIndex:
                 'job_number': row['job_number'],
                 'description': row['description'],
                 'drawings': drawings,
+                'po_number': row['po_number'],
                 'path': row['path'],
             })
         return results
@@ -797,6 +845,7 @@ class SearchIndex:
                 'job_number': row['name_no_ext'],
                 'description': row['rel_path'] if row['rel_path'] != '.' else '',
                 'drawings': [],
+                'po_number': '',
                 'path': row['dir_path'],
             })
         return results
@@ -832,6 +881,7 @@ class SearchIndex:
                 'job_number': row['quote_name'],
                 'description': '',
                 'drawings': [],
+                'po_number': '',
                 'path': row['path'],
             })
         return results
