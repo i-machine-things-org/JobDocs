@@ -29,7 +29,7 @@
    <item>
     <widget class="QGroupBox" name="historyGroup">
      <property name="title">
-      <string>Recent Jobs</string>
+      <string>Recent Jobs &amp; Quotes</string>
      </property>
      <layout class="QVBoxLayout" name="historyLayout">
       <property name="spacing">
@@ -59,12 +59,17 @@
         </column>
         <column>
          <property name="text">
+          <string>Type</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
           <string>Customer</string>
          </property>
         </column>
         <column>
          <property name="text">
-          <string>Job #</string>
+          <string>Job # / Quote #</string>
          </property>
         </column>
         <column>
