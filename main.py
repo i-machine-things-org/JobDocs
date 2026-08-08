@@ -947,10 +947,26 @@ class JobDocsMainWindow(QMainWindow):
                 available_modules.append((module_name, module_name))
         return available_modules
 
+    def _refresh_available_modules_cache(self) -> None:
+        """Recompute _available_modules_cache from disk. Must be called after
+        install_plugin()/uninstall_plugin() change what's on disk — otherwise
+        a plugin installed/uninstalled mid-session stays invisible/stuck in
+        the Settings dialog's module list until restart (the cache is
+        otherwise only computed once, at startup, in load_modules())."""
+        modules_dir = Path(__file__).parent / 'modules'
+        loader = ModuleLoader(modules_dir, plugins_dir=self._get_plugins_dir())
+        self._available_modules_cache = self._discover_available_modules(loader)
+
     def _on_tab_activated(self, index: int) -> None:
         """Build a lazily-registered tab's real widget the first time it's
-        shown. No-ops for tabs that are already built (or aren't lazy tabs)."""
-        module = self._pending_tab_modules.pop(index, None)
+        shown. No-ops for tabs that are already built (or aren't lazy tabs).
+
+        The module is only popped from _pending_tab_modules *after*
+        get_widget() succeeds — if construction fails, it stays pending so a
+        later click on the tab retries construction instead of leaving the
+        tab permanently stuck as a blank placeholder for the rest of the
+        session."""
+        module = self._pending_tab_modules.get(index)
         if module is None:
             return
         try:
@@ -959,7 +975,15 @@ class JobDocsMainWindow(QMainWindow):
             self.log_message(f"ERROR: Failed to load module {module.__class__.__name__}: {e}")
             import traceback
             traceback.print_exc()
+            QMessageBox.critical(
+                self,
+                "Module Load Error",
+                f"Failed to load the \"{module.get_name()}\" tab:\n\n{e}\n\n"
+                "You can try selecting this tab again."
+            )
             return
+
+        del self._pending_tab_modules[index]
 
         self.tabs.blockSignals(True)
         try:
@@ -1097,6 +1121,7 @@ class JobDocsMainWindow(QMainWindow):
 
     def _on_plugin_install_success(self, module_name: str, dest: str, dep_warning: str, worker: _PluginInstallWorker):
         self._install_progress.close()
+        self._refresh_available_modules_cache()
         if dep_warning:
             msg = (f"Plugin '{module_name}' files copied to:\n{dest}\n\n"
                    f"The plugin may not load until dependencies are resolved.")
@@ -1157,6 +1182,8 @@ class JobDocsMainWindow(QMainWindow):
         except (OSError, shutil.Error) as e:
             QMessageBox.critical(self, "Uninstall Plugin", f"Failed to remove plugin:\n{e}")
             return
+
+        self._refresh_available_modules_cache()
 
         disabled = self.settings.get("disabled_modules", [])
         if choice in disabled:
