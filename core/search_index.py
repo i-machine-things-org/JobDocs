@@ -758,6 +758,59 @@ class SearchIndex:
             return False
         return True
 
+    # ------------------------------------------------------------------
+    # Incremental updates
+    # ------------------------------------------------------------------
+    #
+    # is_fully_covered() and the once-per-launch background indexer
+    # (start_indexer() in modules/search/module.py, wired via
+    # QTimer.singleShot(0, ...) in main.py) only prove a customer directory
+    # was indexed *at some point* — not that the index reflects a job/quote
+    # created after that pass. Job/quote creation call these right after a
+    # successful create so the new entry is searchable immediately this
+    # session, instead of being invisible to search until the app restarts.
+
+    def add_job(
+        self, prefix: str, customer: str, job_number: str, description: str,
+        drawings: List[str], path: str, mtime: Optional[float] = None,
+    ) -> None:
+        """Incrementally add/update a single row in the jobs table.
+
+        Safe to call even if the index has never been fully built — this
+        just adds one row and does not touch indexed_dirs, so it never
+        makes is_fully_covered() claim more coverage than actually exists.
+        """
+        if mtime is None:
+            mtime = self._dir_mtime(path)
+        try:
+            with closing(self._connect(timeout=2.0)) as conn, conn:
+                conn.execute(
+                    """INSERT OR REPLACE INTO jobs
+                       (prefix, customer, job_number, description, drawings, path, mtime)
+                       VALUES(?,?,?,?,?,?,?)""",
+                    (prefix, customer, job_number, description, ','.join(drawings), path, mtime),
+                )
+        except sqlite3.Error as exc:
+            logger.warning("search_index: add_job failed for %s/%s: %s", customer, job_number, exc)
+
+    def add_quote(
+        self, prefix: str, customer: str, quote_name: str, path: str,
+        mtime: Optional[float] = None,
+    ) -> None:
+        """Incrementally add/update a single row in the quotes table. See add_job()."""
+        if mtime is None:
+            mtime = self._dir_mtime(path)
+        try:
+            with closing(self._connect(timeout=2.0)) as conn, conn:
+                conn.execute(
+                    """INSERT OR REPLACE INTO quotes
+                       (prefix, customer, quote_name, path, mtime)
+                       VALUES(?,?,?,?,?)""",
+                    (prefix, customer, quote_name, path, mtime),
+                )
+        except sqlite3.Error as exc:
+            logger.warning("search_index: add_quote failed for %s/%s: %s", customer, quote_name, exc)
+
     def find_job_by_number(self, job_number: str) -> Optional[Dict]:
         """Return the most recently indexed job with an exact (case-insensitive)
         job_number match, or None if there is confirmed no match. Used for

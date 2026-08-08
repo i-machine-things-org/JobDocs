@@ -265,6 +265,18 @@ class BulkCreateDialog(QDialog):
             if reply != QMessageBox.StandardButton.Yes:
                 return
 
+            # QMessageBox.question() above blocks indefinitely with no timeout
+            # while waiting on the user — this app is used against what looks
+            # like a shared network path, so a job could be created externally
+            # (another workstation) during that wait. Re-check every job not
+            # already flagged as a duplicate before trusting pre_existing in
+            # the creation loop below; jobs already flagged don't need
+            # re-checking since they're skipped either way.
+            unconfirmed_keys = {(j['customer'], j['job_number']) for j in jobs} - pre_existing
+            for customer_key, job_number_key in unconfirmed_keys:
+                if self.job_exists(customer_key, job_number_key, is_itar):
+                    pre_existing.add((customer_key, job_number_key))
+
         # Find the job module (the one that has create_single_job)
         job_module = None
         for module in self.app_context.main_window.modules:
