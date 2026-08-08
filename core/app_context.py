@@ -362,6 +362,6 @@ class AppContext:
                     if os.path.isdir(item_path):
                         quotes.append((item, item_path))
             except OSError as e:
-                logger.debug("find_quote_folders: OSError %s", e)
+                logger.warning("find_quote_folders: OSError %s", e)
 
         return quotes
