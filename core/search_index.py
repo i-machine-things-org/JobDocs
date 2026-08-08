@@ -258,6 +258,11 @@ class SearchIndex:
                 logger.info("search_index: migrating schema to v4 (po_number column, force re-index)")
                 conn.executescript(_MIGRATION_V4)
             else:
+                # Column already present (e.g. a database that reached this
+                # state outside the normal migration path) — still force a
+                # re-index so any customers indexed before po_number existed
+                # get backfilled, not left with an empty value forever.
+                conn.execute("DELETE FROM indexed_dirs WHERE kind='cf'")
                 conn.execute("PRAGMA user_version = 4")
 
     def _dir_mtime(self, path: str) -> float:
