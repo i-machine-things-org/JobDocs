@@ -18,9 +18,9 @@ staging      - Integration/test branch; all feature PRs land here first
 - Main branch for releases
 - Only ever updated by merging `staging` in (see Branch Workflow below)
 - Tagged with version numbers for releases (`vMAJOR.MINOR.PATCH`)
-- Protected: direct PRs from feature branches are blocked; only a PR with
-  head `staging` can merge here (enforced by
-  `.github/workflows/require-staging-base.yml`)
+- `.github/workflows/require-staging-base.yml` fails any PR into `master`
+  whose head isn't `staging`; branch protection on `master` marks this
+  check required so a failing check blocks the merge button
 
 ---
 
@@ -34,15 +34,14 @@ staging      - Integration/test branch; all feature PRs land here first
   contents are verified
 
 **Use When**:
-- Opening any new PR (`gh pr create --base staging`, or just let it default —
-  see `.github/workflows/require-staging-base.yml` for the enforcement)
+- Opening any new PR with `gh pr create --base staging`.
 
 ---
 
 ## Branch Workflow
 
 ### Development Flow
-```
+```text
 feature/fix/chore branch → PR into staging → (review + testing) → staging → master PR → master
 ```
 
