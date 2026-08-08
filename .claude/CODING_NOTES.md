@@ -8,6 +8,7 @@
 - **Avoid broad `except Exception`.** Catch specific exceptions (`OSError`, `AttributeError`, `shutil.Error`, etc.) so unexpected errors aren't silently masked.
 - **Don't leave silent `except Exception: pass`.** Log at debug/warning level so failures stay traceable without breaking the fallback behavior.
 - **Drop f-string prefixes with no placeholders.** Ruff flags these (F541); use plain string literals instead.
+- **A hardcoded `if entry_type == 'x':` special-case silently drops every other type.** `add_to_history()` only had a `'job'` branch though the plugin template documents it as a generic mechanism; quote entries vanished with no error. Prefer a generic `history[f'recent_{entry_type}s']` keying over enumerating known types, or add an explicit `else: log a warning`.
 - **Escape backslashes in non-raw docstrings.** A bare backslash (e.g. `runtime\python.exe`) is an invalid escape sequence.
 
 ## File & Directory Operations
