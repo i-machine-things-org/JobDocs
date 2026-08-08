@@ -1269,6 +1269,17 @@ class FilePreviewWidget(QWidget):
     # Cap decoded size to this many pixels on the longer side — a full-res
     # decode of a high-res scan/photo can run tens of MB for what's ultimately
     # shown in a ~200-400px preview pane. Shared with the PDF render path below.
+    #
+    # NOTE: setScaledSize() below only bounds the *decode itself* for formats
+    # whose Qt plugin advertises QImageIOHandler.ImageOption.ScaledSize
+    # support — JPEG does, but PNG/BMP/WEBP/ICO/GIF do not (verified against
+    # this repo's Qt build: supportsOption(ScaledSize) is False for all
+    # five). For those formats — which includes the common "scanned drawing"
+    # case (PNG/TIFF) — Qt still decodes at full native resolution
+    # internally before scaling down, so the transient decode-time memory
+    # spike is unchanged from the old QPixmap(path) behavior. What this DOES
+    # fix for every format is steady-state memory: self._pixmap only ever
+    # holds the small scaled copy, never a full-res decode, between previews.
     _PREVIEW_MAX_DIM = 600
 
     def __init__(self, parent=None):
@@ -1338,9 +1349,15 @@ class FilePreviewWidget(QWidget):
     def _load_bounded_image(self, file_path: str) -> QPixmap | None:
         """Decode file_path bounded to _PREVIEW_MAX_DIM on the longer side.
 
-        Uses QImageReader.setScaledSize() so the decoder itself produces a
-        small image instead of decoding the original at full resolution and
-        scaling it down afterward — mirrors the PDF render path's MAX_DIM cap.
+        Requests QImageReader.setScaledSize() so the decoder produces a small
+        image directly — but this only bounds actual *decode-time* memory for
+        formats whose Qt plugin supports native scaled reading (JPEG, on this
+        Qt build). For formats that don't (PNG, BMP, WEBP, ICO, GIF — see
+        _PREVIEW_MAX_DIM's comment), Qt silently falls back to decoding at
+        full native resolution and then scaling the QImage down in software,
+        same peak memory as the old QPixmap(file_path) path. Either way, only
+        the small scaled result is kept afterward, so steady-state/resident
+        memory is bounded for all formats even when decode-time memory isn't.
         """
         reader = QImageReader(file_path)
         reader.setAutoTransform(True)  # respect EXIF orientation
