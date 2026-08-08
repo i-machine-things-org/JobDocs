@@ -743,11 +743,6 @@ class JobDocsMainWindow(QMainWindow):
 
         return self.DEFAULT_SETTINGS.copy()
 
-    def _partial_save_settings(self, partial: Dict[str, Any]):
-        """Merge partial settings dict and persist to disk (used by mid-dialog callbacks)."""
-        self.settings.update(partial)
-        self.save_settings()
-
     def save_settings(self):
         """Save settings to file and sync to remote server if configured"""
         try:
@@ -981,7 +976,6 @@ class JobDocsMainWindow(QMainWindow):
 
         dialog = SettingsDialog(
             self.settings, self, available_modules,
-            save_callback=self._partial_save_settings,
             active_keys=set(self.DEFAULT_SETTINGS)
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
