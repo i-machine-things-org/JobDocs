@@ -202,7 +202,7 @@ class DropZone(QFrame):
                     'drop the file here.'
                 )
         if not is_outlook_web and not files and is_classic_outlook:
-            files = DropZone._handle_classic_outlook_drop(mime)
+            files = DropZone._handle_classic_outlook_drop(mime, self)
             if not files:
                 from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(
@@ -230,7 +230,7 @@ class DropZone(QFrame):
                     # Non-local URL (blob:, https:, etc.) — log and skip for now
                     print(f"[DropZone]   Skipping non-local URL: {url.toString()}", flush=True)
         if not files and descriptor_fmt:
-            files = DropZone._handle_outlook_drop(mime, descriptor_fmt)
+            files = DropZone._handle_outlook_drop(mime, descriptor_fmt, self)
 
         print(f"[DropZone] emitting {len(files)} file(s)", flush=True)
         for f in files:
@@ -523,7 +523,7 @@ class DropZone(QFrame):
         return candidates
 
     @staticmethod
-    def _handle_classic_outlook_drop(mime_data) -> list:
+    def _handle_classic_outlook_drop(mime_data, parent=None) -> list:
         """Handle drag from the classic Outlook desktop app — including
         multiple selected emails dragged at once.
 
@@ -580,6 +580,26 @@ class DropZone(QFrame):
                 except Exception as e:
                     print(f"[DropZone] Could not parse descriptor for subject(s): {e}", flush=True)
 
+        # raw_ids and subjects come from two independently-filtered parses of
+        # separate MIME blobs (Csv vs. text/plain) with no shared row key —
+        # they're only ever paired by position. If one row is dropped from
+        # one list but not the other (e.g. a blank sender name skips a
+        # subjects row but not the matching raw_ids row), positional pairing
+        # silently shifts and every subsequent (raw_id, subject) pair points
+        # to the wrong email — which could feed a mismatched subject into
+        # _mapi_save_email's MAPI subject-search fallback and retrieve the
+        # WRONG email. When lengths disagree, treat raw_id as authoritative
+        # and drop subjects entirely rather than risk mis-pairing; retrieval
+        # then relies on the direct entry-ID lookup only for this drop.
+        if raw_ids and subjects and len(raw_ids) != len(subjects):
+            print(
+                f"[DropZone] Classic Outlook: entry ID count ({len(raw_ids)}) != "
+                f"subject count ({len(subjects)}) — positional pairing is unreliable; "
+                "discarding subjects to avoid mis-pairing IDs with the wrong subject",
+                flush=True,
+            )
+            subjects = []
+
         if not raw_ids and not subjects:
             print('[DropZone] Classic Outlook: no entry ID or subject — cannot retrieve email', flush=True)
             return []
@@ -591,13 +611,35 @@ class DropZone(QFrame):
         _dropzone_tmp_dirs.append(tmp_dir)
 
         files: list = []
+        failed_labels: list = []
         for idx in range(item_count):
             raw_id = raw_ids[idx] if idx < len(raw_ids) else ''
             subject = subjects[idx] if idx < len(subjects) else ''
             results = DropZone._mapi_save_email(raw_id, subject, tmp_dir, idx)
-            files.extend(results)
+            if results:
+                files.extend(results)
+            else:
+                label = subject or (f"{raw_id[:20]}..." if raw_id else f"item {idx + 1}")
+                failed_labels.append(label)
+                print(f"[DropZone] Classic Outlook: could not retrieve item {idx} ({label!r})", flush=True)
 
         print(f"[DropZone] Classic Outlook: retrieved {len(files)} file(s) from {item_count} email(s)", flush=True)
+
+        # Only warn here for a *partial* failure (some retrieved, some not) — a
+        # total failure (files empty) is already reported by dropEvent()'s
+        # existing "Email Not Retrieved" check on the caller side; warning here
+        # too would just double up the dialog for that case.
+        if failed_labels and files:
+            from PyQt6.QtWidgets import QMessageBox
+            missed = ', '.join(failed_labels)
+            QMessageBox.warning(
+                parent, 'Some Emails Not Retrieved',
+                f"{len(failed_labels)} of {item_count} selected emails could not be retrieved.\n\n"
+                f"Not retrieved: {missed}\n\n"
+                'Make sure Outlook is open and signed in, then try dragging the '
+                'missing email(s) again individually.'
+            )
+
         return files
 
     # Fixed-size fields of a FILEDESCRIPTOR(W) struct before cFileName (dwFlags,
@@ -642,7 +684,7 @@ class DropZone(QFrame):
         return filenames
 
     @staticmethod
-    def _handle_outlook_drop(mime_data, descriptor_fmt: str) -> list:
+    def _handle_outlook_drop(mime_data, descriptor_fmt: str, parent=None) -> list:
         """Save the Outlook virtual-file bytes to a temp file, then extract attachments.
 
         CFSTR_FILECONTENTS (FileContents) is retrieved through Qt's QMimeData,
@@ -680,7 +722,7 @@ class DropZone(QFrame):
             from PyQt6.QtWidgets import QMessageBox
             missed = ', '.join(filenames[1:])
             QMessageBox.warning(
-                None, 'Only First File Retrieved',
+                parent, 'Only First File Retrieved',
                 f"This drop contains {len(filenames)} files, but only "
                 f"'{filename}' could be retrieved.\n\n"
                 f"Not retrieved: {missed}\n\n"
