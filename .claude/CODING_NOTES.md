@@ -40,6 +40,8 @@
 - **Escape untrusted strings before interpolating into RichText labels.** A crafted version string could inject HTML into a `QLabel`; use `html.escape()`.
 - **Keep a live reference to non-modal dialogs.** Store on a longer-lived owner (e.g. `window._dialog = dlg`) and clear it on `finished`, or the dialog is garbage-collected and disappears immediately.
 - **Bound image decode size before loading, don't scale after.** `QPixmap(path)` decodes at full resolution even if only shown in a small preview. Use `QImageReader.setScaledSize()` (checked against `reader.size()` first) so the decoder itself produces a small image — mirrors the MAX_DIM cap already used for PDF preview rendering.
+- **`QMimeData.data()` has no `FORMATETC.lindex` — it can only ever retrieve entry 0 of a multi-item OLE virtual-file drag (`FILEGROUPDESCRIPTOR` + `FileContents`).** Parse and log every entry the descriptor lists (documented fixed-size struct, safe to loop), but warn the user explicitly when count > 1 instead of silently emitting only the first file as a full success.
+- **A "one row = one item" MIME payload used for single-select must be re-audited when multi-select is possible.** Classic Outlook's drag data mirrors this (`text/plain` header+rows, `Csv` entry IDs) — code that only reads line/entry 0 silently drops every other selected item with no error.
 
 ## Print & Rendering
 
