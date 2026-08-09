@@ -169,9 +169,11 @@ def test_find_job_folders_honors_is_cancelled_mid_scan(tmp_path):
 
     jobs = ctx.find_job_folders(str(cf_root / 'Acme'), is_cancelled=is_cancelled)
 
-    # 25 folders exist total; cancelling almost immediately must yield far
-    # fewer than that, proving the loop is polled per-item, not once per call.
-    assert len(jobs) < 25
+    # 25 folders exist total across 5 PO folders of 5 jobs each. Cancelling
+    # after the second poll must yield fewer than 5 -- if cancellation only
+    # took effect between PO folders (not per-job), all 5 jobs of the first
+    # PO folder would still come back (5 < 25 would wrongly pass).
+    assert len(jobs) < 5
 
 
 def test_find_quote_folders_honors_is_cancelled_mid_scan(tmp_path):
