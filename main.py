@@ -948,14 +948,11 @@ class JobDocsMainWindow(QMainWindow):
             traceback.print_exc()
 
     def _start_search_indexer(self):
-        # Read-only (search-only) installs never build/persist a search
-        # index — SearchModule.initialize() already skips opening the
-        # SQLite index file in that case (see modules/search/module.py),
-        # so this is belt-and-suspenders: don't even ask modules to index.
-        # Search still works via the live filesystem-walk fallback that
-        # perform_search() already uses whenever no index is populated.
-        if self.readonly_mode:
-            return
+        # The search index is a local performance cache, not a write into
+        # shop job/blueprint directories, so read-only installs still build
+        # and use it — a read-only kiosk searching a large shared drive is
+        # exactly the case that benefits most from not re-walking the
+        # filesystem on every query.
         for module in self.modules:
             if hasattr(module, 'start_indexer'):
                 try:

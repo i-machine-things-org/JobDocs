@@ -129,14 +129,13 @@ class AppContext:
         background indexer maintains, so callers should check is_populated()
         before relying on results being complete.
 
-        Returns None on a read-only (search-only) install without ever
-        opening/creating the on-disk index file — read-only mode must not
-        persist anything to disk, including index creation. Callers should
-        already be falling back to a live filesystem search when this
-        returns None (mirrors SearchModule's own index handling).
+        The index DB is a local performance cache under config_dir, not a
+        write into shop job/blueprint directories — read-only mode restricts
+        the latter, not the app's own local cache, so this is available on
+        read-only installs too. A read-only kiosk that searches a large
+        shared drive benefits the most from not re-walking the filesystem
+        on every query.
         """
-        if self._readonly_mode:
-            return None
         if self._search_index is None and not self._search_index_failed:
             try:
                 from core.search_index import SearchIndex
