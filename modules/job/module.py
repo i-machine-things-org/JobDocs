@@ -84,6 +84,14 @@ class JobTreeWorker(QThread):
                         customer_path, is_cancelled=lambda: self._is_cancelled
                     )
 
+                    # A cancelled scan can still return here with partial results
+                    # (find_job_folders() stops mid-walk but still returns what it
+                    # had). Don't emit them -- a refresh that cancelled this worker
+                    # has already moved on to a new one, and a stale customer_loaded
+                    # signal would land on the freshly-cleared tree.
+                    if self._is_cancelled:
+                        break
+
                     # Only emit if customer has jobs
                     if jobs:
                         self.customer_loaded.emit(display_name, customer_path, jobs)
@@ -91,7 +99,10 @@ class JobTreeWorker(QThread):
             except OSError as e:
                 print(f"[JobTreeWorker] OSError: {e}", flush=True)
 
-        self.finished.emit()
+        # Likewise, don't signal completion for a cancelled run -- the worker
+        # that superseded this one will emit its own finished() when it's done.
+        if not self._is_cancelled:
+            self.finished.emit()
 
 
 class JobModule(BaseModule):
