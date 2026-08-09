@@ -21,9 +21,15 @@ from core.app_context import AppContext
 from modules.search.module import SearchModule
 
 
+# QApplication.clipboard() requires a live QApplication instance. Constructed
+# once at module import time and held in a module-level variable so it isn't
+# garbage-collected between test calls (a local variable whose return value
+# is discarded gets GC'd immediately, leaving QApplication.clipboard() None).
+_QAPP = QApplication.instance() or QApplication([])
+
+
 def _qapp() -> QApplication:
-    """QApplication.clipboard() requires a live QApplication instance."""
-    return QApplication.instance() or QApplication([])
+    return _QAPP
 
 
 class _FakeTable:
