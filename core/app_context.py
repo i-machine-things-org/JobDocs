@@ -128,7 +128,15 @@ class AppContext:
         could not be opened. Points at the same DB file the Search tab's
         background indexer maintains, so callers should check is_populated()
         before relying on results being complete.
+
+        Returns None on a read-only (search-only) install without ever
+        opening/creating the on-disk index file — read-only mode must not
+        persist anything to disk, including index creation. Callers should
+        already be falling back to a live filesystem search when this
+        returns None (mirrors SearchModule's own index handling).
         """
+        if self._readonly_mode:
+            return None
         if self._search_index is None and not self._search_index_failed:
             try:
                 from core.search_index import SearchIndex
@@ -141,11 +149,24 @@ class AppContext:
         return self._search_index
 
     def save_settings(self):
-        """Save application settings to disk"""
+        """Save application settings to disk.
+
+        No-ops on a read-only (search-only) install. This is the central,
+        defense-in-depth enforcement of readonly_mode: any module — including
+        ones that forget to check readonly_mode/is_readonly() themselves, or
+        a future/plugin module that never learns about it — is blocked here
+        before it can bypass the restriction through the shared context.
+        """
+        if self._readonly_mode:
+            logger.debug("save_settings: skipped (read-only install)")
+            return
         self._save_settings()
 
     def save_history(self):
-        """Save application history to disk"""
+        """Save application history to disk. No-ops in read-only mode; see save_settings()."""
+        if self._readonly_mode:
+            logger.debug("save_history: skipped (read-only install)")
+            return
         self._save_history()
 
     def log_message(self, message: str):

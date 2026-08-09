@@ -415,6 +415,16 @@ class SearchModule(BaseModule):
 
     def initialize(self, app_context):
         super().initialize(app_context)
+        if app_context.readonly_mode:
+            # Read-only (search-only) installs must never write a persisted
+            # index file to disk — so never even open/create search_index.db.
+            # perform_search() already falls back to a live filesystem walk
+            # whenever self._index is None or is_populated() is False, so
+            # search still works each session; it's just not accelerated by
+            # a cached index. See core/app_context.py's get_search_index()
+            # for the equivalent guard on the shared-context accessor.
+            self._index = None
+            return
         try:
             db_path = get_config_dir() / 'search_index.db'
             self._index = SearchIndex(db_path)
@@ -424,6 +434,11 @@ class SearchModule(BaseModule):
 
     def start_indexer(self):
         """Start the background index update. Called after the UI is shown."""
+        if self.app_context.readonly_mode:
+            # Defense in depth: initialize() never opens an index on a
+            # read-only install (self._index is already None), but make the
+            # rule explicit here too rather than relying solely on that.
+            return
         if self._index is None:
             return
         if self._index_worker and self._index_worker.isRunning():

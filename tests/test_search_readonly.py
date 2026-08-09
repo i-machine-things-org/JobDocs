@@ -121,7 +121,7 @@ class TestBlueprintsPathActionReadonlyGuard:
 
         # suppress_bp_link_notification=True avoids the modal QMessageBox
         # confirmation on a successful link, keeping this test headless-safe.
-        app_context, show_error, save_settings = _make_app_context(
+        app_context, show_error, _save_settings = _make_app_context(
             tmp_path, bp_dir, readonly_mode=False, suppress_notification=True,
         )
         module = _make_module(app_context, source)
