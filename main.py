@@ -657,6 +657,14 @@ class JobDocsMainWindow(QMainWindow):
         self.settings_file = self.config_dir / 'settings.json'
         self.history_file = self.config_dir / 'history.json'
 
+        # Read-only (search-only) install: only the Search tab loads, and the
+        # menu bar (Settings, Install Plugin, etc.) is hidden entirely. This
+        # must be determined *before* settings/history are loaded so the
+        # local-cache write-back paths in load_settings()/load_history() below
+        # can respect it — read-only mode must prevent all automatic
+        # persistence, not just the module-selection/UI behavior.
+        self.readonly_mode = _is_readonly_install()
+
         # Load settings first (needed for remote sync setup)
         self.settings = self.load_settings()
 
@@ -666,10 +674,6 @@ class JobDocsMainWindow(QMainWindow):
 
         self.history = self.load_history()
         self.modules = []  # Store loaded modules
-
-        # Read-only (search-only) install: only the Search tab loads, and the
-        # menu bar (Settings, Install Plugin, etc.) is hidden entirely.
-        self.readonly_mode = _is_readonly_install()
 
         # Setup UI
         self.setWindowTitle("JobDocs — Search" if self.readonly_mode else "JobDocs")
@@ -749,12 +753,14 @@ class JobDocsMainWindow(QMainWindow):
                 # Remote settings loaded successfully - use them
                 merged = self.DEFAULT_SETTINGS.copy()
                 merged.update(remote_settings)
-                # Save to local to keep in sync
-                try:
-                    with open(self.settings_file, 'w') as f:
-                        json.dump(merged, f, indent=2)
-                except IOError:
-                    pass
+                # Save to local to keep in sync — never on a read-only
+                # (search-only) install, which must not write a local cache.
+                if not self.readonly_mode:
+                    try:
+                        with open(self.settings_file, 'w') as f:
+                            json.dump(merged, f, indent=2)
+                    except IOError:
+                        pass
                 return merged
 
         # Fall back to local settings
@@ -772,6 +778,9 @@ class JobDocsMainWindow(QMainWindow):
 
     def save_settings(self):
         """Save settings to file and sync to remote server if configured"""
+        if self.readonly_mode:
+            logger.debug("save_settings: skipped (read-only install)")
+            return
         try:
             # Save locally first
             with open(self.settings_file, 'w') as f:
@@ -790,12 +799,14 @@ class JobDocsMainWindow(QMainWindow):
         if self.remote_sync.is_enabled():
             remote_history = self.remote_sync.load_json_from_remote('history.json')
             if remote_history:
-                # Save to local to keep in sync
-                try:
-                    with open(self.history_file, 'w') as f:
-                        json.dump(remote_history, f, indent=2)
-                except IOError:
-                    pass
+                # Save to local to keep in sync — never on a read-only
+                # (search-only) install, which must not write a local cache.
+                if not self.readonly_mode:
+                    try:
+                        with open(self.history_file, 'w') as f:
+                            json.dump(remote_history, f, indent=2)
+                    except IOError:
+                        pass
                 return remote_history
 
         # Fall back to local history
@@ -810,6 +821,9 @@ class JobDocsMainWindow(QMainWindow):
 
     def save_history(self):
         """Save history to file and sync to remote server if configured"""
+        if self.readonly_mode:
+            logger.debug("save_history: skipped (read-only install)")
+            return
         try:
             # Save locally first
             with open(self.history_file, 'w') as f:
@@ -934,6 +948,14 @@ class JobDocsMainWindow(QMainWindow):
             traceback.print_exc()
 
     def _start_search_indexer(self):
+        # Read-only (search-only) installs never build/persist a search
+        # index — SearchModule.initialize() already skips opening the
+        # SQLite index file in that case (see modules/search/module.py),
+        # so this is belt-and-suspenders: don't even ask modules to index.
+        # Search still works via the live filesystem-walk fallback that
+        # perform_search() already uses whenever no index is populated.
+        if self.readonly_mode:
+            return
         for module in self.modules:
             if hasattr(module, 'start_indexer'):
                 try:
@@ -1522,7 +1544,8 @@ near-instant even across thousands of jobs.</p>""",
             except Exception as e:
                 print(f"Error cleaning up module {module.get_name()}: {e}")
 
-        # Save any pending settings/history
+        # Save any pending settings/history. On a read-only (search-only)
+        # install these are no-ops (see save_settings()/save_history() above).
         try:
             self.save_settings()
             self.save_history()
