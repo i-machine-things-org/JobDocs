@@ -94,14 +94,20 @@ class TestAtomicWriteJson:
     def test_fsync_called_before_replace(self, tmp_path, monkeypatch):
         calls = []
         original_fsync = os.fsync
+        original_replace = os.replace
 
         def _tracking_fsync(fd):
-            calls.append(fd)
+            calls.append('fsync')
             return original_fsync(fd)
 
+        def _tracking_replace(src, dst):
+            calls.append('replace')
+            return original_replace(src, dst)
+
         monkeypatch.setattr(os, 'fsync', _tracking_fsync)
+        monkeypatch.setattr(os, 'replace', _tracking_replace)
 
         target = tmp_path / 'settings.json'
         atomic_write_json(target, {'a': 1})
 
-        assert len(calls) == 1
+        assert calls == ['fsync', 'replace']
