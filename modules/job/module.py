@@ -80,7 +80,9 @@ class JobTreeWorker(QThread):
                         continue
 
                     display_name = f"[{prefix}] {customer}" if prefix else customer
-                    jobs = self.app_context.find_job_folders(customer_path)
+                    jobs = self.app_context.find_job_folders(
+                        customer_path, is_cancelled=lambda: self._is_cancelled
+                    )
 
                     # Only emit if customer has jobs
                     if jobs:

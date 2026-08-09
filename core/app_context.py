@@ -255,12 +255,24 @@ class AppContext:
 
         return Path(base_dir) / path_str
 
-    def find_job_folders(self, customer_path: str, *, errors: Optional[List[OSError]] = None) -> List[Tuple[str, str]]:
+    def find_job_folders(
+        self,
+        customer_path: str,
+        *,
+        errors: Optional[List[OSError]] = None,
+        is_cancelled: Optional[Callable[[], bool]] = None,
+    ) -> List[Tuple[str, str]]:
         """
         Find all job folders in a customer directory.
 
         Args:
             customer_path: Path to customer directory
+            errors: Optional list to collect OSErrors encountered
+            is_cancelled: Optional callable polled inside the per-item scan
+                loops (PO folders, job folders) so a caller running this on a
+                background thread can make cancellation take effect promptly
+                even mid-way through a single, large customer directory —
+                not just between separate calls to this method.
 
         Returns:
             List of (job_name, job_docs_path) tuples
@@ -268,6 +280,7 @@ class AppContext:
         structure = self._settings.get('job_folder_structure', '{customer}/{job_folder}/job documents')
         logger.debug("find_job_folders: customer=%s structure=%s", customer_path, structure)
 
+        cancelled = is_cancelled or (lambda: False)
         after_customer = structure.split('{customer}/', 1)[-1] if '{customer}/' in structure else structure
         jobs = []
 
@@ -275,6 +288,8 @@ class AppContext:
             suffix = after_customer.replace('{job_folder}/', '', 1)
             try:
                 for item in os.listdir(customer_path):
+                    if cancelled():
+                        break
                     item_path = os.path.join(customer_path, item)
                     if os.path.isdir(item_path):
                         expected_docs_path = os.path.join(item_path, suffix)
@@ -298,6 +313,8 @@ class AppContext:
                     if os.path.exists(base_path):
                         try:
                             for po_dir in sorted(os.listdir(base_path)):
+                                if cancelled():
+                                    break
                                 po_path = os.path.join(base_path, po_dir)
                                 if not os.path.isdir(po_path):
                                     continue
@@ -305,6 +322,8 @@ class AppContext:
                                 if not os.path.exists(sub_path):
                                     continue
                                 for item in sorted(os.listdir(sub_path)):
+                                    if cancelled():
+                                        break
                                     item_path = os.path.join(sub_path, item)
                                     if os.path.isdir(item_path):
                                         if suffix:
@@ -322,6 +341,8 @@ class AppContext:
                     if os.path.exists(prefix_path):
                         try:
                             for item in os.listdir(prefix_path):
+                                if cancelled():
+                                    break
                                 item_path = os.path.join(prefix_path, item)
                                 if os.path.isdir(item_path):
                                     if suffix:
@@ -338,13 +359,22 @@ class AppContext:
         logger.debug("find_job_folders: returning %d jobs from %s", len(jobs), customer_path)
         return jobs
 
-    def find_quote_folders(self, customer_path: str) -> List[Tuple[str, str]]:
+    def find_quote_folders(
+        self,
+        customer_path: str,
+        *,
+        is_cancelled: Optional[Callable[[], bool]] = None,
+    ) -> List[Tuple[str, str]]:
         """
         Find all quote folders in a customer directory.
         Quotes are located in customer/{quote_folder_path}/quote_folders
 
         Args:
             customer_path: Path to customer directory
+            is_cancelled: Optional callable polled inside the item-scan loop
+                so a caller running this on a background thread can make
+                cancellation take effect promptly rather than only between
+                separate calls to this method.
 
         Returns:
             List of (quote_name, quote_path) tuples
@@ -352,12 +382,15 @@ class AppContext:
         quote_folder_path = self._settings.get('quote_folder_path', 'Quotes')
         quotes_dir = os.path.join(customer_path, quote_folder_path)
 
+        cancelled = is_cancelled or (lambda: False)
         quotes = []
 
         if os.path.exists(quotes_dir):
             try:
                 items = os.listdir(quotes_dir)
                 for item in items:
+                    if cancelled():
+                        break
                     item_path = os.path.join(quotes_dir, item)
                     if os.path.isdir(item_path):
                         quotes.append((item, item_path))

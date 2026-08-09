@@ -75,7 +75,9 @@ class QuoteTreeWorker(QThread):
                         continue
 
                     display_name = f"[{prefix}] {customer}" if prefix else customer
-                    quotes = self.app_context.find_quote_folders(customer_path)
+                    quotes = self.app_context.find_quote_folders(
+                        customer_path, is_cancelled=lambda: self._is_cancelled
+                    )
 
                     # Only emit if customer has quotes
                     if quotes:
