@@ -36,7 +36,8 @@ class AppContext:
         show_info_callback: Callable[[str, str], None],
         get_customer_list_callback: Callable[[], List[str]],
         add_to_history_callback: Callable[[str, Dict[str, Any]], None],
-        main_window: Optional[Any] = None
+        main_window: Optional[Any] = None,
+        readonly_mode: bool = False
     ):
         """
         Initialize the application context.
@@ -53,6 +54,11 @@ class AppContext:
             get_customer_list_callback: Function to get customer list
             add_to_history_callback: Function to add to history
             main_window: Optional reference to main window for advanced use
+            readonly_mode: True for a read-only (search-only) install — see
+                main.py's _is_readonly_install(). Modules must check this
+                (via the readonly_mode property or is_readonly()) before
+                performing any filesystem write or persisted settings change,
+                since a read-only install still loads the Search module.
         """
         self._settings = settings
         self._history = history
@@ -66,8 +72,23 @@ class AppContext:
         self._add_to_history = add_to_history_callback
         self._main_window = main_window
         self._print_provider = None
+        self._readonly_mode = readonly_mode
         self._search_index = None
         self._search_index_failed = False
+
+    @property
+    def readonly_mode(self) -> bool:
+        """True if this is a read-only (search-only) install.
+
+        Modules must not perform filesystem writes (e.g. creating/linking
+        files into shop directories) or persist settings changes when this
+        is True.
+        """
+        return self._readonly_mode
+
+    def is_readonly(self) -> bool:
+        """Same as the readonly_mode property; provided for call-site clarity."""
+        return self._readonly_mode
 
     @property
     def settings(self) -> Dict[str, Any]:
@@ -107,6 +128,13 @@ class AppContext:
         could not be opened. Points at the same DB file the Search tab's
         background indexer maintains, so callers should check is_populated()
         before relying on results being complete.
+
+        The index DB is a local performance cache under config_dir, not a
+        write into shop job/blueprint directories — read-only mode restricts
+        the latter, not the app's own local cache, so this is available on
+        read-only installs too. A read-only kiosk that searches a large
+        shared drive benefits the most from not re-walking the filesystem
+        on every query.
         """
         if self._search_index is None and not self._search_index_failed:
             try:
@@ -120,11 +148,24 @@ class AppContext:
         return self._search_index
 
     def save_settings(self):
-        """Save application settings to disk"""
+        """Save application settings to disk.
+
+        No-ops on a read-only (search-only) install. This is the central,
+        defense-in-depth enforcement of readonly_mode: any module — including
+        ones that forget to check readonly_mode/is_readonly() themselves, or
+        a future/plugin module that never learns about it — is blocked here
+        before it can bypass the restriction through the shared context.
+        """
+        if self._readonly_mode:
+            logger.debug("save_settings: skipped (read-only install)")
+            return
         self._save_settings()
 
     def save_history(self):
-        """Save application history to disk"""
+        """Save application history to disk. No-ops in read-only mode; see save_settings()."""
+        if self._readonly_mode:
+            logger.debug("save_history: skipped (read-only install)")
+            return
         self._save_history()
 
     def log_message(self, message: str):
