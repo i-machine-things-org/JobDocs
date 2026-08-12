@@ -437,7 +437,8 @@ class QuoteModule(BaseModule):
 
                     quote_dest = quote_path / file_name
                     if not quote_dest.exists():
-                        create_file_link(bp_dest, quote_dest, link_type)
+                        if not create_file_link(bp_dest, quote_dest, link_type):
+                            self.log_message(f"Warning: Could not link {file_name} to quote")
                 else:
                     quote_dest = quote_path / file_name
                     if not quote_dest.exists():
@@ -464,7 +465,8 @@ class QuoteModule(BaseModule):
                             if drawing_lower in bp_name and bp_name.endswith(ext.lower()):
                                 dest = quote_path / bp_file.name
                                 if not dest.exists():
-                                    create_file_link(bp_file, dest, link_type)
+                                    if not create_file_link(bp_file, dest, link_type):
+                                        self.log_message(f"Warning: Could not link {bp_file.name} to quote")
 
             # Add to history
             self.app_context.add_to_history('quote', {
@@ -868,8 +870,11 @@ class QuoteModule(BaseModule):
 
                     quote_dest = Path(quote_path) / file_name
                     if bp_ready and not quote_dest.exists():
-                        create_file_link(bp_dest, quote_dest, link_type)
-                        added += 1
+                        if create_file_link(bp_dest, quote_dest, link_type):
+                            added += 1
+                        else:
+                            skipped += 1
+                            self.log_message(f"Warning: Could not link {file_name} to quote")
                     else:
                         skipped += 1
 
