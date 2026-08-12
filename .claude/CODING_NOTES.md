@@ -7,6 +7,7 @@
 - **Hoist helper functions out of methods.** Defining a helper (e.g. `_is_hidden`) inside a method recreates it on every call — move it to module or class level.
 - **Avoid broad `except Exception`.** Catch specific exceptions (`OSError`, `AttributeError`, `shutil.Error`, etc.) so unexpected errors aren't silently masked.
 - **Don't leave silent `except Exception: pass`.** Log at debug/warning level so failures stay traceable without breaking the fallback behavior.
+- **This repo has no logging config anywhere (no `basicConfig`/handlers).** Default root level is WARNING, so `logger.debug(...)` never fires at runtime. Use `logger.warning` (or higher) for anything that should actually be visible until real logging setup exists.
 - **Drop f-string prefixes with no placeholders.** Ruff flags these (F541); use plain string literals instead.
 - **Escape backslashes in non-raw docstrings.** A bare backslash (e.g. `runtime\python.exe`) is an invalid escape sequence.
 
@@ -17,12 +18,14 @@
 - **Wrap directory scans in `OSError`/`PermissionError` handlers.** Log per-item/per-dir and continue — never let one bad entry abort discovery (e.g. plugin dir scans).
 - **Use atomic swap for install/update operations.** Copy to a temp dir, then backup-then-rename into place, with rollback on failure, so a partial write never corrupts the live install.
 - **Gate link creation on copy success.** In "copy then link" flows, track a `*_ready` flag; only create the link if the copy succeeded or the destination already existed.
+- **Check `create_file_link`'s boolean return at every call site.** It returns `False` on failure instead of raising; ignoring it (or incrementing a success counter unconditionally) reports failed links as successful adds in a windowed GUI app with no visible console.
 
 ## ITAR / Filter Consistency (JobDocs)
 
 - **Search must mirror browse/refresh filter logic.** `search_jobs`/`search_quotes` need the same customer + ITAR filtering as `refresh_*_tree`, or search results silently ignore active filters.
 - **Detect ITAR prefixes consistently.** Use `startswith(('[ITAR] ', '[ITAR-BP] '))` everywhere a customer label is checked, not a bare `'[ITAR]'` substring.
 - **Cancel the active tree worker before a synchronous search.** Otherwise queued `customer_loaded` emissions can repopulate the tree after the search clears it, mixing stale and fresh results.
+- **Defer a sub-tab's expensive data load until it's actually shown.** `refresh_job_tree`/`refresh_quote_tree` used to walk the whole customer directory tree as soon as the widget was built (via the `populate_*_customer_list` dynamic dispatch). Gate the walk on `<sub_tab_widget>.currentWidget() is <target_tab>`, set a stale flag when skipped, and flush it from `currentChanged` when the tab becomes active.
 
 ## Qt / PyQt6 UI Patterns
 
@@ -36,6 +39,7 @@
 - **Escape untrusted strings before interpolating into RichText labels.** A crafted version string could inject HTML into a `QLabel`; use `html.escape()`.
 - **Keep a live reference to non-modal dialogs.** Store on a longer-lived owner (e.g. `window._dialog = dlg`) and clear it on `finished`, or the dialog is garbage-collected and disappears immediately.
 - **`QImageReader.setScaledSize()` only bounds decode memory for formats whose Qt plugin supports it — verify with `supportsOption(ScaledSize)`, don't assume.** True for JPEG on this Qt build; False for PNG/BMP/WEBP/ICO/GIF, where Qt still decodes full-res internally then scales down in software (same peak memory as `QPixmap(path)`). Still worth using: it bounds *steady-state* memory for every format (no full-res `QPixmap`/`QImage` held resident afterward), just not decode-time memory for non-native formats. A real decode-time fix for those would need a different library (e.g. Pillow, not currently a dependency) — don't claim "bounded decode" without checking `supportsOption()` for the specific format first.
+- **A mode flag (e.g. `readonly_mode`) only enforces anything once it's on `AppContext`, not just `main.py`.** Skipping module *loading* isn't a write guarantee — audit every still-loaded module's write paths and gate each on `app_context.readonly_mode`.
 
 ## Print & Rendering
 
@@ -51,6 +55,14 @@
 - **Track staleness recursively, not just on the top directory.** A single `getmtime` on a customer dir misses nested subdirectory changes; walk dirs (not files) for a lightweight recursive mtime check.
 - **Don't commit partial index data from a cancelled walk.** Collect rows into a local list first; only delete + insert + mark-indexed after the walk actually completes.
 - **Let index-query failures propagate, don't collapse them into "no match."** A caught `sqlite3.Error` returned as `None` is indistinguishable from a confirmed no-match; callers need to fall back to a filesystem scan on failure but trust `None` otherwise.
+- **Don't treat a zero-result index query as automatic grounds for a filesystem fallback.** Check `indexed_dirs` coverage (shallow `os.listdir()`) to tell "confirmed zero matches" from "not caught up yet." Caveat: proves indexed *once*, not fresh — pair with the incremental-update note below.
+- **Update the index incrementally on job/quote creation, don't rely on the background indexer alone.** It runs once per launch only. `SearchIndex.add_job()`/`add_quote()` insert one row right after a successful create so it's searchable immediately.
+- **Every branch of a schema migration must force the same re-index, not just the "normal" path.** (CodeRabbit, PR #297) A v4 migration's "column already exists" fallback bumped `user_version` without clearing `indexed_dirs`, so already-indexed customers would never get the new column backfilled. Both branches of a conditional migration need the same side effects unless there's a real reason they shouldn't.
+
+## Performance / Redundant Work (JobDocs)
+
+- **Memoize a filesystem scan's result instead of re-running it with identical args later in the same operation.** E.g. bulk create's duplicate-check pass and creation pass both queried the same (customer, job_number) — cache the first pass's result set and reuse it, tracking newly-created keys locally for intra-batch duplicates.
+- **Re-verify after a blocking, timeout-less confirmation dialog — don't trust a pre-dialog scan.** `QMessageBox.question()` waits indefinitely; on a shared network path, data can change during that wait. Bulk create re-checks non-flagged jobs right after the dialog returns Yes.
 
 ## Build & Packaging
 
@@ -62,6 +74,9 @@
 - **Flatpak's `/app` is read-only at runtime.** Per-user writable state (installed plugins, deps) must go under `$XDG_DATA_HOME` / `~/.var/app/<id>/data`, gated on `FLATPAK_ID`.
 - **When switching PyInstaller onefile to onedir, update every downstream consumer.** Flatpak staging, manifests, and verify steps all reference the old single-binary path and need updating together.
 - **Manual recovery commands must use `sys.executable`, quoted.** Bare `pip` may resolve to the wrong interpreter; unquoted paths with spaces break copy-pasted commands.
+- **Never run a built Inno Setup installer against a real machine's default paths to test it.** `[Setup] AppId` keys the Uninstall/Previous-Data registry entries regardless of `/DIR=`; a throwaway test install can still clobber a real install's registry data or PATH. Test with `iscc` syntax-compile only, or in an isolated VM/container.
+- **Inno Setup: use `WizardIsTaskSelected`/task checkboxes, not `[Types]`+`TypesCombo`, for a simple binary install-variant choice.** `WizardForm.TypesComboChange` isn't a scriptable identifier in current Inno Setup; a Tasks-section checkbox plus `GetPreviousData`/`RegisterPreviousData` (not a global `PreviousDataKey`) is simpler and remembers the choice across updates.
+- **Pre-select a `[Tasks]` entry via `WizardSelectTasks('name')`, never by matching its Description text.** Description strings get duplicated across `[Tasks]` and `[Code]`; if they drift, the match silently fails. `WizardSelectTasks`/`WizardIsTaskSelected` key off the stable `Name`.
 
 ## CI / GitHub Actions
 
