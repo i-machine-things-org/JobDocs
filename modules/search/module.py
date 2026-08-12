@@ -415,6 +415,10 @@ class SearchModule(BaseModule):
 
     def initialize(self, app_context):
         super().initialize(app_context)
+        # The search index is a local performance cache under config_dir,
+        # not a write into shop job/blueprint directories, so read-only
+        # installs still build and use it — see
+        # core/app_context.py's get_search_index() for the same reasoning.
         try:
             db_path = get_config_dir() / 'search_index.db'
             self._index = SearchIndex(db_path)
@@ -1022,8 +1026,13 @@ class SearchModule(BaseModule):
             menu.addSeparator()
             print_action = menu.addAction("Print Selected")
             print_action.triggered.connect(self._print_selected_folder_files)
-            bp_action = menu.addAction("Blueprints Path")
-            bp_action.triggered.connect(lambda: self._blueprints_path_action(path))
+            # "Blueprints Path" hard-links the file into the blueprints folder
+            # (and can persist a settings change) — not available on read-only
+            # (search-only) installs. See _blueprints_path_action()'s own
+            # readonly_mode guard for the defense-in-depth check.
+            if not self.app_context.readonly_mode:
+                bp_action = menu.addAction("Blueprints Path")
+                bp_action.triggered.connect(lambda: self._blueprints_path_action(path))
 
         menu.exec(self.folder_tree.viewport().mapToGlobal(pos))
 
@@ -1059,6 +1068,16 @@ class SearchModule(BaseModule):
 
     def _blueprints_path_action(self, source_path: str):
         """Hard link file to blueprints folder if not already there, then copy its path."""
+        if self.app_context.readonly_mode:
+            # Defense in depth: the context menu doesn't offer this action on
+            # read-only (search-only) installs, but never perform the write
+            # even if this is somehow reached (e.g. a stale/queued signal).
+            self.show_error(
+                "Read-Only Install",
+                "This is a read-only (search-only) install; files cannot be linked "
+                "into the blueprints folder."
+            )
+            return
         customer, bp_dir = self._get_customer_bp_info()
         if not customer or not bp_dir:
             self.show_error("Error", "Blueprints directory not configured or no job selected")
