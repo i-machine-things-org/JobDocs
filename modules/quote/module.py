@@ -477,6 +477,16 @@ class QuoteModule(BaseModule):
             })
             self.app_context.save_history()
 
+            # Make the new quote searchable this session immediately — see
+            # the matching comment in job/module.py's create_single_job()
+            # and core/search_index.py's is_fully_covered() docstring for why
+            # the background indexer alone isn't enough.
+            search_index = self.app_context.get_search_index()
+            if search_index is not None:
+                search_index.add_quote(
+                    'ITAR' if is_itar else '', customer, quote_dir_name, str(quote_path),
+                )
+
             self.log_message(f"Created: {quote_path}")
             return True
 
