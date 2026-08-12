@@ -25,6 +25,7 @@
 - **Search must mirror browse/refresh filter logic.** `search_jobs`/`search_quotes` need the same customer + ITAR filtering as `refresh_*_tree`, or search results silently ignore active filters.
 - **Detect ITAR prefixes consistently.** Use `startswith(('[ITAR] ', '[ITAR-BP] '))` everywhere a customer label is checked, not a bare `'[ITAR]'` substring.
 - **Cancel the active tree worker before a synchronous search.** Otherwise queued `customer_loaded` emissions can repopulate the tree after the search clears it, mixing stale and fresh results.
+- **Defer a sub-tab's expensive data load until it's actually shown.** `refresh_job_tree`/`refresh_quote_tree` used to walk the whole customer directory tree as soon as the widget was built (via the `populate_*_customer_list` dynamic dispatch). Gate the walk on `<sub_tab_widget>.currentWidget() is <target_tab>`, set a stale flag when skipped, and flush it from `currentChanged` when the tab becomes active.
 
 ## Qt / PyQt6 UI Patterns
 
