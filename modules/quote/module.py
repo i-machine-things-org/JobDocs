@@ -75,7 +75,17 @@ class QuoteTreeWorker(QThread):
                         continue
 
                     display_name = f"[{prefix}] {customer}" if prefix else customer
-                    quotes = self.app_context.find_quote_folders(customer_path)
+                    quotes = self.app_context.find_quote_folders(
+                        customer_path, is_cancelled=lambda: self._is_cancelled
+                    )
+
+                    # A cancelled scan can still return here with partial results
+                    # (find_quote_folders() stops mid-walk but still returns what
+                    # it had). Don't emit them -- a refresh that cancelled this
+                    # worker has already moved on to a new one, and a stale
+                    # customer_loaded signal would land on the freshly-cleared tree.
+                    if self._is_cancelled:
+                        break
 
                     # Only emit if customer has quotes
                     if quotes:
@@ -84,7 +94,10 @@ class QuoteTreeWorker(QThread):
             except OSError as e:
                 print(f"[QuoteTreeWorker] OSError: {e}", flush=True)
 
-        self.finished.emit()
+        # Likewise, don't signal completion for a cancelled run -- the worker
+        # that superseded this one will emit its own finished() when it's done.
+        if not self._is_cancelled:
+            self.finished.emit()
 
 
 class QuoteModule(BaseModule):
@@ -97,6 +110,12 @@ class QuoteModule(BaseModule):
         self.add_files: List[str] = []  # For "Add to Existing" tab
         self._widget = None
         self._worker = None  # Background thread worker
+        self._quote_tab_widget = None
+        self._add_to_quote_tab = None
+        # The Add to Existing tab's quote tree isn't built until that sub-tab
+        # is actually activated — avoids an eager full customer-directory
+        # walk at startup. True means a refresh is owed the next time it's shown.
+        self._add_tree_stale = True
 
         # Preview panels
         self.quote_preview: FilePreviewWidget | None = None
@@ -149,6 +168,10 @@ class QuoteModule(BaseModule):
         # Load UI file
         ui_file = self._get_ui_path('quote/ui/quote_tab.ui')
         uic.loadUi(ui_file, widget)
+
+        self._quote_tab_widget = widget.quote_tab_widget
+        self._add_to_quote_tab = widget.addToQuoteTab
+        self._quote_tab_widget.currentChanged.connect(self._on_quote_subtab_changed)
 
         # ===== Setup "Create New" Tab =====
         self.quote_customer_combo = widget.quote_customer_combo
@@ -437,7 +460,8 @@ class QuoteModule(BaseModule):
 
                     quote_dest = quote_path / file_name
                     if not quote_dest.exists():
-                        create_file_link(bp_dest, quote_dest, link_type)
+                        if not create_file_link(bp_dest, quote_dest, link_type):
+                            self.log_message(f"Warning: Could not link {file_name} to quote")
                 else:
                     quote_dest = quote_path / file_name
                     if not quote_dest.exists():
@@ -464,7 +488,8 @@ class QuoteModule(BaseModule):
                             if drawing_lower in bp_name and bp_name.endswith(ext.lower()):
                                 dest = quote_path / bp_file.name
                                 if not dest.exists():
-                                    create_file_link(bp_file, dest, link_type)
+                                    if not create_file_link(bp_file, dest, link_type):
+                                        self.log_message(f"Warning: Could not link {bp_file.name} to quote")
 
             # Add to history
             self.app_context.add_to_history('quote', {
@@ -476,6 +501,16 @@ class QuoteModule(BaseModule):
                 'path': str(quote_path)
             })
             self.app_context.save_history()
+
+            # Make the new quote searchable this session immediately — see
+            # the matching comment in job/module.py's create_single_job()
+            # and core/search_index.py's is_fully_covered() docstring for why
+            # the background indexer alone isn't enough.
+            search_index = self.app_context.get_search_index()
+            if search_index is not None:
+                search_index.add_quote(
+                    'ITAR' if is_itar else '', customer, quote_dir_name, str(quote_path),
+                )
 
             self.log_message(f"Created: {quote_path}")
             return True
@@ -581,8 +616,31 @@ class QuoteModule(BaseModule):
 
     # ==================== Add to Existing Tab: Quote Tree Management ====================
 
+    def _is_add_tab_active(self) -> bool:
+        return (
+            self._quote_tab_widget is not None
+            and self._quote_tab_widget.currentWidget() is self._add_to_quote_tab
+        )
+
+    def _on_quote_subtab_changed(self, index: int):
+        """Load the quote tree the first time the Add to Existing sub-tab is
+        shown (or the next time it's shown after data went stale), instead of
+        walking the whole customer directory tree eagerly at startup."""
+        if self._add_tree_stale and self._is_add_tab_active():
+            self.refresh_quote_tree()
+
     def refresh_quote_tree(self):
         """Refresh the quote tree with current filter settings (async with background thread)"""
+        if not self._is_add_tab_active():
+            self._add_tree_stale = True
+            # Don't let a walk started while the tab was active keep running
+            # in the background after the user has switched away from it.
+            if self._worker and self._worker.isRunning():
+                self._worker.cancel()
+                self._worker.wait()
+            return
+        self._add_tree_stale = False
+
         # Cancel any existing worker
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
@@ -858,8 +916,11 @@ class QuoteModule(BaseModule):
 
                     quote_dest = Path(quote_path) / file_name
                     if bp_ready and not quote_dest.exists():
-                        create_file_link(bp_dest, quote_dest, link_type)
-                        added += 1
+                        if create_file_link(bp_dest, quote_dest, link_type):
+                            added += 1
+                        else:
+                            skipped += 1
+                            self.log_message(f"Warning: Could not link {file_name} to quote")
                     else:
                         skipped += 1
 

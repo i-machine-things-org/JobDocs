@@ -311,10 +311,15 @@ class BulkCreateDialog(QDialog):
             QMessageBox.critical(self, "Error", "Directories not configured")
             return
 
+        # Remember which jobs already existed on disk before this run so the
+        # creation pass below can reuse this instead of re-scanning the
+        # filesystem for the same (customer, job_number) a second time.
         duplicates = []
+        pre_existing: set = set()
         for job in jobs:
             if self.job_exists(job['customer'], job['job_number'], is_itar):
                 duplicates.append(f"{job['customer']} - Job #{job['job_number']}")
+                pre_existing.add((job['customer'], job['job_number']))
 
         if duplicates:
             dup_list = "\n".join(duplicates[:10])
@@ -327,6 +332,18 @@ class BulkCreateDialog(QDialog):
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
+
+            # QMessageBox.question() above blocks indefinitely with no timeout
+            # while waiting on the user — this app is used against what looks
+            # like a shared network path, so a job could be created externally
+            # (another workstation) during that wait. Re-check every job not
+            # already flagged as a duplicate before trusting pre_existing in
+            # the creation loop below; jobs already flagged don't need
+            # re-checking since they're skipped either way.
+            unconfirmed_keys = {(j['customer'], j['job_number']) for j in jobs} - pre_existing
+            for customer_key, job_number_key in unconfirmed_keys:
+                if self.job_exists(customer_key, job_number_key, is_itar):
+                    pre_existing.add((customer_key, job_number_key))
 
         # Find the job module (the one that has create_single_job)
         job_module = None
@@ -347,6 +364,7 @@ class BulkCreateDialog(QDialog):
         new_customers = set()
         created = 0
         skipped = 0
+        created_this_run: set = set()
 
         controls = [
             self.import_btn, self.clear_bulk_btn, self.validate_btn,
@@ -372,7 +390,11 @@ class BulkCreateDialog(QDialog):
 
                 self.bulk_status_label.setText(f"Processing job {i + 1} of {len(jobs)}...")
 
-                if self.job_exists(customer, job['job_number'], is_itar):
+                # Reuses the pre_existing set from the scan above instead of
+                # calling job_exists() (a filesystem scan) again — duplicates
+                # within this same batch are still caught via created_this_run.
+                key = (customer, job['job_number'])
+                if key in pre_existing or key in created_this_run:
                     skipped += 1
                 else:
                     if job_module.create_single_job(
@@ -382,6 +404,7 @@ class BulkCreateDialog(QDialog):
                         job.get('revision', ''), is_itar, []
                     ):
                         created += 1
+                        created_this_run.add(key)
 
                 self.bulk_progress.setValue(i + 1)
                 QApplication.processEvents()
