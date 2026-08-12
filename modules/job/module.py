@@ -80,7 +80,17 @@ class JobTreeWorker(QThread):
                         continue
 
                     display_name = f"[{prefix}] {customer}" if prefix else customer
-                    jobs = self.app_context.find_job_folders(customer_path)
+                    jobs = self.app_context.find_job_folders(
+                        customer_path, is_cancelled=lambda: self._is_cancelled
+                    )
+
+                    # A cancelled scan can still return here with partial results
+                    # (find_job_folders() stops mid-walk but still returns what it
+                    # had). Don't emit them -- a refresh that cancelled this worker
+                    # has already moved on to a new one, and a stale customer_loaded
+                    # signal would land on the freshly-cleared tree.
+                    if self._is_cancelled:
+                        break
 
                     # Only emit if customer has jobs
                     if jobs:
@@ -89,7 +99,10 @@ class JobTreeWorker(QThread):
             except OSError as e:
                 print(f"[JobTreeWorker] OSError: {e}", flush=True)
 
-        self.finished.emit()
+        # Likewise, don't signal completion for a cancelled run -- the worker
+        # that superseded this one will emit its own finished() when it's done.
+        if not self._is_cancelled:
+            self.finished.emit()
 
 
 class JobModule(BaseModule):
@@ -102,6 +115,12 @@ class JobModule(BaseModule):
         self.add_files: List[str] = []  # For "Add to Existing" tab
         self._widget = None
         self._worker = None  # Background thread worker
+        self._job_tab_widget = None
+        self._add_to_job_tab = None
+        # The Add to Existing tab's job tree isn't built until that sub-tab is
+        # actually activated — avoids an eager full customer-directory walk at
+        # startup. True means a refresh is owed the next time it's shown.
+        self._add_tree_stale = True
 
         # Create New tab widget references
         self.customer_combo = None
@@ -158,6 +177,10 @@ class JobModule(BaseModule):
         # Load UI file
         ui_file = self._get_ui_path('job/ui/job_tab.ui')
         uic.loadUi(ui_file, widget)
+
+        self._job_tab_widget = widget.job_tab_widget
+        self._add_to_job_tab = widget.addToJobTab
+        self._job_tab_widget.currentChanged.connect(self._on_job_subtab_changed)
 
         # ===== Setup "Create New" Tab =====
         self.customer_combo = widget.customer_combo
@@ -450,7 +473,8 @@ class JobModule(BaseModule):
 
                     job_dest = job_path / file_name
                     if bp_dest.exists() and not job_dest.exists():
-                        create_file_link(bp_dest, job_dest, link_type)
+                        if not create_file_link(bp_dest, job_dest, link_type):
+                            self.log_message(f"Warning: Could not link {file_name} to job")
                 else:
                     job_dest = job_path / file_name
                     if not job_dest.exists():
@@ -477,7 +501,8 @@ class JobModule(BaseModule):
                             if drawing_lower in bp_name and bp_name.endswith(ext.lower()):
                                 dest = job_path / bp_file.name
                                 if not dest.exists():
-                                    create_file_link(bp_file, dest, link_type)
+                                    if not create_file_link(bp_file, dest, link_type):
+                                        self.log_message(f"Warning: Could not link {bp_file.name} to job")
 
             # Add to history
             self.app_context.add_to_history('job', {
@@ -492,6 +517,19 @@ class JobModule(BaseModule):
                 'path': str(job_path)
             })
             self.app_context.save_history()
+
+            # Make the new job searchable this session immediately — the
+            # background indexer only runs once per app launch, so without
+            # this a job created mid-session would be invisible to search
+            # until the app restarts (see is_fully_covered() in
+            # core/search_index.py for why a zero-result search can't be
+            # trusted to fall back to a filesystem walk otherwise).
+            search_index = self.app_context.get_search_index()
+            if search_index is not None:
+                search_index.add_job(
+                    'ITAR' if is_itar else '', customer, job_number,
+                    description, drawings, str(job_path),
+                )
 
             self.log_message(f"Created: {job_path}")
             return True
@@ -658,8 +696,31 @@ class JobModule(BaseModule):
 
     # ==================== Add to Existing Tab: Job Tree Management ====================
 
+    def _is_add_tab_active(self) -> bool:
+        return (
+            self._job_tab_widget is not None
+            and self._job_tab_widget.currentWidget() is self._add_to_job_tab
+        )
+
+    def _on_job_subtab_changed(self, index: int):
+        """Load the job tree the first time the Add to Existing sub-tab is shown
+        (or the next time it's shown after data went stale), instead of walking
+        the whole customer directory tree eagerly at startup."""
+        if self._add_tree_stale and self._is_add_tab_active():
+            self.refresh_job_tree()
+
     def refresh_job_tree(self):
         """Refresh the job tree with current filter settings (async with background thread)"""
+        if not self._is_add_tab_active():
+            self._add_tree_stale = True
+            # Don't let a walk started while the tab was active keep running
+            # in the background after the user has switched away from it.
+            if self._worker and self._worker.isRunning():
+                self._worker.cancel()
+                self._worker.wait()
+            return
+        self._add_tree_stale = False
+
         # Cancel any existing worker
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
@@ -935,8 +996,11 @@ class JobModule(BaseModule):
 
                     job_dest = Path(job_path) / file_name
                     if bp_ready and not job_dest.exists():
-                        create_file_link(bp_dest, job_dest, link_type)
-                        added += 1
+                        if create_file_link(bp_dest, job_dest, link_type):
+                            added += 1
+                        else:
+                            skipped += 1
+                            self.log_message(f"Warning: Could not link {file_name} to job")
                     else:
                         skipped += 1
 

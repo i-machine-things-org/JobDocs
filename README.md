@@ -42,6 +42,12 @@ Download the installer from the [latest release](https://github.com/i-machine-th
 
 Both options add `JobDocs.exe` to `PATH` so it is callable from any terminal.
 
+On the Select Additional Tasks page, check **"Read-Only (Search Only)"** to install a
+kiosk-style build with only the Search tab and no menu bar — useful for shared/shop-floor
+machines that should look up jobs but not create or edit them. Updating a read-only
+install automatically re-selects Read-Only, so it stays search-only across upgrades
+without re-checking the box each time.
+
 ### Linux (Flatpak)
 
 Add the JobDocs repository and install:
