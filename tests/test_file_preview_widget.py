@@ -121,6 +121,9 @@ class TestBoundedDecodeIsFormatSpecific:
         buffer. If this regresses to a full decode, the delta jumps well
         past the threshold below.
         """
+        if not os.path.isfile('/proc/self/status'):
+            pytest.skip("VmHWM probe requires Linux procfs")
+
         img_path = tmp_path / 'large.jpg'
         _make_jpeg(img_path, 4000, 3000)
 
