@@ -117,9 +117,11 @@ class SearchWorker(QThread):
 
                 # Find job folders
                 scan_errors: List[OSError] = []
-                jobs = self.app_context.find_job_folders(customer_path, errors=scan_errors)
+                jobs = self.app_context.find_job_folders(
+                    customer_path, errors=scan_errors, include_po_number=True,
+                )
 
-                for dir_name, job_docs_path in jobs:
+                for dir_name, job_docs_path, po_number in jobs:
                     if self._is_cancelled:
                         break
 
@@ -155,6 +157,7 @@ class SearchWorker(QThread):
                             'job_number': job_num,
                             'description': desc,
                             'drawings': drawings,
+                            'po_number': po_number,
                             'path': job_docs_path
                         }
                         self.result_found.emit(result)
@@ -194,6 +197,7 @@ class SearchWorker(QThread):
                                 'job_number': job_num,
                                 'description': desc,
                                 'drawings': drawings,
+                                'po_number': '',
                                 'path': item_path,
                             })
                             self.result_count += 1
@@ -220,6 +224,7 @@ class SearchWorker(QThread):
                         'job_number': quote_name,
                         'description': '',
                         'drawings': [],
+                        'po_number': '',
                         'path': quote_path,
                     })
                     self.result_count += 1
@@ -263,6 +268,7 @@ class SearchWorker(QThread):
                             'job_number': name_no_ext,
                             'description': rel_path if rel_path != '.' else '',
                             'drawings': [],
+                            'po_number': '',
                             'path': root
                         }
                         self.result_found.emit(result)
@@ -329,6 +335,7 @@ class SearchWorker(QThread):
                         'job_number': job_num if job_num else "(no job #)",
                         'description': desc,
                         'drawings': drawings,
+                        'po_number': '',
                         'path': root
                     }
                     self.result_found.emit(result)
@@ -408,6 +415,10 @@ class SearchModule(BaseModule):
 
     def initialize(self, app_context):
         super().initialize(app_context)
+        # The search index is a local performance cache under config_dir,
+        # not a write into shop job/blueprint directories, so read-only
+        # installs still build and use it — see
+        # core/app_context.py's get_search_index() for the same reasoning.
         try:
             db_path = get_config_dir() / 'search_index.db'
             self._index = SearchIndex(db_path)
@@ -654,9 +665,14 @@ class SearchModule(BaseModule):
                 search_desc, search_drawing, include_blueprints,
             ):
                 return
-            # Index returned 0 results — fall back to filesystem strict search.
-            # The index may not have indexed all customer directories (e.g. when
-            # the folder structure doesn't match the configured template).
+            # Index returned 0 results. Trust it — and skip the slow filesystem
+            # walk entirely — if every customer directory currently on disk has
+            # actually been indexed. Otherwise the index may just not have
+            # caught up yet (e.g. a customer folder added after the last
+            # background run), so fall back to a live filesystem search.
+            if self._index.is_fully_covered(customer_dirs, bp_dirs):
+                self.search_status_label.setText("Found 0 result(s)")
+                return
 
         # --- Fallback: live filesystem walk ---
         dirs_to_search = list(customer_dirs) + bp_dirs
@@ -717,8 +733,9 @@ class SearchModule(BaseModule):
         0: lambda x: x['date'],
         1: lambda x: x['customer'].lower(),
         2: lambda x: x['job_number'].lower(),
-        3: lambda x: x['description'].lower(),
-        4: lambda x: ', '.join(x['drawings']).lower(),
+        3: lambda x: x['po_number'].lower(),
+        4: lambda x: x['description'].lower(),
+        5: lambda x: ', '.join(x['drawings']).lower(),
     })
 
     def _on_header_clicked(self, column: int):
@@ -754,8 +771,9 @@ class SearchModule(BaseModule):
                 self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
                 self.search_table.setItem(row, 1, QTableWidgetItem(result['customer']))
                 self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
-                self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
-                self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
+                self.search_table.setItem(row, 3, QTableWidgetItem(result['po_number']))
+                self.search_table.setItem(row, 4, QTableWidgetItem(result['description']))
+                self.search_table.setItem(row, 5, QTableWidgetItem(', '.join(result['drawings'])))
         finally:
             self.search_table.blockSignals(False)
         if selected_path is not None:
@@ -782,8 +800,9 @@ class SearchModule(BaseModule):
         self.search_table.setItem(row, 0, QTableWidgetItem(result['date'].strftime("%Y-%m-%d %H:%M")))
         self.search_table.setItem(row, 1, QTableWidgetItem(result['customer']))
         self.search_table.setItem(row, 2, QTableWidgetItem(result['job_number']))
-        self.search_table.setItem(row, 3, QTableWidgetItem(result['description']))
-        self.search_table.setItem(row, 4, QTableWidgetItem(', '.join(result['drawings'])))
+        self.search_table.setItem(row, 3, QTableWidgetItem(result['po_number']))
+        self.search_table.setItem(row, 4, QTableWidgetItem(result['description']))
+        self.search_table.setItem(row, 5, QTableWidgetItem(', '.join(result['drawings'])))
 
     def _on_progress_update(self, status: str):
         """Slot called with progress updates"""
@@ -1012,8 +1031,13 @@ class SearchModule(BaseModule):
             menu.addSeparator()
             print_action = menu.addAction("Print Selected")
             print_action.triggered.connect(self._print_selected_folder_files)
-            bp_action = menu.addAction("Blueprints Path")
-            bp_action.triggered.connect(lambda: self._blueprints_path_action(path))
+            # "Blueprints Path" hard-links the file into the blueprints folder
+            # (and can persist a settings change) — not available on read-only
+            # (search-only) installs. See _blueprints_path_action()'s own
+            # readonly_mode guard for the defense-in-depth check.
+            if not self.app_context.readonly_mode:
+                bp_action = menu.addAction("Blueprints Path")
+                bp_action.triggered.connect(lambda: self._blueprints_path_action(path))
 
         menu.exec(self.folder_tree.viewport().mapToGlobal(pos))
 
@@ -1049,6 +1073,16 @@ class SearchModule(BaseModule):
 
     def _blueprints_path_action(self, source_path: str):
         """Hard link file to blueprints folder if not already there, then copy its path."""
+        if self.app_context.readonly_mode:
+            # Defense in depth: the context menu doesn't offer this action on
+            # read-only (search-only) installs, but never perform the write
+            # even if this is somehow reached (e.g. a stale/queued signal).
+            self.show_error(
+                "Read-Only Install",
+                "This is a read-only (search-only) install; files cannot be linked "
+                "into the blueprints folder."
+            )
+            return
         customer, bp_dir = self._get_customer_bp_info()
         if not customer or not bp_dir:
             self.show_error("Error", "Blueprints directory not configured or no job selected")
