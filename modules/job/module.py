@@ -450,7 +450,8 @@ class JobModule(BaseModule):
 
                     job_dest = job_path / file_name
                     if bp_dest.exists() and not job_dest.exists():
-                        create_file_link(bp_dest, job_dest, link_type)
+                        if not create_file_link(bp_dest, job_dest, link_type):
+                            self.log_message(f"Warning: Could not link {file_name} to job")
                 else:
                     job_dest = job_path / file_name
                     if not job_dest.exists():
@@ -477,7 +478,8 @@ class JobModule(BaseModule):
                             if drawing_lower in bp_name and bp_name.endswith(ext.lower()):
                                 dest = job_path / bp_file.name
                                 if not dest.exists():
-                                    create_file_link(bp_file, dest, link_type)
+                                    if not create_file_link(bp_file, dest, link_type):
+                                        self.log_message(f"Warning: Could not link {bp_file.name} to job")
 
             # Add to history
             self.app_context.add_to_history('job', {
@@ -948,8 +950,11 @@ class JobModule(BaseModule):
 
                     job_dest = Path(job_path) / file_name
                     if bp_ready and not job_dest.exists():
-                        create_file_link(bp_dest, job_dest, link_type)
-                        added += 1
+                        if create_file_link(bp_dest, job_dest, link_type):
+                            added += 1
+                        else:
+                            skipped += 1
+                            self.log_message(f"Warning: Could not link {file_name} to job")
                     else:
                         skipped += 1
 

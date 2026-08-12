@@ -459,7 +459,7 @@ class AppContext:
                     item_path = os.path.join(quotes_dir, item)
                     if os.path.isdir(item_path):
                         quotes.append((item, item_path))
-            except OSError:
-                pass
+            except OSError as e:
+                logger.warning("find_quote_folders: OSError %s", e)
 
         return quotes
