@@ -271,20 +271,6 @@ class SearchIndex:
         except OSError:
             return 0.0
 
-    def _subtree_mtime(self, path: str) -> float:
-        """Return the max mtime of path and all descendant directories (not files)."""
-        try:
-            result = os.path.getmtime(path)
-            for root, dirs, _ in os.walk(path):
-                for d in dirs:
-                    try:
-                        result = max(result, os.path.getmtime(os.path.join(root, d)))
-                    except OSError:
-                        pass
-            return result
-        except OSError:
-            return 0.0
-
     def _is_stale(
         self, conn: sqlite3.Connection, dir_path: str, prefix: str, kind: str, *, recursive: bool = False
     ) -> bool:

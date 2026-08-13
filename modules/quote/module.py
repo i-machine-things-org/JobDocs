@@ -364,13 +364,6 @@ class QuoteModule(BaseModule):
             return
         self.add_preview.preview_file(self.add_files[row] if 0 <= row < len(self.add_files) else None)
 
-    def clear_quote_files(self):
-        """Clear all files from quote files list"""
-        self.quote_files.clear()
-        self.quote_files_list.clear()
-        if self.quote_preview:
-            self.quote_preview.clear()
-
     # ==================== Create New Tab: Quote Creation ====================
 
     def create_quote(self):
