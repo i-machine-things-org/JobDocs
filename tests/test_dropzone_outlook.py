@@ -23,6 +23,7 @@ pytest.importorskip("PyQt6")
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtTest import QTest  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from shared.widgets import DropZone  # noqa: E402
@@ -32,6 +33,12 @@ from shared.widgets import DropZone  # noqa: E402
 def qapp():
     app = QApplication.instance() or QApplication([])
     yield app
+
+
+def _pump_deferred_warning(qapp):
+    """Process events so a QTimer.singleShot(0, ...)-deferred QMessageBox.warning
+    (used to dodge Windows OLE drag-drop's nested event loop) actually runs."""
+    QTest.qWait(50)
 
 
 def _make_filedescriptorw_entry(filename: str) -> bytes:
@@ -105,6 +112,7 @@ class TestHandleOutlookDropMultiFile:
         )
 
         files = DropZone._handle_outlook_drop(mime, 'FileGroupDescriptorW')
+        _pump_deferred_warning(qapp)
 
         assert len(files) == 1
         assert files[0].endswith('invoice.pdf')
@@ -127,9 +135,27 @@ class TestHandleOutlookDropMultiFile:
         )
 
         files = DropZone._handle_outlook_drop(mime, 'FileGroupDescriptorW')
+        _pump_deferred_warning(qapp)
 
         assert len(files) == 1
         assert warnings == []
+
+    def test_descriptor_filename_with_path_components_is_sanitized(self, qapp, tmp_path, monkeypatch):
+        """Review finding: a malicious/odd drag source could put path separators
+        in the descriptor's filename, e.g. '../../evil.txt' or a Windows
+        absolute path — this must never escape the tempdir it's saved into."""
+        blob = _make_descriptor_blob(['../../../etc/evil.txt'])
+        mime = _FakeMime({
+            'FileGroupDescriptorW': blob,
+            'FileContents': b'CONTENT',
+        })
+
+        files = DropZone._handle_outlook_drop(mime, 'FileGroupDescriptorW')
+
+        assert len(files) == 1
+        saved_path = files[0]
+        assert os.path.basename(saved_path) == 'evil.txt'
+        assert '..' not in saved_path.split(os.sep)
 
 
 class TestHandleClassicOutlookDropMultiSelect:
@@ -218,6 +244,7 @@ class TestHandleClassicOutlookDropMultiSelect:
         )
 
         files = DropZone._handle_classic_outlook_drop(mime, parent="fake-parent")
+        _pump_deferred_warning(qapp)
 
         assert len(files) == 2  # only the two successful emails
         assert len(warnings) == 1
@@ -248,6 +275,7 @@ class TestHandleClassicOutlookDropMultiSelect:
         )
 
         files = DropZone._handle_classic_outlook_drop(mime)
+        _pump_deferred_warning(qapp)
 
         assert len(files) == 2
         assert warnings == []
@@ -276,6 +304,7 @@ class TestHandleClassicOutlookDropMultiSelect:
         )
 
         files = DropZone._handle_classic_outlook_drop(mime)
+        _pump_deferred_warning(qapp)
 
         assert files == []
         assert warnings == []
