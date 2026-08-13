@@ -983,6 +983,7 @@ class JobDocsMainWindow(QMainWindow):
             )
             return
 
+        module.mark_widget_built()
         del self._pending_tab_modules[index]
 
         self.tabs.blockSignals(True)
