@@ -9,6 +9,8 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+from shared.utils import atomic_write_json
+
 
 class RemoteSyncManager:
     """Manages synchronization of settings and history files with remote server"""
@@ -79,11 +81,10 @@ class RemoteSyncManager:
             self.remote_path.mkdir(parents=True, exist_ok=True)
 
             # Write the JSON file
-            with open(remote_file, 'w') as f:
-                json.dump(data, f, indent=2)
+            atomic_write_json(remote_file, data)
 
             return True
-        except (IOError, PermissionError) as e:
+        except OSError as e:
             print(f"Warning: Could not save {filename} to remote: {e}")
             return False
 
