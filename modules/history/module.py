@@ -84,11 +84,17 @@ class HistoryModule(BaseModule):
         )
 
         def _sort_key(entry):
+            # Returns a numeric timestamp, not a raw datetime: entries can
+            # mix naive and offset-aware ISO strings (e.g. a synced entry
+            # with a "+00:00" suffix next to a locally-written naive one),
+            # and datetime objects with different tzinfo-awareness raise
+            # TypeError when compared directly during sort(). Floats from
+            # .timestamp() are always comparable regardless of awareness.
             _kind, data = entry
             try:
-                return datetime.fromisoformat(data.get('date', ''))
-            except (ValueError, TypeError):
-                return datetime.min
+                return datetime.fromisoformat(data.get('date', '')).timestamp()
+            except (ValueError, TypeError, OSError, OverflowError):
+                return float('-inf')
 
         entries.sort(key=_sort_key, reverse=True)
 
