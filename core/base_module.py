@@ -24,6 +24,7 @@ class BaseModule(ABC):
         """Initialize the module"""
         self._app_context = None
         self._widget = None
+        self._widget_built = False
 
     @abstractmethod
     def get_name(self) -> str:
@@ -62,6 +63,29 @@ class BaseModule(ABC):
                         application resources and callbacks
         """
         self._app_context = app_context
+
+    def is_widget_built(self) -> bool:
+        """Return True if get_widget() has already been called successfully.
+
+        Tracked via an explicit flag (mark_widget_built()) rather than
+        inferring from self._widget: get_widget()'s contract only requires
+        returning a QWidget, not caching it in self._widget, so a plugin
+        that builds a fresh widget each call (or caches it under a different
+        name) would otherwise always read as "not built". Used by the main
+        window to know whether a lazily-constructed tab's data (e.g.
+        customer lists) needs populating yet.
+        """
+        return self._widget_built
+
+    def mark_widget_built(self):
+        """Record that get_widget() has been called and succeeded.
+
+        Called by the main window right after a successful get_widget(),
+        not by modules themselves -- keeps the tracking correct regardless
+        of how a given module's get_widget() manages its own widget
+        reference internally.
+        """
+        self._widget_built = True
 
     def is_tab_module(self) -> bool:
         """
