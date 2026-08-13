@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
 from core.module_loader import ModuleLoader
 from core.app_context import AppContext
 from core.base_module import BaseModule
-from shared.utils import get_config_dir, get_os_text
+from shared.utils import atomic_write_json, get_config_dir, get_os_text
 from shared.remote_sync import RemoteSyncManager
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,21 @@ def _get_app_version() -> str:
     except Exception:
         pass
     return "dev"
+
+
+def _is_readonly_install() -> bool:
+    """True for a read-only (search-only) install — see build_scripts/JobDocs.iss.
+
+    Detected via a marker file the installer drops next to app/runtime/plugins
+    when the "Read-Only (Search Only)" setup type is chosen. Windows-only;
+    always False in dev checkouts, Flatpak, and full installs.
+    """
+    if os.getenv('FLATPAK_ID'):
+        return False
+    app_dir = Path(__file__).resolve().parent
+    if not (app_dir.parent / 'runtime').is_dir():
+        return False  # dev checkout, not an embedded install
+    return (app_dir.parent / 'readonly.marker').exists()
 
 
 APP_VERSION = _get_app_version()
@@ -643,6 +658,14 @@ class JobDocsMainWindow(QMainWindow):
         self.settings_file = self.config_dir / 'settings.json'
         self.history_file = self.config_dir / 'history.json'
 
+        # Read-only (search-only) install: only the Search tab loads, and the
+        # menu bar (Settings, Install Plugin, etc.) is hidden entirely. This
+        # must be determined *before* settings/history are loaded so the
+        # local-cache write-back paths in load_settings()/load_history() below
+        # can respect it — read-only mode must prevent all automatic
+        # persistence, not just the module-selection/UI behavior.
+        self.readonly_mode = _is_readonly_install()
+
         # Load settings first (needed for remote sync setup)
         self.settings = self.load_settings()
 
@@ -656,7 +679,7 @@ class JobDocsMainWindow(QMainWindow):
         self._available_modules_cache: List[tuple] = []  # for Settings dialog
 
         # Setup UI
-        self.setWindowTitle("JobDocs")
+        self.setWindowTitle("JobDocs — Search" if self.readonly_mode else "JobDocs")
         self.resize(700, 600)
         self._set_window_icon()
 
@@ -676,14 +699,17 @@ class JobDocsMainWindow(QMainWindow):
             show_info_callback=self.show_info_dialog,
             get_customer_list_callback=self.get_customer_list,
             add_to_history_callback=self.add_to_history,
-            main_window=self
+            main_window=self,
+            readonly_mode=self.readonly_mode
         )
 
         # Load modules
         self.load_modules()
 
-        # Setup menu
-        self.setup_menu()
+        # Setup menu (read-only installs hide the menu bar entirely — there's
+        # nothing behind it to reach: Settings, Install Plugin, other tabs)
+        if not self.readonly_mode:
+            self.setup_menu()
 
         # Apply UI style
         self.apply_ui_style()
@@ -736,12 +762,13 @@ class JobDocsMainWindow(QMainWindow):
                 # Remote settings loaded successfully - use them
                 merged = self.DEFAULT_SETTINGS.copy()
                 merged.update(remote_settings)
-                # Save to local to keep in sync
-                try:
-                    with open(self.settings_file, 'w') as f:
-                        json.dump(merged, f, indent=2)
-                except IOError:
-                    pass
+                # Save to local to keep in sync — never on a read-only
+                # (search-only) install, which must not write a local cache.
+                if not self.readonly_mode:
+                    try:
+                        atomic_write_json(self.settings_file, merged)
+                    except OSError:
+                        pass
                 return merged
 
         # Fall back to local settings
@@ -752,23 +779,20 @@ class JobDocsMainWindow(QMainWindow):
 
         return self.DEFAULT_SETTINGS.copy()
 
-    def _partial_save_settings(self, partial: Dict[str, Any]):
-        """Merge partial settings dict and persist to disk (used by mid-dialog callbacks)."""
-        self.settings.update(partial)
-        self.save_settings()
-
     def save_settings(self):
         """Save settings to file and sync to remote server if configured"""
+        if self.readonly_mode:
+            logger.debug("save_settings: skipped (read-only install)")
+            return
         try:
             # Save locally first
-            with open(self.settings_file, 'w') as f:
-                json.dump(self.settings, f, indent=2)
+            atomic_write_json(self.settings_file, self.settings)
 
             # Sync to remote if configured
             if self.remote_sync.is_enabled():
                 self.remote_sync.save_json_to_remote('settings.json', self.settings)
 
-        except IOError as e:
+        except OSError as e:
             self.show_error_dialog("Error", f"Failed to save settings: {e}")
 
     def load_history(self) -> Dict[str, Any]:
@@ -777,12 +801,13 @@ class JobDocsMainWindow(QMainWindow):
         if self.remote_sync.is_enabled():
             remote_history = self.remote_sync.load_json_from_remote('history.json')
             if remote_history:
-                # Save to local to keep in sync
-                try:
-                    with open(self.history_file, 'w') as f:
-                        json.dump(remote_history, f, indent=2)
-                except IOError:
-                    pass
+                # Save to local to keep in sync — never on a read-only
+                # (search-only) install, which must not write a local cache.
+                if not self.readonly_mode:
+                    try:
+                        atomic_write_json(self.history_file, remote_history)
+                    except OSError:
+                        pass
                 return remote_history
 
         # Fall back to local history
@@ -797,16 +822,18 @@ class JobDocsMainWindow(QMainWindow):
 
     def save_history(self):
         """Save history to file and sync to remote server if configured"""
+        if self.readonly_mode:
+            logger.debug("save_history: skipped (read-only install)")
+            return
         try:
             # Save locally first
-            with open(self.history_file, 'w') as f:
-                json.dump(self.history, f, indent=2)
+            atomic_write_json(self.history_file, self.history)
 
             # Sync to remote if configured
             if self.remote_sync.is_enabled():
                 self.remote_sync.save_json_to_remote('history.json', self.history)
 
-        except IOError as e:
+        except OSError as e:
             self.show_error_dialog("Error", f"Failed to save history: {e}")
 
     # ==================== Window Icon ====================
@@ -869,7 +896,14 @@ class JobDocsMainWindow(QMainWindow):
         try:
             # Load modules with experimental flag and disabled modules list
             experimental_enabled = self.settings.get('experimental_features', False)
-            disabled_modules = self.settings.get('disabled_modules', [])
+            if self.readonly_mode:
+                # Only the search module loads; ignore the user's disabled_modules
+                # setting entirely so a synced settings.json can't re-enable tabs.
+                disabled_modules = [
+                    name for name in loader.discover_modules() if name != 'search'
+                ]
+            else:
+                disabled_modules = self.settings.get('disabled_modules', [])
             self.modules = loader.load_all_modules(self.app_context, experimental_enabled, disabled_modules)
 
             if not self.modules:
@@ -924,6 +958,11 @@ class JobDocsMainWindow(QMainWindow):
             traceback.print_exc()
 
     def _start_search_indexer(self):
+        # The search index is a local performance cache, not a write into
+        # shop job/blueprint directories, so read-only installs still build
+        # and use it — a read-only kiosk searching a large shared drive is
+        # exactly the case that benefits most from not re-walking the
+        # filesystem on every query.
         for module in self.modules:
             if hasattr(module, 'start_indexer'):
                 try:
@@ -1062,7 +1101,6 @@ class JobDocsMainWindow(QMainWindow):
         # module class from scratch on every single Settings-dialog open.
         dialog = SettingsDialog(
             self.settings, self, self._available_modules_cache,
-            save_callback=self._partial_save_settings,
             active_keys=set(self.DEFAULT_SETTINGS)
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -1581,7 +1619,8 @@ near-instant even across thousands of jobs.</p>""",
             except Exception as e:
                 print(f"Error cleaning up module {module.get_name()}: {e}")
 
-        # Save any pending settings/history
+        # Save any pending settings/history. On a read-only (search-only)
+        # install these are no-ops (see save_settings()/save_history() above).
         try:
             self.save_settings()
             self.save_history()
