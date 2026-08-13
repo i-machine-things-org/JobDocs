@@ -41,6 +41,7 @@
 - **Persist settings through the real settings store, not a dialog-local copy.** Writing to `self.settings` inside a dialog is lost on Cancel if that object is a local copy rather than the live settings store.
 - **Escape untrusted strings before interpolating into RichText labels.** A crafted version string could inject HTML into a `QLabel`; use `html.escape()`.
 - **Keep a live reference to non-modal dialogs.** Store on a longer-lived owner (e.g. `window._dialog = dlg`) and clear it on `finished`, or the dialog is garbage-collected and disappears immediately.
+- **`QImageReader.setScaledSize()` only bounds decode memory for formats whose Qt plugin supports it — verify with `supportsOption(ScaledSize)`, don't assume.** True for JPEG on this Qt build; False for PNG/BMP/WEBP/ICO/GIF, where Qt still decodes full-res internally then scales down in software (same peak memory as `QPixmap(path)`). Still worth using: it bounds *steady-state* memory for every format (no full-res `QPixmap`/`QImage` held resident afterward), just not decode-time memory for non-native formats. A real decode-time fix for those would need a different library (e.g. Pillow, not currently a dependency) — don't claim "bounded decode" without checking `supportsOption()` for the specific format first.
 - **A mode flag (e.g. `readonly_mode`) only enforces anything once it's on `AppContext`, not just `main.py`.** Skipping module *loading* isn't a write guarantee — audit every still-loaded module's write paths and gate each on `app_context.readonly_mode`.
 
 ## Print & Rendering
