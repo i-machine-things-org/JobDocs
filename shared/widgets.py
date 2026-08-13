@@ -560,7 +560,7 @@ class DropZone(QFrame):
                 if cols[0].strip().lower() in ('from', ''):
                     continue
                 subjects.append(cols[1].strip() if len(cols) >= 2 else '')
-            print(f"[DropZone] Classic Outlook subject(s): {subjects}", flush=True)
+            print(f"[DropZone] Classic Outlook subject(s): {len(subjects)}", flush=True)
         except Exception as e:
             print(f"[DropZone] Could not parse subjects from text/plain: {e}", flush=True)
 
@@ -576,7 +576,7 @@ class DropZone(QFrame):
                         for name in DropZone._parse_descriptor_filenames(descriptor_bytes, is_unicode)
                     ]
                     if subjects:
-                        print(f"[DropZone] Classic Outlook subject(s) (from descriptor): {subjects}", flush=True)
+                        print(f"[DropZone] Classic Outlook subject(s) (from descriptor): {len(subjects)}", flush=True)
                 except Exception as e:
                     print(f"[DropZone] Could not parse descriptor for subject(s): {e}", flush=True)
 
@@ -621,7 +621,7 @@ class DropZone(QFrame):
             else:
                 label = subject or (f"{raw_id[:20]}..." if raw_id else f"item {idx + 1}")
                 failed_labels.append(label)
-                print(f"[DropZone] Classic Outlook: could not retrieve item {idx} ({label!r})", flush=True)
+                print(f"[DropZone] Classic Outlook: could not retrieve item {idx}", flush=True)
 
         print(f"[DropZone] Classic Outlook: retrieved {len(files)} file(s) from {item_count} email(s)", flush=True)
 
@@ -630,15 +630,19 @@ class DropZone(QFrame):
         # existing "Email Not Retrieved" check on the caller side; warning here
         # too would just double up the dialog for that case.
         if failed_labels and files:
+            from PyQt6.QtCore import QTimer
             from PyQt6.QtWidgets import QMessageBox
             missed = ', '.join(failed_labels)
-            QMessageBox.warning(
+            # Deferred via singleShot(0, ...): Windows OLE drag-drop runs its own
+            # nested event loop for the duration of dropEvent(), and showing a
+            # modal dialog synchronously from inside it can hang or crash.
+            QTimer.singleShot(0, lambda: QMessageBox.warning(
                 parent, 'Some Emails Not Retrieved',
                 f"{len(failed_labels)} of {item_count} selected emails could not be retrieved.\n\n"
                 f"Not retrieved: {missed}\n\n"
                 'Make sure Outlook is open and signed in, then try dragging the '
                 'missing email(s) again individually.'
-            )
+            ))
 
         return files
 
@@ -711,7 +715,11 @@ class DropZone(QFrame):
 
         is_unicode = descriptor_fmt.upper().endswith('W')
         filenames = DropZone._parse_descriptor_filenames(descriptor_bytes, is_unicode)
-        filename = filenames[0] if filenames else 'email.eml'
+        # Descriptor filenames come from the drag source (untrusted) — strip any
+        # path components before joining into tmp_dir to prevent traversal.
+        filename = os.path.basename(
+            (filenames[0] if filenames else '').replace('\\', '/')
+        ).strip() or 'email.eml'
         print(
             f"[DropZone] descriptor lists {len(filenames)} file(s): {filenames}; "
             f"only entry 0 ({filename!r}) is retrievable via this drop path",
@@ -719,9 +727,13 @@ class DropZone(QFrame):
         )
 
         if len(filenames) > 1:
+            from PyQt6.QtCore import QTimer
             from PyQt6.QtWidgets import QMessageBox
             missed = ', '.join(filenames[1:])
-            QMessageBox.warning(
+            # Deferred via singleShot(0, ...): Windows OLE drag-drop runs its own
+            # nested event loop for the duration of dropEvent(), and showing a
+            # modal dialog synchronously from inside it can hang or crash.
+            QTimer.singleShot(0, lambda: QMessageBox.warning(
                 parent, 'Only First File Retrieved',
                 f"This drop contains {len(filenames)} files, but only "
                 f"'{filename}' could be retrieved.\n\n"
@@ -729,7 +741,7 @@ class DropZone(QFrame):
                 'This is a Windows drag-and-drop limitation for virtual '
                 '(non-file) sources — drag the remaining files individually, '
                 'or save them to disk first and drop the saved files.'
-            )
+            ))
 
         tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
         _dropzone_tmp_dirs.append(tmp_dir)
