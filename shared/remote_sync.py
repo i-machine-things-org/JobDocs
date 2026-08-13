@@ -5,9 +5,10 @@ Handles syncing JSON files to/from a remote server path (network share, etc.)
 """
 
 import json
-import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional
+
+from shared.utils import atomic_write_json
 
 
 class RemoteSyncManager:
@@ -79,67 +80,9 @@ class RemoteSyncManager:
             self.remote_path.mkdir(parents=True, exist_ok=True)
 
             # Write the JSON file
-            with open(remote_file, 'w') as f:
-                json.dump(data, f, indent=2)
+            atomic_write_json(remote_file, data)
 
             return True
-        except (IOError, PermissionError) as e:
+        except OSError as e:
             print(f"Warning: Could not save {filename} to remote: {e}")
             return False
-
-    def sync_from_remote(self, local_file: Path, filename: str) -> bool:
-        """
-        Sync a file FROM remote TO local (download)
-
-        Args:
-            local_file: Local file path
-            filename: Remote filename
-
-        Returns:
-            True if sync occurred, False otherwise
-        """
-        if not self.is_enabled():
-            return False
-
-        remote_file = self.remote_path / filename
-
-        try:
-            if remote_file.exists():
-                # Copy from remote to local
-                shutil.copy2(remote_file, local_file)
-                print(f"Synced {filename} from remote server")
-                return True
-        except (IOError, PermissionError) as e:
-            print(f"Warning: Could not sync {filename} from remote: {e}")
-
-        return False
-
-    def sync_to_remote(self, local_file: Path, filename: str) -> bool:
-        """
-        Sync a file FROM local TO remote (upload)
-
-        Args:
-            local_file: Local file path
-            filename: Remote filename
-
-        Returns:
-            True if sync occurred, False otherwise
-        """
-        if not self.is_enabled():
-            return False
-
-        remote_file = self.remote_path / filename
-
-        try:
-            if local_file.exists():
-                # Ensure remote directory exists
-                self.remote_path.mkdir(parents=True, exist_ok=True)
-
-                # Copy from local to remote
-                shutil.copy2(local_file, remote_file)
-                print(f"Synced {filename} to remote server")
-                return True
-        except (IOError, PermissionError) as e:
-            print(f"Warning: Could not sync {filename} to remote: {e}")
-
-        return False
