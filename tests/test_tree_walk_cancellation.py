@@ -1,0 +1,207 @@
+"""Tests for fine-grained cancellation of the Add-to-Existing tree walk.
+
+Follow-up to issue #287 / PR #304. The original fix made refresh_job_tree()/
+refresh_quote_tree() call worker.cancel() followed by a *blocking* worker.wait()
+when the "Add to Existing" tab is not active. That's safe only if cancel()
+takes effect quickly. But JobTreeWorker/QuoteTreeWorker's run() loop only
+checked the cancellation flag *between* customers -- AppContext.find_job_folders()/
+find_quote_folders() themselves (the per-customer directory scan) had no way
+to observe cancellation at all. So a worker that was mid-scan on one large or
+slow customer directory when cancel() was requested would keep scanning that
+entire customer to completion before honoring cancellation, and the GUI-thread
+wait() would block for exactly that long.
+
+The fix threads an `is_cancelled` callable into find_job_folders()/
+find_quote_folders() and polls it inside their per-item scan loops (PO
+folders, job folders, quote folders), not just once per call. These tests
+verify that plumbing end-to-end using a deliberately slow fake AppContext
+standing in for a slow/large directory tree, and directly against the real
+AppContext implementation.
+"""
+
+import os
+import time
+
+import pytest
+
+from core.app_context import AppContext
+
+pytest.importorskip("PyQt6")
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PyQt6.QtWidgets import QApplication  # noqa: E402
+
+from modules.job.module import JobTreeWorker  # noqa: E402
+from modules.quote.module import QuoteTreeWorker  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    app = QApplication.instance() or QApplication([])
+    yield app
+
+
+class _SlowJobAppContext:
+    """Stands in for a customer directory scan slow enough (huge tree /
+    network share) that it would still be "in flight" when cancel() is
+    requested. Mirrors the shape of AppContext.find_job_folders(): it must
+    honor is_cancelled() *inside* its per-item loop for the worker's cancel()
+    to take effect promptly."""
+
+    def __init__(self, num_items=40, step_delay=0.05):
+        self.num_items = num_items
+        self.step_delay = step_delay
+
+    def find_job_folders(self, customer_path, is_cancelled=None, **kwargs):
+        cancelled = is_cancelled or (lambda: False)
+        jobs = []
+        for i in range(self.num_items):
+            if cancelled():
+                break
+            time.sleep(self.step_delay)
+            jobs.append((f"job{i}", customer_path))
+        return jobs
+
+
+class _SlowQuoteAppContext:
+    def __init__(self, num_items=40, step_delay=0.05):
+        self.num_items = num_items
+        self.step_delay = step_delay
+
+    def find_quote_folders(self, customer_path, is_cancelled=None, **kwargs):
+        cancelled = is_cancelled or (lambda: False)
+        quotes = []
+        for i in range(self.num_items):
+            if cancelled():
+                break
+            time.sleep(self.step_delay)
+            quotes.append((f"quote{i}", customer_path))
+        return quotes
+
+
+def test_job_worker_cancel_does_not_block_on_slow_in_flight_customer(qapp, tmp_path):
+    """Reproduces the reviewer's reachability path: cancel() is requested
+    while the worker is mid-scan on a single slow customer. wait() must
+    return quickly -- far sooner than the full (unbounded) scan would take --
+    because find_job_folders() now polls is_cancelled() per item."""
+    cf_root = tmp_path / 'customer_files'
+    (cf_root / 'Acme').mkdir(parents=True)
+
+    slow_ctx = _SlowJobAppContext(num_items=40, step_delay=0.05)  # ~2s if uninterrupted
+    worker = JobTreeWorker([('', str(cf_root))], 'Acme', False, slow_ctx)
+    worker.start()
+    try:
+        time.sleep(0.15)  # let it get into the middle of the slow scan
+        start = time.monotonic()
+        worker.cancel()
+        finished = worker.wait(2000)
+        elapsed = time.monotonic() - start
+        assert finished, "worker did not finish within the wait timeout"
+        assert elapsed < 1.0, (
+            f"cancel()+wait() took {elapsed:.2f}s -- cancellation is not "
+            "taking effect inside the per-customer scan"
+        )
+    finally:
+        if worker.isRunning():
+            worker.cancel()
+            worker.wait()
+
+
+def test_quote_worker_cancel_does_not_block_on_slow_in_flight_customer(qapp, tmp_path):
+    cf_root = tmp_path / 'customer_files'
+    (cf_root / 'Acme').mkdir(parents=True)
+
+    slow_ctx = _SlowQuoteAppContext(num_items=40, step_delay=0.05)
+    worker = QuoteTreeWorker([('', str(cf_root))], 'Acme', False, slow_ctx)
+    worker.start()
+    try:
+        time.sleep(0.15)
+        start = time.monotonic()
+        worker.cancel()
+        finished = worker.wait(2000)
+        elapsed = time.monotonic() - start
+        assert finished, "worker did not finish within the wait timeout"
+        assert elapsed < 1.0, (
+            f"cancel()+wait() took {elapsed:.2f}s -- cancellation is not "
+            "taking effect inside the per-customer scan"
+        )
+    finally:
+        if worker.isRunning():
+            worker.cancel()
+            worker.wait()
+
+
+def _make_app_context(tmp_path, cf_root):
+    return AppContext(
+        settings={
+            'job_folder_structure': '{customer}/{po_number}/{job_folder}',
+            'customer_files_dir': str(cf_root),
+        },
+        history={},
+        config_dir=tmp_path,
+        save_settings_callback=lambda: None,
+        save_history_callback=lambda: None,
+        log_message_callback=lambda *a: None,
+        show_error_callback=lambda *a: None,
+        show_info_callback=lambda *a: None,
+        get_customer_list_callback=lambda: [],
+        add_to_history_callback=lambda *a: None,
+    )
+
+
+def test_find_job_folders_honors_is_cancelled_mid_scan(tmp_path):
+    """Direct unit test of AppContext.find_job_folders(): with PO/job
+    structure and several PO folders each containing several job folders, an
+    is_cancelled callable that returns True after the first poll must stop
+    the scan well short of visiting every folder."""
+    cf_root = tmp_path / 'customer_files'
+    for po in range(5):
+        for job in range(5):
+            (cf_root / 'Acme' / f'PO{po}' / f'{job}_Job').mkdir(parents=True)
+    ctx = _make_app_context(tmp_path, cf_root)
+
+    calls = {'n': 0}
+
+    def is_cancelled():
+        calls['n'] += 1
+        return calls['n'] > 1  # cancel on the second poll
+
+    jobs = ctx.find_job_folders(str(cf_root / 'Acme'), is_cancelled=is_cancelled)
+
+    # 25 folders exist total across 5 PO folders of 5 jobs each. Cancelling
+    # after the second poll must yield fewer than 5 -- if cancellation only
+    # took effect between PO folders (not per-job), all 5 jobs of the first
+    # PO folder would still come back (5 < 25 would wrongly pass).
+    assert len(jobs) < 5
+
+
+def test_find_quote_folders_honors_is_cancelled_mid_scan(tmp_path):
+    cf_root = tmp_path / 'customer_files'
+    for q in range(25):
+        (cf_root / 'Acme' / 'Quotes' / f'{q}_Quote').mkdir(parents=True)
+    ctx = AppContext(
+        settings={
+            'quote_folder_path': 'Quotes',
+            'customer_files_dir': str(cf_root),
+        },
+        history={},
+        config_dir=tmp_path,
+        save_settings_callback=lambda: None,
+        save_history_callback=lambda: None,
+        log_message_callback=lambda *a: None,
+        show_error_callback=lambda *a: None,
+        show_info_callback=lambda *a: None,
+        get_customer_list_callback=lambda: [],
+        add_to_history_callback=lambda *a: None,
+    )
+
+    calls = {'n': 0}
+
+    def is_cancelled():
+        calls['n'] += 1
+        return calls['n'] > 1
+
+    quotes = ctx.find_quote_folders(str(cf_root / 'Acme'), is_cancelled=is_cancelled)
+
+    assert len(quotes) < 25

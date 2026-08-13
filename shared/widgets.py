@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QWidget, QSplitter, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, pyqtSlot, QSize, QThread
-from PyQt6.QtGui import QBrush, QColor, QDragEnterEvent, QDropEvent, QImage, QPixmap
+from PyQt6.QtGui import QBrush, QColor, QDragEnterEvent, QDropEvent, QImage, QImageReader, QPixmap
 from pathlib import Path
 import atexit
 import logging
@@ -944,160 +944,6 @@ class JobSearchDialog(QDialog):
         return None
 
 
-class FileCopyDialog(QDialog):
-    """Dialog for selecting files to copy from a source folder"""
-
-    def __init__(self, parent, source_folder: str, title: str = "Select Files to Copy"):
-        super().__init__(parent)
-        self.source_folder = Path(source_folder)
-        self.selected_files = []
-
-        self.setWindowTitle(title)
-        self.resize(600, 450)
-
-        layout = QVBoxLayout(self)
-
-        # Header
-        header_label = QLabel(f"Source: {self.source_folder.name}")
-        header_label.setStyleSheet("font-weight: bold; padding: 5px;")
-        layout.addWidget(header_label)
-
-        # File tree with checkboxes
-        self.file_tree = QTreeWidget()
-        self.file_tree.setHeaderLabels(["File", "Size", "Type"])
-        self.file_tree.setRootIsDecorated(False)
-        self.file_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.file_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.file_tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        layout.addWidget(self.file_tree)
-
-        # Populate files
-        self._populate_files()
-
-        # Select All / Select None buttons
-        button_layout = QHBoxLayout()
-        select_all_btn = QPushButton("Select All")
-        select_all_btn.clicked.connect(self._select_all)
-        select_none_btn = QPushButton("Select None")
-        select_none_btn.clicked.connect(self._select_none)
-        button_layout.addWidget(select_all_btn)
-        button_layout.addWidget(select_none_btn)
-        button_layout.addStretch()
-        layout.addLayout(button_layout)
-
-        # Status label
-        self.status_label = QLabel()
-        self._update_status()
-        layout.addWidget(self.status_label)
-
-        # Dialog buttons
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok |
-            QDialogButtonBox.StandardButton.Cancel
-        )
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-
-    def _populate_files(self):
-        """Populate the file tree with files from source folder"""
-        if not self.source_folder.exists():
-            return
-
-        # Collect all files (including from job documents subfolder)
-        files_to_show = []
-
-        # Files in main folder
-        for item in self.source_folder.iterdir():
-            if item.is_file():
-                files_to_show.append(item)
-
-        # Check for "job documents" subfolder
-        job_docs = self.source_folder / "job documents"
-        if job_docs.exists() and job_docs.is_dir():
-            for item in job_docs.iterdir():
-                if item.is_file():
-                    files_to_show.append(item)
-
-        # Sort by name
-        files_to_show.sort(key=lambda f: f.name.lower())
-
-        for file_path in files_to_show:
-            item = QTreeWidgetItem()
-
-            # Checkbox in first column
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(0, Qt.CheckState.Checked)
-
-            # File name (show relative path if from subfolder)
-            try:
-                rel_path = file_path.relative_to(self.source_folder)
-                item.setText(0, str(rel_path))
-            except ValueError:
-                item.setText(0, file_path.name)
-
-            # File size
-            try:
-                size = file_path.stat().st_size
-                if size < 1024:
-                    size_str = f"{size} B"
-                elif size < 1024 * 1024:
-                    size_str = f"{size / 1024:.1f} KB"
-                else:
-                    size_str = f"{size / (1024 * 1024):.1f} MB"
-                item.setText(1, size_str)
-            except OSError:
-                item.setText(1, "?")
-
-            # File type (extension)
-            item.setText(2, file_path.suffix.upper() or "File")
-
-            # Store full path in data
-            item.setData(0, Qt.ItemDataRole.UserRole, str(file_path))
-
-            self.file_tree.addTopLevelItem(item)
-
-        # Connect check state changes to update status
-        self.file_tree.itemChanged.connect(self._update_status)
-
-    def _select_all(self):
-        """Select all files"""
-        for i in range(self.file_tree.topLevelItemCount()):
-            item = self.file_tree.topLevelItem(i)
-            item.setCheckState(0, Qt.CheckState.Checked)
-
-    def _select_none(self):
-        """Deselect all files"""
-        for i in range(self.file_tree.topLevelItemCount()):
-            item = self.file_tree.topLevelItem(i)
-            item.setCheckState(0, Qt.CheckState.Unchecked)
-
-    def _update_status(self):
-        """Update the status label with selection count"""
-        selected = 0
-        total = self.file_tree.topLevelItemCount()
-        for i in range(total):
-            item = self.file_tree.topLevelItem(i)
-            if item.checkState(0) == Qt.CheckState.Checked:
-                selected += 1
-        self.status_label.setText(f"Selected: {selected} of {total} files")
-
-    def get_selected_files(self) -> list:
-        """Return list of selected file paths"""
-        selected = []
-        for i in range(self.file_tree.topLevelItemCount()):
-            item = self.file_tree.topLevelItem(i)
-            if item.checkState(0) == Qt.CheckState.Checked:
-                file_path = item.data(0, Qt.ItemDataRole.UserRole)
-                if file_path:
-                    selected.append(file_path)
-        return selected
-
-    def has_files(self) -> bool:
-        """Check if there are any files to show"""
-        return self.file_tree.topLevelItemCount() > 0
-
-
 class DrawingSearchDialog(QDialog):
     """Dialog for searching and linking existing drawings by drawing number"""
 
@@ -1266,6 +1112,22 @@ class FilePreviewWidget(QWidget):
     _CAD_EXTS = {'.step', '.stp', '.iges', '.igs', '.x_t', '.x_b', '.prt', '.asm'}
     _MESH_EXTS = {'.stl', '.obj', '.ply', '.3mf'}
 
+    # Cap decoded size to this many pixels on the longer side — a full-res
+    # decode of a high-res scan/photo can run tens of MB for what's ultimately
+    # shown in a ~200-400px preview pane. Shared with the PDF render path below.
+    #
+    # NOTE: setScaledSize() below only bounds the *decode itself* for formats
+    # whose Qt plugin advertises QImageIOHandler.ImageOption.ScaledSize
+    # support — JPEG does, but PNG/BMP/WEBP/ICO/GIF do not (verified against
+    # this repo's Qt build: supportsOption(ScaledSize) is False for all
+    # five). For those formats — which includes the common "scanned drawing"
+    # case (PNG/TIFF) — Qt still decodes at full native resolution
+    # internally before scaling down, so the transient decode-time memory
+    # spike is unchanged from the old QPixmap(path) behavior. What this DOES
+    # fix for every format is steady-state memory: self._pixmap only ever
+    # holds the small scaled copy, never a full-res decode, between previews.
+    _PREVIEW_MAX_DIM = 600
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._pixmap: QPixmap | None = None
@@ -1303,8 +1165,8 @@ class FilePreviewWidget(QWidget):
             size_str = ""
 
         if ext in self._IMAGE_EXTS:
-            pix = QPixmap(file_path)
-            if not pix.isNull():
+            pix = self._load_bounded_image(file_path)
+            if pix is not None and not pix.isNull():
                 self._set_pixmap(pix, path.name, size_str)
                 return
 
@@ -1330,6 +1192,34 @@ class FilePreviewWidget(QWidget):
         type_label = (ext.upper().lstrip('.') + " file") if ext else "File"
         self._set_text(type_label, f"{path.name}\n{size_str}")
 
+    def _load_bounded_image(self, file_path: str) -> QPixmap | None:
+        """Decode file_path bounded to _PREVIEW_MAX_DIM on the longer side.
+
+        Requests QImageReader.setScaledSize() so the decoder produces a small
+        image directly — but this only bounds actual *decode-time* memory for
+        formats whose Qt plugin supports native scaled reading (JPEG, on this
+        Qt build). For formats that don't (PNG, BMP, WEBP, ICO, GIF — see
+        _PREVIEW_MAX_DIM's comment), Qt silently falls back to decoding at
+        full native resolution and then scaling the QImage down in software,
+        same peak memory as the old QPixmap(file_path) path. Either way, only
+        the small scaled result is kept afterward, so steady-state/resident
+        memory is bounded for all formats even when decode-time memory isn't.
+        """
+        reader = QImageReader(file_path)
+        reader.setAutoTransform(True)  # respect EXIF orientation
+        size = reader.size()
+        if size.isValid() and size.width() > 0 and size.height() > 0:
+            scale = min(self._PREVIEW_MAX_DIM / size.width(), self._PREVIEW_MAX_DIM / size.height(), 1.0)
+            if scale < 1.0:
+                reader.setScaledSize(QSize(
+                    max(1, round(size.width() * scale)),
+                    max(1, round(size.height() * scale)),
+                ))
+        image = reader.read()
+        if image.isNull():
+            return None
+        return QPixmap.fromImage(image)
+
     def _try_pdf_preview(self, file_path: str) -> bool:
         try:
             import fitz  # pymupdf
@@ -1341,7 +1231,7 @@ class FilePreviewWidget(QWidget):
                 # Cap rendered size: a fixed 1.5× scale can exceed Qt's 256 MB
                 # allocation limit for high-res embedded images. Scale to fit
                 # within MAX_DIM × MAX_DIM pixels instead.
-                MAX_DIM = 600
+                MAX_DIM = self._PREVIEW_MAX_DIM
                 rect = page.rect
                 scale = min(MAX_DIM / rect.width, MAX_DIM / rect.height, 1.5)
                 pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))
