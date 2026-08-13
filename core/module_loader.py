@@ -287,30 +287,3 @@ class ModuleLoader:
             )
 
         return self.loaded_modules
-
-    def get_module(self, module_name: str) -> BaseModule:
-        """
-        Get a loaded module by name.
-
-        Args:
-            module_name: Name of the module
-
-        Returns:
-            The module instance
-
-        Raises:
-            KeyError: If module not found
-        """
-        for module in self.loaded_modules:
-            if module.__class__.__name__.lower() == module_name.lower():
-                return module
-        raise KeyError(f"Module not found: {module_name}")
-
-    def unload_all(self):
-        """Cleanup and unload all modules"""
-        for module in self.loaded_modules:
-            try:
-                module.cleanup()
-            except Exception as e:
-                print(f"Error cleaning up module {module.get_name()}: {e}")
-        self.loaded_modules.clear()
