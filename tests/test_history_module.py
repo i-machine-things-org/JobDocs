@@ -83,11 +83,39 @@ def test_refresh_history_tolerates_null_date(qapp):
     m.refresh_history()
 
     assert m.history_table.rowCount() == 2
-    # The null-date job sorts as the oldest (datetime.min fallback) and its
+    # The null-date job sorts as the oldest (float('-inf') fallback) and its
     # display column falls back to "Unknown" rather than crashing.
     assert m.history_table.item(0, 1).text() == 'Quote'
     assert m.history_table.item(1, 1).text() == 'Job'
     assert m.history_table.item(1, 0).text() == 'Unknown'
+
+
+def test_refresh_history_tolerates_mixed_naive_and_aware_dates(qapp):
+    """Regression test (CodeRabbit finding on PR #307): entries.sort() raises
+    TypeError if _sort_key() returns raw datetime objects with inconsistent
+    tzinfo-awareness -- e.g. a synced entry with an offset ("+00:00") next to
+    a locally-written naive one. Returning a numeric timestamp instead keeps
+    every key directly comparable regardless of awareness.
+    """
+    history = {
+        'recent_jobs': [
+            {'date': '2026-08-01T10:00:00', 'customer': 'Acme', 'job_number': '12345'},
+        ],
+        'recent_quotes': [
+            {'date': '2026-08-02T10:00:00+00:00', 'customer': 'Acme', 'quote_number': '99001'},
+        ],
+    }
+    m = HistoryModule()
+    m.initialize(_make_context(history))
+    m.get_widget()
+
+    # Must not raise TypeError from comparing naive vs. offset-aware datetimes.
+    m.refresh_history()
+
+    assert m.history_table.rowCount() == 2
+    # Newest first: the offset-aware quote (08-02) before the naive job (08-01).
+    assert m.history_table.item(0, 1).text() == 'Quote'
+    assert m.history_table.item(1, 1).text() == 'Job'
 
 
 def test_clear_history_clears_both_jobs_and_quotes(qapp, monkeypatch):
