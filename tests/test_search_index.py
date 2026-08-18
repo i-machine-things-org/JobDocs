@@ -156,6 +156,28 @@ class TestIsFullyCovered:
             conn.execute("DROP TABLE indexed_dirs")
         assert index.is_fully_covered([('', str(cf_root))], []) is False
 
+    def test_new_job_in_existing_po_container_is_not_covered(self, tmp_path):
+        # A customer directory's own mtime only reflects changes to its
+        # *direct* children -- adding a job folder inside an already-indexed
+        # PO-container subdirectory changes that container's mtime, not the
+        # customer dir's. is_fully_covered() must check previously-recorded
+        # containers too, not just the customer-level indexed_dirs row
+        # (CodeRabbit finding, PR #305 independent review).
+        cf_root = tmp_path / 'customer_files'
+        customer_path = cf_root / 'Acme'
+        po_dir = customer_path / 'job documents' / 'PO-1001'
+        (po_dir / '11111_LegacyBracket').mkdir(parents=True)
+
+        ctx = _make_app_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+        assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+        # A new job shows up inside the existing PO-1001 container after the
+        # last index run -- customer_path itself is untouched.
+        (po_dir / '22222_NewShaft').mkdir(parents=True)
+        assert index.is_fully_covered([('', str(cf_root))], []) is False
+
 
 def _assert_no_recursive_walk_needed(monkeypatch):
     """Fail the test if os.walk is called — is_fully_covered must only use
