@@ -83,3 +83,20 @@ class TestFindJobFoldersWithPoNumber:
         jobs = ctx.find_job_folders(str(customer_path))
 
         assert [name for name, _ in jobs] == ['12345_Bracket']
+
+    def test_legacy_job_folder_found_when_po_number_is_a_whole_path_segment(self, tmp_path):
+        # Regression test (CodeRabbit finding on PR #305): when the PO number
+        # placeholder occupies a whole path segment on its own (no literal
+        # prefix/suffix sharing that segment, e.g. "{po_number}" rather than
+        # "PO-{po_number}"), matches_po_name is unconditionally True, so a
+        # legacy job folder that predates PO folders was always treated as a
+        # PO container and its own job-documents suffix underneath it was
+        # never discovered.
+        customer_path = tmp_path / 'Acme'
+        (customer_path / '12345_LegacyBracket' / 'job documents').mkdir(parents=True)
+        (customer_path / '1001' / '22222_NewJob' / 'job documents').mkdir(parents=True)
+
+        ctx = _make_context('{customer}/{po_number}/{job_folder}/job documents')
+        jobs = ctx.find_job_folders(str(customer_path))
+
+        assert sorted(name for name, _ in jobs) == ['12345_LegacyBracket', '22222_NewJob']

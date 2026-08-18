@@ -303,7 +303,7 @@ class AppContext:
         errors: Optional[List[OSError]] = None,
         is_cancelled: Optional[Callable[[], bool]] = None,
         include_po_number: bool = False,
-    ) -> List[Tuple[str, str]]:
+    ) -> List[Tuple[str, ...]]:
         """
         Find all job folders in a customer directory.
 
@@ -397,6 +397,16 @@ class AppContext:
                                     sub_path = os.path.join(po_path, post_po) if post_po else po_path
                                     if os.path.exists(sub_path):
                                         handled_as_po_container = True
+                                        if suffix and os.path.exists(os.path.join(po_path, suffix)):
+                                            # When po_name_prefix and po_name_suffix are both
+                                            # empty, matches_po_name is always True, so this
+                                            # would otherwise be treated as a PO container even
+                                            # when it's really a legacy job folder holding the
+                                            # job-documents suffix directly (pre-dates PO folders
+                                            # being added). Only decidable when suffix is
+                                            # non-empty; an empty suffix leaves the two layouts
+                                            # genuinely ambiguous.
+                                            jobs.append(_job(po_dir, os.path.join(po_path, suffix)))
                                         po_number_end = (
                                             len(po_dir) - len(po_name_suffix) if po_name_suffix else len(po_dir)
                                         )
