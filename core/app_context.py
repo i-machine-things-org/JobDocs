@@ -402,11 +402,18 @@ class AppContext:
                                 )
                                 handled_as_po_container = False
                                 if matches_po_name:
+                                    # Record po_path as soon as it's recognized as a PO
+                                    # container, before checking sub_path -- an empty
+                                    # PO folder with no post_po subdirectory yet (e.g.
+                                    # "PO-1001" with no "job documents" inside) would
+                                    # otherwise never be recorded, so a job created in
+                                    # it later evades the search-index freshness check.
+                                    if containers is not None:
+                                        containers.append(po_path)
                                     sub_path = os.path.join(po_path, post_po) if post_po else po_path
                                     if os.path.exists(sub_path):
                                         handled_as_po_container = True
                                         if containers is not None:
-                                            containers.append(po_path)
                                             if sub_path != po_path:
                                                 containers.append(sub_path)
                                         if (

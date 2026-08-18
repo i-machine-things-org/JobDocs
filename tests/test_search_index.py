@@ -201,6 +201,28 @@ class TestIsFullyCovered:
         (po_dir / '22222_NewShaft').mkdir(parents=True)
         assert index.is_fully_covered([('', str(cf_root))], []) is False
 
+    def test_new_job_in_po_container_missing_its_subdir_is_not_covered(self, tmp_path):
+        # CodeRabbit finding on PR #316 (a gap in the fix directly above): the
+        # prior fix only appended po_path to `containers` *after* confirming
+        # sub_path exists. For a structure with a literal subdirectory between
+        # the PO folder and {job_folder} (post_po non-empty, e.g. "job
+        # documents"), a PO folder that exists but doesn't have that
+        # subdirectory yet (truly empty, not even the container dir) was never
+        # recorded at all -- not just stale, invisible to is_fully_covered().
+        cf_root = tmp_path / 'customer_files'
+        customer_path = cf_root / 'Acme'
+        po_dir = customer_path / 'PO-1001'
+        po_dir.mkdir(parents=True)  # PO-1001 exists but has no "job documents" yet
+
+        ctx = _make_app_context('{customer}/PO-{po_number}/job documents/{job_folder}')
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+        assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+        # "job documents" is created inside PO-1001, with a job inside it.
+        (po_dir / 'job documents' / '22222_NewShaft').mkdir(parents=True)
+        assert index.is_fully_covered([('', str(cf_root))], []) is False
+
 
 def _assert_no_recursive_walk_needed(monkeypatch):
     """Fail the test if os.walk is called — is_fully_covered must only use
