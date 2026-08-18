@@ -100,3 +100,22 @@ class TestFindJobFoldersWithPoNumber:
         jobs = ctx.find_job_folders(str(customer_path))
 
         assert sorted(name for name, _ in jobs) == ['12345_LegacyBracket', '22222_NewJob']
+
+    def test_named_po_folder_with_intermediate_path_is_not_reported_as_a_job(self, tmp_path):
+        # Regression test (CodeRabbit finding on PR #316): the legacy-folder
+        # detection above must only fire for the genuinely ambiguous
+        # whole-segment case (po_name_prefix, po_name_suffix, and post_po all
+        # empty). When the PO folder has a named prefix ("PO-") and an
+        # intermediate path segment before {job_folder} that happens to share
+        # its literal name with the job-documents suffix (both "job
+        # documents" here), po_path/suffix always exists for *every* valid PO
+        # folder -- it's the same directory as sub_path, which is already
+        # confirmed to exist. Without the extra guards, every real PO folder
+        # would also be reported as a spurious job in its own right.
+        customer_path = tmp_path / 'Acme'
+        (customer_path / 'PO-1001' / 'job documents' / '22222_NewJob' / 'job documents').mkdir(parents=True)
+
+        ctx = _make_context('{customer}/PO-{po_number}/job documents/{job_folder}/job documents')
+        jobs = ctx.find_job_folders(str(customer_path))
+
+        assert [name for name, _ in jobs] == ['22222_NewJob']
