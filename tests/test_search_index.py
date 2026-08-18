@@ -178,6 +178,29 @@ class TestIsFullyCovered:
         (po_dir / '22222_NewShaft').mkdir(parents=True)
         assert index.is_fully_covered([('', str(cf_root))], []) is False
 
+    def test_new_job_in_initially_empty_po_container_is_not_covered(self, tmp_path):
+        # CodeRabbit finding on PR #316: update() used to derive container_dirs
+        # only from *found* jobs' ancestor paths, so a PO folder that matched
+        # the naming convention but held zero jobs at index time was never
+        # recorded in indexed_dirs at all. A job created in it afterward left
+        # is_fully_covered() with no row to compare a changed mtime against,
+        # so it kept trusting a zero-result search. find_job_folders() now
+        # reports every examined PO container via its `containers` out-param,
+        # whether or not it currently holds any jobs.
+        cf_root = tmp_path / 'customer_files'
+        customer_path = cf_root / 'Acme'
+        po_dir = customer_path / 'job documents' / 'PO-1001'
+        po_dir.mkdir(parents=True)  # PO folder exists but is empty
+
+        ctx = _make_app_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+        assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+        # A job is created inside the previously-empty PO-1001 container.
+        (po_dir / '22222_NewShaft').mkdir(parents=True)
+        assert index.is_fully_covered([('', str(cf_root))], []) is False
+
 
 def _assert_no_recursive_walk_needed(monkeypatch):
     """Fail the test if os.walk is called — is_fully_covered must only use

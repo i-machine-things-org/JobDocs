@@ -455,9 +455,11 @@ class SearchIndex:
                         # that hold job folders). Checking these — not just the customer
                         # root — detects new/deleted jobs inside existing subdirs.
                         scan_errors: List[Exception] = []
+                        po_containers: List[str] = []
                         try:
                             jobs = app_context.find_job_folders(
                                 customer_path, errors=scan_errors, include_po_number=True,
+                                containers=po_containers,
                             )
                         except OSError as exc:
                             logger.warning("search_index: find_job_folders(%s): %s", customer_path, exc)
@@ -475,10 +477,14 @@ class SearchIndex:
                         # in indexed_dirs. customer_path must be included so the
                         # precheck can confirm it was indexed and avoid calling
                         # find_job_folders every run.
+                        # po_containers additionally covers PO folders that matched
+                        # the naming convention but currently hold zero jobs --
+                        # without them, an empty PO container is never recorded, so
+                        # a job created in it later goes undetected by is_fully_covered().
                         # Also track the quotes dir so a new quote folder triggers
                         # re-indexing even when no job folders changed.
                         customer_p = Path(customer_path)
-                        container_dirs: set = {customer_path}
+                        container_dirs: set = {customer_path, *po_containers}
                         for _, job_docs_path, _ in jobs:
                             for p in Path(job_docs_path).parents:
                                 if p == customer_p:
