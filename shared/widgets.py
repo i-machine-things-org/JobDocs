@@ -86,11 +86,21 @@ class DropZone(QFrame):
 
     @staticmethod
     def _outlook_descriptor_format(mime_data) -> str:
-        """Return the FileGroupDescriptor format name if present, else empty string."""
+        """Return the FileGroupDescriptor format name if present, else empty string.
+
+        Prefers the Unicode (W) format over the ANSI one when a drag source
+        offers both — Qt's QMimeData.formats() order reflects how the source
+        registered them, not a fixed preference, so picking the first match
+        could pick ANSI and misdecode/truncate Unicode filenames even though
+        the better format was also available.
+        """
+        fallback = ''
         for fmt in mime_data.formats():
             if 'filegroupdescriptor' in fmt.lower():
-                return fmt
-        return ''
+                if DropZone._is_unicode_descriptor_format(fmt):
+                    return fmt
+                fallback = fallback or fmt
+        return fallback
 
     @staticmethod
     def _is_unicode_descriptor_format(fmt: str) -> bool:

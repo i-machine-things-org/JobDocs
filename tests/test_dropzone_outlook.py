@@ -92,6 +92,35 @@ class TestIsUnicodeDescriptorFormat:
         assert DropZone._is_unicode_descriptor_format(fmt) is False
 
 
+class TestOutlookDescriptorFormatPrefersUnicode:
+    """Regression coverage for CodeRabbit's finding on PR #316: QMimeData.formats()
+    does not guarantee any particular ordering between the ANSI and Unicode
+    descriptor formats when a drag source offers both. Picking the first match
+    could pick ANSI and truncate Unicode filenames even though the Unicode
+    format was also available.
+    """
+
+    def test_unicode_is_preferred_when_ansi_listed_first(self, qapp):
+        ansi = 'application/x-qt-windows-mime;value="FileGroupDescriptor"'
+        unicode_fmt = 'application/x-qt-windows-mime;value="FileGroupDescriptorW"'
+        mime = _FakeMime({ansi: b'', unicode_fmt: b''})
+
+        assert DropZone._outlook_descriptor_format(mime) == unicode_fmt
+
+    def test_unicode_is_preferred_when_listed_first(self, qapp):
+        ansi = 'application/x-qt-windows-mime;value="FileGroupDescriptor"'
+        unicode_fmt = 'application/x-qt-windows-mime;value="FileGroupDescriptorW"'
+        mime = _FakeMime({unicode_fmt: b'', ansi: b''})
+
+        assert DropZone._outlook_descriptor_format(mime) == unicode_fmt
+
+    def test_ansi_used_when_it_is_the_only_format_present(self, qapp):
+        ansi = 'application/x-qt-windows-mime;value="FileGroupDescriptor"'
+        mime = _FakeMime({ansi: b''})
+
+        assert DropZone._outlook_descriptor_format(mime) == ansi
+
+
 class TestParseDescriptorFilenames:
     def test_parses_all_entries_not_just_the_first(self, qapp):
         blob = _make_descriptor_blob(['invoice.pdf', 'photo.jpg', 'notes.txt'])
@@ -406,3 +435,34 @@ class TestClassicOutlookIdSubjectLengthMismatch:
 
         assert [c[0] for c in calls] == ['ID-AAAA', 'ID-BBBB']
         assert [c[1] for c in calls] == ['First email', 'Second email']
+
+
+class TestClassicOutlookSubjectFallsBackToDescriptor:
+    """Nitpick coverage requested by CodeRabbit on PR #316: the existing
+    descriptor-parsing tests (TestHandleOutlookDropMultiFile) exercise
+    _handle_outlook_drop directly, not _handle_classic_outlook_drop's own
+    subject-fallback path, which only kicks in when text/plain yields no
+    subjects and must use the full quoted Qt MIME identifier correctly
+    (see TestOutlookDescriptorFormatPrefersUnicode) to avoid a truncated
+    UTF-16 subject reaching MAPI's subject-search fallback.
+    """
+
+    def test_full_utf16_subject_from_descriptor_is_not_truncated(self, qapp, monkeypatch):
+        unicode_fmt = 'application/x-qt-windows-mime;value="FileGroupDescriptorW"'
+        blob = _make_descriptor_blob(['Invoice Attached.msg'])
+        mime = _FakeMime({
+            'application/x-qt-windows-mime;value="Csv"': "ID-AAAA\r\n".encode('utf-16-le'),
+            unicode_fmt: blob,
+            # No text/plain data -- forces the descriptor fallback path.
+        })
+
+        calls = []
+        monkeypatch.setattr(
+            DropZone, '_mapi_save_email',
+            staticmethod(lambda raw_id, subject, tmp_dir, idx=0: calls.append((raw_id, subject, idx)) or ['x.msg']),
+        )
+
+        DropZone._handle_classic_outlook_drop(mime)
+
+        assert len(calls) == 1
+        assert calls[0][1] == 'Invoice Attached'
