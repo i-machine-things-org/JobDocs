@@ -93,6 +93,19 @@ class DropZone(QFrame):
         return ''
 
     @staticmethod
+    def _is_unicode_descriptor_format(fmt: str) -> bool:
+        """Return True if fmt identifies the Unicode (W) FileGroupDescriptor format.
+
+        Qt exposes this as a MIME identifier like
+        'application/x-qt-windows-mime;value="FileGroupDescriptorW"' — the
+        string ends with a closing quote, not 'W', so a plain
+        fmt.endswith('W') never matches and Unicode filenames get parsed as
+        Latin-1, truncating them at the first null byte. Match the token
+        itself instead.
+        """
+        return 'filegroupdescriptorw' in fmt.lower()
+
+    @staticmethod
     def _is_classic_outlook(mime_data) -> bool:
         """Return True if this drag is from the classic Outlook desktop app."""
         return 'application/x-qt-windows-mime;value="RenPrivateMessages"' in mime_data.formats()
@@ -570,7 +583,7 @@ class DropZone(QFrame):
             if descriptor_fmt:
                 try:
                     descriptor_bytes = bytes(mime_data.data(descriptor_fmt))
-                    is_unicode = descriptor_fmt.upper().endswith('W')
+                    is_unicode = DropZone._is_unicode_descriptor_format(descriptor_fmt)
                     subjects = [
                         os.path.splitext(name)[0]
                         for name in DropZone._parse_descriptor_filenames(descriptor_bytes, is_unicode)
@@ -713,7 +726,7 @@ class DropZone(QFrame):
             )
             return []
 
-        is_unicode = descriptor_fmt.upper().endswith('W')
+        is_unicode = DropZone._is_unicode_descriptor_format(descriptor_fmt)
         filenames = DropZone._parse_descriptor_filenames(descriptor_bytes, is_unicode)
         # Descriptor filenames come from the drag source (untrusted) — strip any
         # path components before joining into tmp_dir to prevent traversal.

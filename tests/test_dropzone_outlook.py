@@ -75,6 +75,23 @@ class _FakeMime:
         return list(self._payloads.keys())
 
 
+class TestIsUnicodeDescriptorFormat:
+    """Regression coverage for CodeRabbit's finding on PR #305: Qt exposes the
+    Unicode descriptor format as a full MIME identifier like
+    'application/x-qt-windows-mime;value="FileGroupDescriptorW"' -- the string
+    ends with a closing quote, not 'W', so a plain fmt.endswith('W') check
+    never matches it and misclassifies it as the ANSI format.
+    """
+
+    def test_full_qt_mime_identifier_is_detected_as_unicode(self, qapp):
+        fmt = 'application/x-qt-windows-mime;value="FileGroupDescriptorW"'
+        assert DropZone._is_unicode_descriptor_format(fmt) is True
+
+    def test_ansi_format_is_not_detected_as_unicode(self, qapp):
+        fmt = 'application/x-qt-windows-mime;value="FileGroupDescriptor"'
+        assert DropZone._is_unicode_descriptor_format(fmt) is False
+
+
 class TestParseDescriptorFilenames:
     def test_parses_all_entries_not_just_the_first(self, qapp):
         blob = _make_descriptor_blob(['invoice.pdf', 'photo.jpg', 'notes.txt'])
@@ -156,6 +173,25 @@ class TestHandleOutlookDropMultiFile:
         saved_path = files[0]
         assert os.path.basename(saved_path) == 'evil.txt'
         assert '..' not in saved_path.split(os.sep)
+
+    def test_full_qt_mime_identifier_does_not_truncate_utf16_filename(self, qapp, tmp_path, monkeypatch):
+        """Regression test (CodeRabbit finding on PR #305): with the real Qt
+        format string (not the shortened 'FileGroupDescriptorW' used above),
+        misdetecting it as ANSI decodes the UTF-16-LE filename as Latin-1 and
+        truncates it at the first null byte -- 'invoice.pdf' would come back
+        as just 'i'.
+        """
+        fmt = 'application/x-qt-windows-mime;value="FileGroupDescriptorW"'
+        blob = _make_descriptor_blob(['invoice.pdf'])
+        mime = _FakeMime({
+            fmt: blob,
+            'FileContents': b'PDF-CONTENT-BYTES',
+        })
+
+        files = DropZone._handle_outlook_drop(mime, fmt)
+
+        assert len(files) == 1
+        assert os.path.basename(files[0]) == 'invoice.pdf'
 
 
 class TestHandleClassicOutlookDropMultiSelect:
