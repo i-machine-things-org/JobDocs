@@ -137,3 +137,29 @@ def test_clear_history_clears_both_jobs_and_quotes(qapp, monkeypatch):
     assert history['recent_jobs'] == []
     assert history['recent_quotes'] == []
     assert m.history_table.rowCount() == 0
+
+
+def test_clear_history_clears_plugin_entry_types(qapp, monkeypatch):
+    """Regression test (CodeRabbit finding on PR #305): add_to_history() stores
+    plugin entries under recent_{entry_type}s generically (see tests/test_history.py),
+    but clear_history() only zeroed the two collections it knew about by name.
+    Any other recent_* list must be cleared too.
+    """
+    from PyQt6.QtWidgets import QMessageBox
+
+    history = {
+        'recent_jobs': [{'date': '2026-08-01T10:00:00', 'customer': 'Acme', 'job_number': '12345'}],
+        'recent_quotes': [],
+        'recent_my_entry_types': [{'date': '2026-08-01T10:00:00', 'customer': 'Acme'}],
+    }
+    m = HistoryModule()
+    m.initialize(_make_context(history))
+    m.get_widget()
+
+    monkeypatch.setattr(QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, 'information', lambda *a, **k: None)
+
+    m.clear_history()
+
+    assert history['recent_jobs'] == []
+    assert history['recent_my_entry_types'] == []

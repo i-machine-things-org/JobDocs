@@ -18,8 +18,16 @@ class TestCreateFileLinkLogsOnError:
 
         # Fallback behavior callers rely on is unchanged...
         assert result is False
-        # ...but the failure is no longer silent.
-        assert any('create_file_link' in rec.message for rec in caplog.records)
+        # ...but the failure is no longer silent, and the log actually
+        # identifies the source, destination, link type, and underlying
+        # OSError — not just the fact that create_file_link was involved.
+        records = [rec for rec in caplog.records if rec.name == 'shared.utils']
+        assert len(records) == 1
+        record = records[0]
+        assert str(source) in record.message
+        assert str(dest) in record.message
+        assert 'hard' in record.message
+        assert isinstance(record.args[-1], OSError)
 
     def test_hard_link_succeeds(self, tmp_path):
         source = tmp_path / 'source.txt'

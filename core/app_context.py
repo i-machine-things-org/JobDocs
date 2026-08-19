@@ -303,7 +303,8 @@ class AppContext:
         errors: Optional[List[OSError]] = None,
         is_cancelled: Optional[Callable[[], bool]] = None,
         include_po_number: bool = False,
-    ) -> List[Tuple[str, str]]:
+        containers: Optional[List[str]] = None,
+    ) -> List[Tuple[str, ...]]:
         """
         Find all job folders in a customer directory.
 
@@ -319,6 +320,13 @@ class AppContext:
                 the job's PO number (or '' if the structure has no PO folder,
                 or the job doesn't sit inside one), i.e.
                 (job_name, job_docs_path, po_number).
+            containers: Optional list to collect every PO-container directory
+                examined (matched the PO naming convention and exists), even
+                one holding zero jobs right now. Callers that only derive
+                container paths from returned jobs' ancestors (e.g. to decide
+                what to mark "indexed") would otherwise never learn an empty
+                PO container exists, so a job created in it later goes
+                undetected.
 
         Returns:
             List of (job_name, job_docs_path) tuples, or (job_name,
@@ -394,9 +402,40 @@ class AppContext:
                                 )
                                 handled_as_po_container = False
                                 if matches_po_name:
+                                    # Record po_path as soon as it's recognized as a PO
+                                    # container, before checking sub_path -- an empty
+                                    # PO folder with no post_po subdirectory yet (e.g.
+                                    # "PO-1001" with no "job documents" inside) would
+                                    # otherwise never be recorded, so a job created in
+                                    # it later evades the search-index freshness check.
+                                    if containers is not None:
+                                        containers.append(po_path)
                                     sub_path = os.path.join(po_path, post_po) if post_po else po_path
                                     if os.path.exists(sub_path):
                                         handled_as_po_container = True
+                                        if containers is not None:
+                                            if sub_path != po_path:
+                                                containers.append(sub_path)
+                                        if (
+                                            not po_name_prefix
+                                            and not po_name_suffix
+                                            and not post_po
+                                            and suffix
+                                            and os.path.exists(os.path.join(po_path, suffix))
+                                        ):
+                                            # When po_name_prefix, po_name_suffix, and post_po
+                                            # are all empty, matches_po_name is always True and
+                                            # sub_path == po_path, so this would otherwise be
+                                            # treated as a PO container even when it's really a
+                                            # legacy job folder holding the job-documents suffix
+                                            # directly (pre-dates PO folders being added). Gated
+                                            # on all three being empty so a genuine PO layout
+                                            # with a named prefix/suffix or an intermediate path
+                                            # segment (post_po) never gets an extra, incorrect
+                                            # job entry for the PO folder itself. Only decidable
+                                            # when suffix is non-empty; an empty suffix leaves
+                                            # the two layouts genuinely ambiguous.
+                                            jobs.append(_job(po_dir, os.path.join(po_path, suffix)))
                                         po_number_end = (
                                             len(po_dir) - len(po_name_suffix) if po_name_suffix else len(po_dir)
                                         )
