@@ -18,6 +18,57 @@ def _make_context(structure):
     )
 
 
+def _make_readonly_context(readonly_mode):
+    calls = {'settings': 0, 'history': 0}
+
+    def _save_settings():
+        calls['settings'] += 1
+
+    def _save_history():
+        calls['history'] += 1
+
+    ctx = AppContext(
+        settings={},
+        history={},
+        config_dir=None,
+        save_settings_callback=_save_settings,
+        save_history_callback=_save_history,
+        log_message_callback=lambda *a: None,
+        show_error_callback=lambda *a: None,
+        show_info_callback=lambda *a: None,
+        get_customer_list_callback=lambda: [],
+        add_to_history_callback=lambda *a: None,
+        readonly_mode=readonly_mode,
+    )
+    return ctx, calls
+
+
+class TestPersistenceReadonlyGuard:
+    """AppContext.save_settings/save_history are the central defense-in-depth
+    guard for readonly_mode — every module's persistence funnels through here,
+    not just Search's own check."""
+
+    def test_readonly_mode_blocks_save_settings(self):
+        ctx, calls = _make_readonly_context(readonly_mode=True)
+        ctx.save_settings()
+        assert calls['settings'] == 0
+
+    def test_readonly_mode_blocks_save_history(self):
+        ctx, calls = _make_readonly_context(readonly_mode=True)
+        ctx.save_history()
+        assert calls['history'] == 0
+
+    def test_writable_mode_still_saves_settings(self):
+        ctx, calls = _make_readonly_context(readonly_mode=False)
+        ctx.save_settings()
+        assert calls['settings'] == 1
+
+    def test_writable_mode_still_saves_history(self):
+        ctx, calls = _make_readonly_context(readonly_mode=False)
+        ctx.save_history()
+        assert calls['history'] == 1
+
+
 class TestFindJobFoldersWithPoNumber:
     def test_literal_prefix_sharing_po_number_segment(self, tmp_path):
         # Regression test for #295: "PO-{po_number}" puts literal text in the
