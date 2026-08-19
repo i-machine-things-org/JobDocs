@@ -301,17 +301,32 @@ class AppContext:
         customer_path: str,
         *,
         errors: Optional[List[OSError]] = None,
+        is_cancelled: Optional[Callable[[], bool]] = None,
         include_po_number: bool = False,
-    ) -> List[Tuple[str, str]]:
+        containers: Optional[List[str]] = None,
+    ) -> List[Tuple[str, ...]]:
         """
         Find all job folders in a customer directory.
 
         Args:
             customer_path: Path to customer directory
+            errors: Optional list to collect OSErrors encountered
+            is_cancelled: Optional callable polled inside the per-item scan
+                loops (PO folders, job folders) so a caller running this on a
+                background thread can make cancellation take effect promptly
+                even mid-way through a single, large customer directory —
+                not just between separate calls to this method.
             include_po_number: If True, each returned tuple is extended with
                 the job's PO number (or '' if the structure has no PO folder,
                 or the job doesn't sit inside one), i.e.
                 (job_name, job_docs_path, po_number).
+            containers: Optional list to collect every PO-container directory
+                examined (matched the PO naming convention and exists), even
+                one holding zero jobs right now. Callers that only derive
+                container paths from returned jobs' ancestors (e.g. to decide
+                what to mark "indexed") would otherwise never learn an empty
+                PO container exists, so a job created in it later goes
+                undetected.
 
         Returns:
             List of (job_name, job_docs_path) tuples, or (job_name,
@@ -319,6 +334,8 @@ class AppContext:
         """
         structure = self._settings.get('job_folder_structure', '{customer}/{job_folder}/job documents')
         logger.debug("find_job_folders: customer=%s structure=%s", customer_path, structure)
+
+        cancelled = is_cancelled or (lambda: False)
 
         def _job(name: str, path: str, po_number: str = '') -> Tuple:
             return (name, path, po_number) if include_po_number else (name, path)
@@ -330,6 +347,8 @@ class AppContext:
             suffix = after_customer.replace('{job_folder}/', '', 1)
             try:
                 for item in os.listdir(customer_path):
+                    if cancelled():
+                        break
                     item_path = os.path.join(customer_path, item)
                     if os.path.isdir(item_path):
                         expected_docs_path = os.path.join(item_path, suffix)
@@ -371,6 +390,8 @@ class AppContext:
                     if os.path.exists(base_path):
                         try:
                             for po_dir in sorted(os.listdir(base_path)):
+                                if cancelled():
+                                    break
                                 po_path = os.path.join(base_path, po_dir)
                                 if not os.path.isdir(po_path):
                                     continue
@@ -381,14 +402,47 @@ class AppContext:
                                 )
                                 handled_as_po_container = False
                                 if matches_po_name:
+                                    # Record po_path as soon as it's recognized as a PO
+                                    # container, before checking sub_path -- an empty
+                                    # PO folder with no post_po subdirectory yet (e.g.
+                                    # "PO-1001" with no "job documents" inside) would
+                                    # otherwise never be recorded, so a job created in
+                                    # it later evades the search-index freshness check.
+                                    if containers is not None:
+                                        containers.append(po_path)
                                     sub_path = os.path.join(po_path, post_po) if post_po else po_path
                                     if os.path.exists(sub_path):
                                         handled_as_po_container = True
+                                        if containers is not None:
+                                            if sub_path != po_path:
+                                                containers.append(sub_path)
+                                        if (
+                                            not po_name_prefix
+                                            and not po_name_suffix
+                                            and not post_po
+                                            and suffix
+                                            and os.path.exists(os.path.join(po_path, suffix))
+                                        ):
+                                            # When po_name_prefix, po_name_suffix, and post_po
+                                            # are all empty, matches_po_name is always True and
+                                            # sub_path == po_path, so this would otherwise be
+                                            # treated as a PO container even when it's really a
+                                            # legacy job folder holding the job-documents suffix
+                                            # directly (pre-dates PO folders being added). Gated
+                                            # on all three being empty so a genuine PO layout
+                                            # with a named prefix/suffix or an intermediate path
+                                            # segment (post_po) never gets an extra, incorrect
+                                            # job entry for the PO folder itself. Only decidable
+                                            # when suffix is non-empty; an empty suffix leaves
+                                            # the two layouts genuinely ambiguous.
+                                            jobs.append(_job(po_dir, os.path.join(po_path, suffix)))
                                         po_number_end = (
                                             len(po_dir) - len(po_name_suffix) if po_name_suffix else len(po_dir)
                                         )
                                         po_number = po_dir[len(po_name_prefix):po_number_end]
                                         for item in sorted(os.listdir(sub_path)):
+                                            if cancelled():
+                                                break
                                             item_path = os.path.join(sub_path, item)
                                             if os.path.isdir(item_path):
                                                 if suffix:
@@ -420,6 +474,8 @@ class AppContext:
                     if os.path.exists(prefix_path):
                         try:
                             for item in os.listdir(prefix_path):
+                                if cancelled():
+                                    break
                                 item_path = os.path.join(prefix_path, item)
                                 if os.path.isdir(item_path):
                                     if suffix:
@@ -436,13 +492,22 @@ class AppContext:
         logger.debug("find_job_folders: returning %d jobs from %s", len(jobs), customer_path)
         return jobs
 
-    def find_quote_folders(self, customer_path: str) -> List[Tuple[str, str]]:
+    def find_quote_folders(
+        self,
+        customer_path: str,
+        *,
+        is_cancelled: Optional[Callable[[], bool]] = None,
+    ) -> List[Tuple[str, str]]:
         """
         Find all quote folders in a customer directory.
         Quotes are located in customer/{quote_folder_path}/quote_folders
 
         Args:
             customer_path: Path to customer directory
+            is_cancelled: Optional callable polled inside the item-scan loop
+                so a caller running this on a background thread can make
+                cancellation take effect promptly rather than only between
+                separate calls to this method.
 
         Returns:
             List of (quote_name, quote_path) tuples
@@ -450,16 +515,19 @@ class AppContext:
         quote_folder_path = self._settings.get('quote_folder_path', 'Quotes')
         quotes_dir = os.path.join(customer_path, quote_folder_path)
 
+        cancelled = is_cancelled or (lambda: False)
         quotes = []
 
         if os.path.exists(quotes_dir):
             try:
                 items = os.listdir(quotes_dir)
                 for item in items:
+                    if cancelled():
+                        break
                     item_path = os.path.join(quotes_dir, item)
                     if os.path.isdir(item_path):
                         quotes.append((item, item_path))
-            except OSError:
-                pass
+            except OSError as e:
+                logger.warning("find_quote_folders: OSError %s", e)
 
         return quotes

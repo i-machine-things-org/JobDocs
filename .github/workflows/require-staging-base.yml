@@ -6,7 +6,14 @@ on:
     branches:
       - master
 
+permissions:
+  contents: read
+
 jobs:
+  # NOTE: branch protection on master requires this check by the job id
+  # "check-base" (GitHub Settings > Branches > master > required status
+  # checks). Renaming this job id will silently stop it being enforced —
+  # update the branch protection required-checks list in the same change.
   check-base:
     runs-on: ubuntu-latest
     steps:

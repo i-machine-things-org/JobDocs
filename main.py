@@ -25,12 +25,13 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QMessageBox, QDialog,
     QInputDialog, QLineEdit, QProgressDialog,
-    QVBoxLayout, QLabel, QCheckBox, QDialogButtonBox,
+    QVBoxLayout, QLabel, QCheckBox, QDialogButtonBox, QWidget,
 )
 
 from core.module_loader import ModuleLoader
 from core.app_context import AppContext
-from shared.utils import get_config_dir, get_os_text
+from core.base_module import BaseModule
+from shared.utils import atomic_write_json, get_config_dir, get_os_text
 from shared.remote_sync import RemoteSyncManager
 
 logger = logging.getLogger(__name__)
@@ -58,16 +59,22 @@ def _get_app_version() -> str:
 
 
 def _is_readonly_install() -> bool:
-    """True for a read-only (search-only) install — see build_scripts/JobDocs.iss.
+    """True when running as "JobDocs Kiosk" — see build_scripts/JobDocs.iss.
 
-    Detected via a marker file the installer drops next to app/runtime/plugins
-    when the "Read-Only (Search Only)" setup type is chosen. Windows-only;
-    always False in dev checkouts, Flatpak, and full installs.
+    JobDocs Kiosk is a separate installer/product (own AppId, own release
+    asset — not a Task checkbox on the main installer): a search-only kiosk
+    build for shared/shop-floor machines. Detected via a marker file its
+    installer drops next to app/runtime/plugins. Windows-only; always False
+    in dev checkouts, Flatpak, and the regular JobDocs install.
 
-    This is a UI/kiosk convenience, not access control: on a per-user install
-    the same Windows account running the app can also delete readonly.marker
-    and relaunch to unlock write-capable modules. Real enforcement requires a
-    separately managed account with the install directory locked down.
+    This flag only controls UI chrome and the AppContext persistence guard —
+    the window title, hidden menu bar, and forced "search only" module list
+    (see load_modules() below). It is not itself the containment: the Kiosk
+    build's [Files] selection (build_scripts/JobDocs.iss) never copies
+    write-capable modules to disk in the first place, so deleting this
+    marker on a Kiosk install has nothing to unlock. Real access control
+    for a shared machine still requires a separately managed Windows account
+    with the install directory locked down.
     """
     if os.getenv('FLATPAK_ID'):
         return False
@@ -106,9 +113,16 @@ class _UpdateChecker(QThread):
             tag = data.get("tag_name", "")
             html_url = data.get("html_url", "")
             if tag and _version_tuple(tag) > _version_tuple(APP_VERSION):
+                # A release carries two Windows installers (JobDocs and
+                # JobDocs Kiosk) — match this install's own variant by
+                # filename, not just "the first .exe", or a Kiosk machine
+                # could silently be offered the full installer and vice
+                # versa. See _is_readonly_install() for what "kiosk" means.
+                is_kiosk = _is_readonly_install()
                 asset_url = ""
                 for asset in data.get("assets", []):
-                    if asset.get("name", "").lower().endswith(".exe"):
+                    name = asset.get("name", "").lower()
+                    if name.endswith(".exe") and ("kiosk" in name) == is_kiosk:
                         asset_url = asset.get("browser_download_url", "")
                         break
                 self.update_available.emit(tag, html_url, asset_url)
@@ -679,6 +693,8 @@ class JobDocsMainWindow(QMainWindow):
 
         self.history = self.load_history()
         self.modules = []  # Store loaded modules
+        self._pending_tab_modules: Dict[int, BaseModule] = {}  # lazy tab construction
+        self._available_modules_cache: List[tuple] = []  # for Settings dialog
 
         # Setup UI
         self.setWindowTitle("JobDocs — Search" if self.readonly_mode else "JobDocs")
@@ -732,6 +748,12 @@ class JobDocsMainWindow(QMainWindow):
         elif isinstance(default_tab, int) and 0 <= default_tab < self.tabs.count():
             self.tabs.setCurrentIndex(default_tab)
 
+        # setCurrentIndex() above only emits currentChanged if the index
+        # actually changed — e.g. index 0 was already current by default, so
+        # the lazy-build handler never fires for it on its own. Force-build
+        # whichever tab actually ends up shown; a no-op for anything already built.
+        self._on_tab_activated(self.tabs.currentIndex())
+
         self.statusBar().showMessage("Ready")  # pyright: ignore[reportOptionalMemberAccess]
 
         if prefill:
@@ -762,9 +784,8 @@ class JobDocsMainWindow(QMainWindow):
                 # (search-only) install, which must not write a local cache.
                 if not self.readonly_mode:
                     try:
-                        with open(self.settings_file, 'w') as f:
-                            json.dump(merged, f, indent=2)
-                    except IOError:
+                        atomic_write_json(self.settings_file, merged)
+                    except OSError:
                         pass
                 return merged
 
@@ -776,11 +797,6 @@ class JobDocsMainWindow(QMainWindow):
 
         return self.DEFAULT_SETTINGS.copy()
 
-    def _partial_save_settings(self, partial: Dict[str, Any]):
-        """Merge partial settings dict and persist to disk (used by mid-dialog callbacks)."""
-        self.settings.update(partial)
-        self.save_settings()
-
     def save_settings(self):
         """Save settings to file and sync to remote server if configured"""
         if self.readonly_mode:
@@ -788,14 +804,13 @@ class JobDocsMainWindow(QMainWindow):
             return
         try:
             # Save locally first
-            with open(self.settings_file, 'w') as f:
-                json.dump(self.settings, f, indent=2)
+            atomic_write_json(self.settings_file, self.settings)
 
             # Sync to remote if configured
             if self.remote_sync.is_enabled():
                 self.remote_sync.save_json_to_remote('settings.json', self.settings)
 
-        except IOError as e:
+        except OSError as e:
             self.show_error_dialog("Error", f"Failed to save settings: {e}")
 
     def load_history(self) -> Dict[str, Any]:
@@ -808,9 +823,8 @@ class JobDocsMainWindow(QMainWindow):
                 # (search-only) install, which must not write a local cache.
                 if not self.readonly_mode:
                     try:
-                        with open(self.history_file, 'w') as f:
-                            json.dump(remote_history, f, indent=2)
-                    except IOError:
+                        atomic_write_json(self.history_file, remote_history)
+                    except OSError:
                         pass
                 return remote_history
 
@@ -831,14 +845,13 @@ class JobDocsMainWindow(QMainWindow):
             return
         try:
             # Save locally first
-            with open(self.history_file, 'w') as f:
-                json.dump(self.history, f, indent=2)
+            atomic_write_json(self.history_file, self.history)
 
             # Sync to remote if configured
             if self.remote_sync.is_enabled():
                 self.remote_sync.save_json_to_remote('history.json', self.history)
 
-        except IOError as e:
+        except OSError as e:
             self.show_error_dialog("Error", f"Failed to save history: {e}")
 
     # ==================== Window Icon ====================
@@ -919,26 +932,36 @@ class JobDocsMainWindow(QMainWindow):
                 )
                 return
 
-            # Add each module as a tab (skip non-tab modules)
+            # Cache the (module_name, display_name) list once instead of having
+            # open_settings() re-discover and re-instantiate every module class
+            # on every single Settings-dialog open.
+            self._available_modules_cache = self._discover_available_modules(loader)
+
+            # Add each tab module as an empty placeholder; its real widget is
+            # only built (get_widget()) the first time that tab is actually
+            # activated, via _on_tab_activated below — building every module's
+            # full widget tree (and, for Job/Quote, the customer-list data
+            # that comes with it) eagerly at startup wastes memory on tabs the
+            # user may never open in this session.
+            self._pending_tab_modules: Dict[int, BaseModule] = {}
             for module in self.modules:
                 if not module.is_tab_module():
                     continue
                 try:
-                    widget = module.get_widget()
                     name = module.get_name()
-                    self.tabs.addTab(widget, name)
-                    self.log_message(f"Loaded module: {name}")
+                    placeholder = QWidget()
+                    index = self.tabs.addTab(placeholder, name)
+                    self._pending_tab_modules[index] = module
                 except Exception as e:
-                    self.log_message(f"ERROR: Failed to load module {module.__class__.__name__}: {e}")
+                    self.log_message(f"ERROR: Failed to register module {module.__class__.__name__}: {e}")
                     import traceback
                     traceback.print_exc()
+
+            self.tabs.currentChanged.connect(self._on_tab_activated)
 
             self.statusBar().showMessage(  # pyright: ignore[reportOptionalMemberAccess]
                 f"Loaded {len(self.modules)} module(s)"
             )
-
-            # Populate customer lists in all modules
-            self.populate_customer_lists()
 
             # Kick off the search index build after the event loop starts
             QTimer.singleShot(0, self._start_search_indexer)
@@ -964,6 +987,83 @@ class JobDocsMainWindow(QMainWindow):
                     module.start_indexer()
                 except Exception as exc:
                     logger.warning("_start_search_indexer: %s: %s", module.__class__.__name__, exc)
+
+    def _discover_available_modules(self, loader: ModuleLoader) -> List[tuple]:
+        """Discover every module on disk (regardless of enabled/disabled state)
+        and its display name, for the Settings dialog's module list. Computed
+        once at startup and cached — see load_modules()."""
+        available_module_names = loader.discover_modules()
+        available_modules = []
+        for module_name in available_module_names:
+            try:
+                module_class = loader.load_module(module_name)
+                instance = module_class()
+                display_name = instance.get_name()
+                available_modules.append((module_name, display_name))
+            except Exception:
+                available_modules.append((module_name, module_name))
+        return available_modules
+
+    def _refresh_available_modules_cache(self) -> None:
+        """Recompute _available_modules_cache from disk. Must be called after
+        install_plugin()/uninstall_plugin() change what's on disk — otherwise
+        a plugin installed/uninstalled mid-session stays invisible/stuck in
+        the Settings dialog's module list until restart (the cache is
+        otherwise only computed once, at startup, in load_modules())."""
+        modules_dir = Path(__file__).parent / 'modules'
+        loader = ModuleLoader(modules_dir, plugins_dir=self._get_plugins_dir())
+        self._available_modules_cache = self._discover_available_modules(loader)
+
+    def _on_tab_activated(self, index: int) -> None:
+        """Build a lazily-registered tab's real widget the first time it's
+        shown. No-ops for tabs that are already built (or aren't lazy tabs).
+
+        The module is only popped from _pending_tab_modules *after*
+        get_widget() succeeds — if construction fails, it stays pending so a
+        later click on the tab retries construction instead of leaving the
+        tab permanently stuck as a blank placeholder for the rest of the
+        session."""
+        module = self._pending_tab_modules.get(index)
+        if module is None:
+            return
+        try:
+            widget = module.get_widget()
+        except Exception as e:
+            self.log_message(f"ERROR: Failed to load module {module.__class__.__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(
+                self,
+                "Module Load Error",
+                f"Failed to load the \"{module.get_name()}\" tab:\n\n{e}\n\n"
+                "You can try selecting this tab again."
+            )
+            return
+
+        module.mark_widget_built()
+        del self._pending_tab_modules[index]
+
+        self.tabs.blockSignals(True)
+        try:
+            self.tabs.removeTab(index)
+            self.tabs.insertTab(index, widget, module.get_name())
+            self.tabs.setCurrentIndex(index)
+        finally:
+            self.tabs.blockSignals(False)
+
+        self.log_message(f"Loaded module: {module.get_name()}")
+        self._populate_module_customer_lists(module)
+
+    def _populate_module_customer_lists(self, module) -> None:
+        """Call every populate_*_customer_list method a single module defines."""
+        for method_name in dir(module):
+            if method_name.startswith('populate_') and method_name.endswith('_customer_list'):
+                method = getattr(module, method_name, None)
+                if callable(method):
+                    try:
+                        method()
+                    except Exception as e:
+                        self.log_message(f"Error refreshing {module.get_name()} customer list: {e}")
 
     # ==================== Menu ====================
 
@@ -1014,27 +1114,11 @@ class JobDocsMainWindow(QMainWindow):
         # Import here to avoid circular dependency
         from core.settings_dialog import SettingsDialog
 
-        # Discover all available modules for the settings dialog
-        modules_dir = Path(__file__).parent / 'modules'
-        loader = ModuleLoader(modules_dir, plugins_dir=self._get_plugins_dir())
-        available_module_names = loader.discover_modules()
-
-        # Create list of (module_name, display_name) tuples
-        available_modules = []
-        for module_name in available_module_names:
-            try:
-                # Try to load the module class to get its display name
-                module_class = loader.load_module(module_name)
-                instance = module_class()
-                display_name = instance.get_name()
-                available_modules.append((module_name, display_name))
-            except Exception:
-                # If we can't load it, just use the module name
-                available_modules.append((module_name, module_name))
-
+        # Reuse the (module_name, display_name) list computed once in
+        # load_modules() instead of re-discovering and re-instantiating every
+        # module class from scratch on every single Settings-dialog open.
         dialog = SettingsDialog(
-            self.settings, self, available_modules,
-            save_callback=self._partial_save_settings,
+            self.settings, self, self._available_modules_cache,
             active_keys=set(self.DEFAULT_SETTINGS)
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -1094,6 +1178,7 @@ class JobDocsMainWindow(QMainWindow):
 
     def _on_plugin_install_success(self, module_name: str, dest: str, dep_warning: str, worker: _PluginInstallWorker):
         self._install_progress.close()
+        self._refresh_available_modules_cache()
         if dep_warning:
             msg = (f"Plugin '{module_name}' files copied to:\n{dest}\n\n"
                    f"The plugin may not load until dependencies are resolved.")
@@ -1154,6 +1239,8 @@ class JobDocsMainWindow(QMainWindow):
         except (OSError, shutil.Error) as e:
             QMessageBox.critical(self, "Uninstall Plugin", f"Failed to remove plugin:\n{e}")
             return
+
+        self._refresh_available_modules_cache()
 
         disabled = self.settings.get("disabled_modules", [])
         if choice in disabled:
@@ -1438,6 +1525,14 @@ near-instant even across thousands of jobs.</p>""",
         switches the active tab to Job (if j_no is present) or Quote (if q_no
         is present). Called once from __init__ when prefill data is supplied.
         """
+        # prefill_fields() no-ops on any module whose widget isn't built yet
+        # (its field attributes are still None). A CLI-launched prefill means
+        # the user is about to interact with the app right away, so building
+        # every tab now is an acceptable, one-time trade against the lazy
+        # -tab-construction optimization above.
+        for index in list(self._pending_tab_modules.keys()):
+            self._on_tab_activated(index)
+
         for module in self.modules:
             module.prefill_fields(data)
 
@@ -1490,41 +1585,44 @@ near-instant even across thousands of jobs.</p>""",
         return sorted(customers)
 
     def add_to_history(self, entry_type: str, data: Dict[str, Any]):
-        """Add an entry to history"""
-        if entry_type == 'job':
-            recent_jobs = self.history.get('recent_jobs', [])
+        """Add an entry to history.
 
-            # Add timestamp
-            data['date'] = datetime.now().isoformat()
+        Generic across entry types: recorded under history['recent_{entry_type}s']
+        (e.g. 'job' -> 'recent_jobs', 'quote' -> 'recent_quotes'), matching what
+        modules/_template/module.py's plugin-authoring example documents. Capped
+        at the last 100 entries per type, with a timestamp and customer-history
+        update.
+        """
+        history_key = f'recent_{entry_type}s'
+        recent_entries = self.history.get(history_key, [])
 
-            # Add to front of list
-            recent_jobs.insert(0, data)
+        # Add timestamp
+        data['date'] = datetime.now().isoformat()
 
-            # Keep only last 100 entries
-            self.history['recent_jobs'] = recent_jobs[:100]
+        # Add to front of list
+        recent_entries.insert(0, data)
 
-            # Update customer history
-            customer = data.get('customer', '')
-            if customer:
-                if 'customers' not in self.history:
-                    self.history['customers'] = {}
-                self.history['customers'][customer] = datetime.now().isoformat()
+        # Keep only last 100 entries
+        self.history[history_key] = recent_entries[:100]
 
-            self.save_history()
+        # Update customer history
+        customer = data.get('customer', '')
+        if customer:
+            if 'customers' not in self.history:
+                self.history['customers'] = {}
+            self.history['customers'][customer] = datetime.now().isoformat()
+
+        self.save_history()
 
     def populate_customer_lists(self):
-        """Refresh customer lists in all modules (called after settings change)"""
-        # Call populate methods on all loaded modules that have them
+        """Refresh customer lists in all *already-built* modules (called after
+        settings change). A module whose tab hasn't been activated yet has no
+        widget to populate — it'll load fresh data (reflecting current
+        settings) the first time it's actually shown, via _on_tab_activated."""
         for module in self.modules:
-            # Check for populate_*_customer_list methods
-            for method_name in dir(module):
-                if method_name.startswith('populate_') and method_name.endswith('_customer_list'):
-                    method = getattr(module, method_name, None)
-                    if callable(method):
-                        try:
-                            method()
-                        except Exception as e:
-                            self.log_message(f"Error refreshing {module.get_name()} customer list: {e}")
+            if not module.is_widget_built():
+                continue
+            self._populate_module_customer_lists(module)
 
         self.log_message("Customer lists refreshed")
 
