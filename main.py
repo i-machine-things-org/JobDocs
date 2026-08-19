@@ -63,6 +63,11 @@ def _is_readonly_install() -> bool:
     Detected via a marker file the installer drops next to app/runtime/plugins
     when the "Read-Only (Search Only)" setup type is chosen. Windows-only;
     always False in dev checkouts, Flatpak, and full installs.
+
+    This is a UI/kiosk convenience, not access control: on a per-user install
+    the same Windows account running the app can also delete readonly.marker
+    and relaunch to unlock write-capable modules. Real enforcement requires a
+    separately managed account with the install directory locked down.
     """
     if os.getenv('FLATPAK_ID'):
         return False
