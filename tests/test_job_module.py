@@ -1,0 +1,116 @@
+"""Tests for JobModule.create_single_job()'s search-index integration
+(review finding 1 on PR #298 / issue #293).
+
+Requires PyQt6 (JobModule/BaseModule import PyQt6 widget classes at module
+level) but does not need a QApplication or any .ui file — create_single_job()
+doesn't touch widgets.
+"""
+
+import os
+
+import pytest
+
+pytest.importorskip("PyQt6")
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from core.app_context import AppContext  # noqa: E402
+from core.search_index import SearchIndex  # noqa: E402
+from modules.job.module import JobModule  # noqa: E402
+
+
+def _make_app_context(tmp_path, cf_root, bp_root):
+    return AppContext(
+        settings={
+            'job_folder_structure': '{customer}/{job_folder}',
+            'customer_files_dir': str(cf_root),
+            'blueprints_dir': str(bp_root),
+            'allow_duplicate_jobs': False,
+        },
+        history={},
+        config_dir=tmp_path,
+        save_settings_callback=lambda: None,
+        save_history_callback=lambda: None,
+        log_message_callback=lambda *a: None,
+        show_error_callback=lambda *a: None,
+        show_info_callback=lambda *a: None,
+        get_customer_list_callback=lambda: [],
+        add_to_history_callback=lambda *a: None,
+    )
+
+
+def test_create_single_job_makes_job_immediately_searchable(tmp_path):
+    """Reproduces the review's mid-session scenario end-to-end: a customer
+    is already fully indexed (simulating the once-per-launch background
+    indexer having already run), then a new job is created for that same
+    customer via the real job-creation code path. Before this fix, nothing
+    in create_single_job() touched the search index, so the new job would
+    stay invisible to search until the app restarted and re-indexed.
+    """
+    cf_root = tmp_path / 'customer_files'
+    bp_root = tmp_path / 'blueprints'
+    (cf_root / 'Acme' / '12345_ExistingBracket').mkdir(parents=True)
+
+    ctx = _make_app_context(tmp_path, cf_root, bp_root)
+
+    # Simulate the one-time background indexer having already run and
+    # covered 'Acme' before our new job is created.
+    index = ctx.get_search_index()
+    assert isinstance(index, SearchIndex)
+    index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+    assert index.is_fully_covered([('', str(cf_root))], []) is True
+    assert index.search_jobs('99999') == []  # not created yet
+
+    job_module = JobModule()
+    job_module.initialize(ctx)
+
+    assert job_module.create_single_job(
+        'Acme', '99999', 'PO1', '', 'New Widget', [], '', False, [],
+    ) is True
+
+    # The new job must be searchable this session without any further
+    # indexing — search_jobs() (what modules/search/module.py queries
+    # first, before ever consulting is_fully_covered()) must find it.
+    results = index.search_jobs('99999')
+    assert len(results) == 1
+    assert results[0]['customer'] == 'Acme'
+    assert results[0]['job_number'] == '99999'
+
+
+def test_create_single_job_itar_uses_itar_prefix_in_index(tmp_path):
+    cf_root = tmp_path / 'customer_files'
+    bp_root = tmp_path / 'blueprints'
+    itar_cf_root = tmp_path / 'itar_customer_files'
+    itar_bp_root = tmp_path / 'itar_blueprints'
+
+    ctx = AppContext(
+        settings={
+            'job_folder_structure': '{customer}/{job_folder}',
+            'customer_files_dir': str(cf_root),
+            'blueprints_dir': str(bp_root),
+            'itar_customer_files_dir': str(itar_cf_root),
+            'itar_blueprints_dir': str(itar_bp_root),
+            'allow_duplicate_jobs': False,
+        },
+        history={},
+        config_dir=tmp_path,
+        save_settings_callback=lambda: None,
+        save_history_callback=lambda: None,
+        log_message_callback=lambda *a: None,
+        show_error_callback=lambda *a: None,
+        show_info_callback=lambda *a: None,
+        get_customer_list_callback=lambda: [],
+        add_to_history_callback=lambda *a: None,
+    )
+
+    job_module = JobModule()
+    job_module.initialize(ctx)
+
+    assert job_module.create_single_job(
+        'Acme', '88888', 'PO1', '', 'Restricted Part', [], '', True, [],
+    ) is True
+
+    index = ctx.get_search_index()
+    match = index.find_job_by_number('88888')
+    assert match is not None
+    assert match['customer'] == '[ITAR] Acme'

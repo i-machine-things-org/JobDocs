@@ -35,25 +35,33 @@ A modular tool for managing blueprint files and customer job directories with su
 
 ### Windows
 
-Download the installer from the [latest release](https://github.com/i-machine-things-org/JobDocs/releases/latest) and run it. The installer offers two options:
+The [latest release](https://github.com/i-machine-things-org/JobDocs/releases/latest) has
+two Windows installers — download whichever fits the machine:
 
-- **Install for me only** — installs to `%LOCALAPPDATA%\Programs\JobDocs` (no admin required)
-- **Install for all users** — installs to `C:\Program Files\JobDocs` (requires admin/UAC)
+- **`JobDocs-<version>-windows-setup.exe`** — the full app: Job, Quote, Bulk Create,
+  Search, Settings, plugins, everything.
+- **`JobDocs-Kiosk-<version>-windows-setup.exe`** — **JobDocs Kiosk**, a search-only
+  build for shared/shop-floor machines that should look up jobs but not create, edit, or
+  browse the filesystem. Only the Search tab's code is on disk (Job, Quote, Bulk,
+  Settings, etc. are never installed, not merely hidden), it never indexes or searches
+  ITAR-controlled directories, and its Search tab offers no "open folder" / "copy path" —
+  only printing and viewing individual files. It installs and updates independently of
+  the full app (separate Start Menu entry, separate uninstall) and can coexist with it on
+  the same machine.
 
-Both options add `JobDocs.exe` to `PATH` so it is callable from any terminal.
+Each installer offers:
 
-On the Select Additional Tasks page, check **"Read-Only (Search Only)"** to install a
-kiosk-style build with only the Search tab and no menu bar — useful for shared/shop-floor
-machines that should look up jobs but not create or edit them. Updating a read-only
-install automatically re-selects Read-Only, so it stays search-only across upgrades
-without re-checking the box each time.
+- **Install for me only** — installs to `%LOCALAPPDATA%\Programs\<app>` (no admin required)
+- **Install for all users** — installs to `C:\Program Files\<app>` (requires admin/UAC)
 
-**This is a UI convenience, not access control.** On a per-user install, the same
-Windows account running JobDocs can delete the install's `readonly.marker` file and
-relaunch to unlock the full app. To actually restrict what a shared machine's user
-can do, run the install under a separately managed Windows account with the
-installation directory locked down (e.g. an admin-only "Install for all users" install
-under a standard, non-admin shop-floor login).
+Both options add the app's exe to `PATH` so it is callable from any terminal.
+
+JobDocs Kiosk's file-level restriction is a UI/footprint measure, not account-level access
+control — the same Windows account running it can still delete its `readonly.marker`
+file, which only re-enables the menu bar and window title (there are no write-capable
+modules present to load either way). To actually restrict what a shared machine's user
+can do (e.g. prevent them from installing the full app themselves), run it under a
+separately managed Windows account with the installation directory locked down.
 
 ### Linux (Flatpak)
 

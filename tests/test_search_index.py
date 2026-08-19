@@ -1,5 +1,6 @@
 """Tests for core/search_index.py — pure sqlite logic, no Qt."""
 
+import os
 import sqlite3
 
 import pytest
@@ -12,7 +13,7 @@ def _make_index(tmp_path):
     return SearchIndex(tmp_path / 'search_index.db')
 
 
-def _make_app_context(structure):
+def _make_app_context(structure='{customer}/{job_folder}'):
     return AppContext(
         settings={'job_folder_structure': structure},
         history={},
@@ -94,6 +95,244 @@ class TestIsPopulated:
         index = _make_index(tmp_path)
         _insert_job(index)
         assert index.is_populated() is True
+
+
+class TestIsFullyCovered:
+    """Regression coverage for #293, finding 2: search_jobs()/search_bp() returning
+    zero results shouldn't always trigger a full filesystem walk — only when the
+    index genuinely hasn't caught up with what's on disk yet.
+    """
+
+    def test_no_configured_dirs_is_vacuously_covered(self, tmp_path):
+        index = _make_index(tmp_path)
+        assert index.is_fully_covered([], []) is True
+
+    def test_unindexed_customer_dir_is_not_covered(self, tmp_path):
+        cf_root = tmp_path / 'customer_files'
+        (cf_root / 'Acme').mkdir(parents=True)
+        index = _make_index(tmp_path)
+        # Nothing has ever been indexed — Acme exists on disk but has no
+        # indexed_dirs row, so a zero-result search can't be trusted yet.
+        assert index.is_fully_covered([('', str(cf_root))], []) is False
+
+    def test_covered_after_successful_update(self, tmp_path):
+        cf_root = tmp_path / 'customer_files'
+        (cf_root / 'Acme' / '12345_Bracket').mkdir(parents=True)
+        ctx = _make_app_context()
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+        assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+    def test_new_customer_added_after_last_update_is_not_covered(self, tmp_path):
+        cf_root = tmp_path / 'customer_files'
+        (cf_root / 'Acme' / '12345_Bracket').mkdir(parents=True)
+        ctx = _make_app_context()
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+
+        # A brand-new customer folder shows up on disk after the last index run
+        # (e.g. the background indexer hasn't picked it up yet).
+        (cf_root / 'NewCo' / '99999_Widget').mkdir(parents=True)
+        assert index.is_fully_covered([('', str(cf_root))], []) is False
+
+    def test_bp_dirs_checked_independently_of_cf_dirs(self, tmp_path):
+        bp_root = tmp_path / 'blueprints'
+        (bp_root / 'Acme').mkdir(parents=True)
+        index = _make_index(tmp_path)
+        assert index.is_fully_covered([], [('BP', str(bp_root))]) is False
+
+    def test_missing_base_dir_does_not_break_coverage_check(self, tmp_path):
+        # A configured directory that doesn't exist on disk shouldn't be
+        # treated as "not covered" — there's nothing under it to miss.
+        index = _make_index(tmp_path)
+        missing_dir = str(tmp_path / 'does_not_exist')
+        assert index.is_fully_covered([('', missing_dir)], []) is True
+
+    def test_query_failure_returns_false(self, tmp_path):
+        cf_root = tmp_path / 'customer_files'
+        (cf_root / 'Acme').mkdir(parents=True)
+        index = _make_index(tmp_path)
+        with sqlite3.connect(str(index._db_path)) as conn:
+            conn.execute("DROP TABLE indexed_dirs")
+        assert index.is_fully_covered([('', str(cf_root))], []) is False
+
+    def test_new_job_in_existing_po_container_is_not_covered(self, tmp_path):
+        # A customer directory's own mtime only reflects changes to its
+        # *direct* children -- adding a job folder inside an already-indexed
+        # PO-container subdirectory changes that container's mtime, not the
+        # customer dir's. is_fully_covered() must check previously-recorded
+        # containers too, not just the customer-level indexed_dirs row
+        # (CodeRabbit finding, PR #305 independent review).
+        cf_root = tmp_path / 'customer_files'
+        customer_path = cf_root / 'Acme'
+        po_dir = customer_path / 'job documents' / 'PO-1001'
+        (po_dir / '11111_LegacyBracket').mkdir(parents=True)
+
+        ctx = _make_app_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+        assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+        # A new job shows up inside the existing PO-1001 container after the
+        # last index run -- customer_path itself is untouched.
+        (po_dir / '22222_NewShaft').mkdir(parents=True)
+        assert index.is_fully_covered([('', str(cf_root))], []) is False
+
+    def test_new_job_in_initially_empty_po_container_is_not_covered(self, tmp_path):
+        # CodeRabbit finding on PR #316: update() used to derive container_dirs
+        # only from *found* jobs' ancestor paths, so a PO folder that matched
+        # the naming convention but held zero jobs at index time was never
+        # recorded in indexed_dirs at all. A job created in it afterward left
+        # is_fully_covered() with no row to compare a changed mtime against,
+        # so it kept trusting a zero-result search. find_job_folders() now
+        # reports every examined PO container via its `containers` out-param,
+        # whether or not it currently holds any jobs.
+        cf_root = tmp_path / 'customer_files'
+        customer_path = cf_root / 'Acme'
+        po_dir = customer_path / 'job documents' / 'PO-1001'
+        po_dir.mkdir(parents=True)  # PO folder exists but is empty
+
+        ctx = _make_app_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+        assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+        # A job is created inside the previously-empty PO-1001 container.
+        (po_dir / '22222_NewShaft').mkdir(parents=True)
+        assert index.is_fully_covered([('', str(cf_root))], []) is False
+
+    def test_new_job_in_po_container_missing_its_subdir_is_not_covered(self, tmp_path):
+        # CodeRabbit finding on PR #316 (a gap in the fix directly above): the
+        # prior fix only appended po_path to `containers` *after* confirming
+        # sub_path exists. For a structure with a literal subdirectory between
+        # the PO folder and {job_folder} (post_po non-empty, e.g. "job
+        # documents"), a PO folder that exists but doesn't have that
+        # subdirectory yet (truly empty, not even the container dir) was never
+        # recorded at all -- not just stale, invisible to is_fully_covered().
+        cf_root = tmp_path / 'customer_files'
+        customer_path = cf_root / 'Acme'
+        po_dir = customer_path / 'PO-1001'
+        po_dir.mkdir(parents=True)  # PO-1001 exists but has no "job documents" yet
+
+        ctx = _make_app_context('{customer}/PO-{po_number}/job documents/{job_folder}')
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+        assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+        # "job documents" is created inside PO-1001, with a job inside it.
+        (po_dir / 'job documents' / '22222_NewShaft').mkdir(parents=True)
+        assert index.is_fully_covered([('', str(cf_root))], []) is False
+
+
+def _assert_no_recursive_walk_needed(monkeypatch):
+    """Fail the test if os.walk is called — is_fully_covered must only use
+    shallow os.listdir() calls, never a recursive directory walk."""
+    def _fail_on_walk(*_args, **_kwargs):
+        raise AssertionError("is_fully_covered must not perform a recursive os.walk")
+    monkeypatch.setattr(os, 'walk', _fail_on_walk)
+
+
+class TestIsFullyCoveredDoesNotWalk:
+    def test_covered_check_uses_only_shallow_listdir(self, tmp_path, monkeypatch):
+        cf_root = tmp_path / 'customer_files'
+        (cf_root / 'Acme' / '12345_Bracket').mkdir(parents=True)
+        ctx = _make_app_context()
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+
+        _assert_no_recursive_walk_needed(monkeypatch)
+        assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+
+class TestAddJobAndAddQuote:
+    """Regression coverage for review finding 1 (#298): a job/quote created
+    mid-session must be searchable immediately, not just after the next full
+    index build. is_fully_covered() only proves a customer dir was indexed
+    *once*, not that it's fresh, so search_jobs()/search_quotes() finding the
+    new row directly is what actually closes the gap — add_job()/add_quote()
+    are what job/quote creation call to make that happen.
+    """
+
+    def test_add_job_makes_new_job_immediately_searchable(self, tmp_path):
+        index = _make_index(tmp_path)
+        assert index.search_jobs('99999') == []
+
+        index.add_job('', 'Acme', '99999', 'New Widget', ['DWG-A'], 'C:/Acme/99999_NewWidget')
+
+        results = index.search_jobs('99999')
+        assert len(results) == 1
+        assert results[0]['customer'] == 'Acme'
+        assert results[0]['job_number'] == '99999'
+        assert results[0]['path'] == 'C:/Acme/99999_NewWidget'
+
+    def test_add_job_reproduces_and_fixes_mid_session_scenario(self, tmp_path):
+        """The exact scenario from the review finding: a customer directory
+        is fully indexed once, then a new job is created for that same
+        customer later in the same session (no second background index
+        run). Before add_job() was wired into job creation, search_jobs()
+        would return 0 results for the new job's number and (in
+        modules/search/module.py) is_fully_covered() would then
+        incorrectly report the search as trustworthy, since it only checks
+        that 'Acme' was indexed at some point — never that a new job
+        folder was added afterwards.
+        """
+        cf_root = tmp_path / 'customer_files'
+        (cf_root / 'Acme' / '12345_Bracket').mkdir(parents=True)
+        ctx = _make_app_context()
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+
+        # Sanity check: the pre-existing job is indexed, and the customer
+        # dir is (correctly) reported as fully covered at this point.
+        assert index.search_jobs('12345') != []
+        assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+        # A new job for the same, already-indexed customer is created mid-
+        # session — mirroring create_single_job() calling add_job() right
+        # after making the folder on disk, without waiting for a re-index.
+        (cf_root / 'Acme' / '99999_NewWidget').mkdir(parents=True)
+        index.add_job('', 'Acme', '99999', 'New Widget', [], str(cf_root / 'Acme' / '99999_NewWidget'))
+
+        # The new job is found directly via search_jobs() now — the search
+        # module never even reaches the is_fully_covered() 0-result check
+        # for this query, so the staleness in is_fully_covered() itself no
+        # longer matters for this case.
+        results = index.search_jobs('99999')
+        assert len(results) == 1
+        assert results[0]['job_number'] == '99999'
+
+    def test_add_job_upserts_on_reindex(self, tmp_path):
+        # A later full re-index shouldn't produce a duplicate row for a job
+        # that was already added incrementally at the same path.
+        index = _make_index(tmp_path)
+        index.add_job('', 'Acme', '99999', 'New Widget', [], 'C:/Acme/99999_NewWidget', mtime=1.0)
+        index.add_job('', 'Acme', '99999', 'New Widget', [], 'C:/Acme/99999_NewWidget', mtime=2.0)
+        results = index.search_jobs('99999')
+        assert len(results) == 1
+
+    def test_add_job_query_failure_does_not_raise(self, tmp_path):
+        # Creating a job must never fail because the index write failed —
+        # add_job() logs and swallows sqlite3.Error rather than propagating it.
+        index = _make_index(tmp_path)
+        with sqlite3.connect(str(index._db_path)) as conn:
+            conn.execute("DROP TABLE jobs")
+        index.add_job('', 'Acme', '99999', 'New Widget', [], 'C:/Acme/99999_NewWidget')  # must not raise
+
+    def test_add_quote_makes_new_quote_immediately_searchable(self, tmp_path):
+        index = _make_index(tmp_path)
+        assert index.search_quotes('55555') == []
+
+        index.add_quote('', 'Acme', '55555_NewQuote', 'C:/Acme/Quotes/55555_NewQuote')
+
+        results = index.search_quotes('55555')
+        assert len(results) == 1
+        assert results[0]['job_number'] == '55555_NewQuote'
+
+    def test_add_quote_query_failure_does_not_raise(self, tmp_path):
+        index = _make_index(tmp_path)
+        with sqlite3.connect(str(index._db_path)) as conn:
+            conn.execute("DROP TABLE quotes")
+        index.add_quote('', 'Acme', '55555_NewQuote', 'C:/Acme/Quotes/55555_NewQuote')  # must not raise
 
 
 class TestSearchJobsFindsPoAndNonPoFolders:

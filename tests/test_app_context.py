@@ -1,9 +1,12 @@
-"""Tests for AppContext.find_job_folders — pure filesystem logic, no Qt widgets used."""
+"""Tests for AppContext file-operation helpers — pure filesystem logic, no Qt."""
+
+import logging
+import os
 
 from core.app_context import AppContext
 
 
-def _make_context(structure):
+def _make_context(structure='{customer}/{job_folder}'):
     return AppContext(
         settings={'job_folder_structure': structure},
         history={},
@@ -69,6 +72,30 @@ class TestPersistenceReadonlyGuard:
         assert calls['history'] == 1
 
 
+class TestFindQuoteFoldersLogsOnError:
+    def test_returns_empty_list_and_logs_on_oserror(self, tmp_path, monkeypatch, caplog):
+        customer_path = tmp_path / 'Acme'
+        (customer_path / 'Quotes').mkdir(parents=True)
+
+        def _raise(*_args, **_kwargs):
+            raise OSError("permission denied")
+
+        monkeypatch.setattr(os, 'listdir', _raise)
+
+        ctx = _make_context()
+        with caplog.at_level(logging.DEBUG, logger='core.app_context'):
+            result = ctx.find_quote_folders(str(customer_path))
+
+        # Fallback behavior callers rely on is unchanged...
+        assert result == []
+        # ...but the failure is no longer silent.
+        assert any('find_quote_folders' in rec.message for rec in caplog.records)
+
+    def test_no_error_when_quotes_dir_missing(self, tmp_path):
+        ctx = _make_context()
+        assert ctx.find_quote_folders(str(tmp_path / 'NoSuchCustomer')) == []
+
+
 class TestFindJobFoldersWithPoNumber:
     def test_literal_prefix_sharing_po_number_segment(self, tmp_path):
         # Regression test for #295: "PO-{po_number}" puts literal text in the
@@ -107,3 +134,39 @@ class TestFindJobFoldersWithPoNumber:
         jobs = ctx.find_job_folders(str(customer_path))
 
         assert [name for name, _ in jobs] == ['12345_Bracket']
+
+    def test_legacy_job_folder_found_when_po_number_is_a_whole_path_segment(self, tmp_path):
+        # Regression test (CodeRabbit finding on PR #305): when the PO number
+        # placeholder occupies a whole path segment on its own (no literal
+        # prefix/suffix sharing that segment, e.g. "{po_number}" rather than
+        # "PO-{po_number}"), matches_po_name is unconditionally True, so a
+        # legacy job folder that predates PO folders was always treated as a
+        # PO container and its own job-documents suffix underneath it was
+        # never discovered.
+        customer_path = tmp_path / 'Acme'
+        (customer_path / '12345_LegacyBracket' / 'job documents').mkdir(parents=True)
+        (customer_path / '1001' / '22222_NewJob' / 'job documents').mkdir(parents=True)
+
+        ctx = _make_context('{customer}/{po_number}/{job_folder}/job documents')
+        jobs = ctx.find_job_folders(str(customer_path))
+
+        assert sorted(name for name, _ in jobs) == ['12345_LegacyBracket', '22222_NewJob']
+
+    def test_named_po_folder_with_intermediate_path_is_not_reported_as_a_job(self, tmp_path):
+        # Regression test (CodeRabbit finding on PR #316): the legacy-folder
+        # detection above must only fire for the genuinely ambiguous
+        # whole-segment case (po_name_prefix, po_name_suffix, and post_po all
+        # empty). When the PO folder has a named prefix ("PO-") and an
+        # intermediate path segment before {job_folder} that happens to share
+        # its literal name with the job-documents suffix (both "job
+        # documents" here), po_path/suffix always exists for *every* valid PO
+        # folder -- it's the same directory as sub_path, which is already
+        # confirmed to exist. Without the extra guards, every real PO folder
+        # would also be reported as a spurious job in its own right.
+        customer_path = tmp_path / 'Acme'
+        (customer_path / 'PO-1001' / 'job documents' / '22222_NewJob' / 'job documents').mkdir(parents=True)
+
+        ctx = _make_context('{customer}/PO-{po_number}/job documents/{job_folder}/job documents')
+        jobs = ctx.find_job_folders(str(customer_path))
+
+        assert [name for name, _ in jobs] == ['22222_NewJob']

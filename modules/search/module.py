@@ -385,6 +385,7 @@ class SearchModule(BaseModule):
         self._index_worker = None  # Background index builder
         self._index: Optional[SearchIndex] = None
         self._index_failures = 0  # consecutive query errors
+        self._index_query_failed = False  # True if the most recent query raised
         self._sort_column: int = 0   # 0 = Date
         self._sort_ascending: bool = False  # newest first
 
@@ -665,9 +666,21 @@ class SearchModule(BaseModule):
                 search_desc, search_drawing, include_blueprints,
             ):
                 return
-            # Index returned 0 results — fall back to filesystem strict search.
-            # The index may not have indexed all customer directories (e.g. when
-            # the folder structure doesn't match the configured template).
+            # Index returned 0 results. Trust it — and skip the slow filesystem
+            # walk entirely — if every customer directory currently on disk has
+            # actually been indexed. Otherwise the index may just not have
+            # caught up yet (e.g. a customer folder added after the last
+            # background run), so fall back to a live filesystem search. A
+            # failed query is not a confirmed zero-result, so never trust
+            # coverage in that case — and self._index may now be None (set
+            # by _search_from_index after repeated failures).
+            if (
+                self._index is not None
+                and not self._index_query_failed
+                and self._index.is_fully_covered(customer_dirs, bp_dirs)
+            ):
+                self.search_status_label.setText("Found 0 result(s)")
+                return
 
         # --- Fallback: live filesystem walk ---
         dirs_to_search = list(customer_dirs) + bp_dirs
@@ -704,6 +717,7 @@ class SearchModule(BaseModule):
                 results += self._index.search_bp(term)
         except Exception as exc:
             self._index_failures += 1
+            self._index_query_failed = True
             logger.error(
                 "search: index query failed (%s): %s (failure %d/3)",
                 type(exc).__name__, exc, self._index_failures,
@@ -713,6 +727,7 @@ class SearchModule(BaseModule):
             return False
 
         self._index_failures = 0
+        self._index_query_failed = False
 
         if not results:
             return False

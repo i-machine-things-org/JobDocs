@@ -1,9 +1,20 @@
-#define MyAppName "JobDocs"
+; JobDocs Kiosk is a separate installer/product built from this same script
+; via `iscc /DKIOSK JobDocs.iss` -- own AppId, own default install dir, own
+; release asset (not a Task checkbox on the main installer). It's a
+; search-only kiosk build for shared/shop-floor machines; see the [Files]
+; section below for what that excludes and main.py's _is_readonly_install().
 #define MyAppVersion GetEnv("RELEASE_VERSION")
 #define MyAppPublisher "i-machine-things"
 #define MyAppURL "https://github.com/i-machine-things/JobDocs"
 #define MyAppExeName "JobDocs.exe"
+
+#ifdef KIOSK
+#define MyAppName "JobDocs Kiosk"
+#define MyAppId "{{A2FC3EFB-053C-4FE6-A2F7-6A56CDE7E4D7}"
+#else
+#define MyAppName "JobDocs"
 #define MyAppId "{{B7C4D2A1-5E8F-4A9B-8C2D-3E4F5A6B7C8D}"
+#endif
 
 [Setup]
 AppId={#MyAppId}
@@ -17,7 +28,11 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\installer_out
+#ifdef KIOSK
+OutputBaseFilename=JobDocs-Kiosk-{#MyAppVersion}-windows-setup
+#else
 OutputBaseFilename=JobDocs-{#MyAppVersion}-windows-setup
+#endif
 SetupIconFile=..\windows\icon.ico
 Compression=lzma2/max
 SolidCompression=yes
@@ -32,7 +47,6 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-Name: "readonly";    Description: "Read-Only (Search Only) — only install the Search tab"; GroupDescription: "Installation Type:"
 
 [Dirs]
 Name: "{app}\plugins"
@@ -44,8 +58,21 @@ Source: "..\JobDocs.exe";          DestDir: "{app}"; Flags: ignoreversion
 ; Application icon (used directly by shortcuts to bypass EXE icon extraction)
 Source: "..\windows\icon.ico";     DestDir: "{app}"; Flags: ignoreversion
 
-; Python source tree (runs via runtime\pythonw.exe)
-Source: "..\app\*";                DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
+#ifdef KIOSK
+; JobDocs Kiosk: only the files the Search module and its shared/core
+; dependencies need. Bulk, Job, Quote, Settings, etc. are never copied, so
+; there is no write-capable module code to unlock even if readonly.marker
+; is later deleted -- see main.py's _is_readonly_install().
+Source: "..\app\main.py";              DestDir: "{app}\app";                 Flags: ignoreversion
+Source: "..\app\core\*";               DestDir: "{app}\app\core";            Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\app\shared\*";             DestDir: "{app}\app\shared";          Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\app\JobDocs.iconset\*";    DestDir: "{app}\app\JobDocs.iconset"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\app\modules\__init__.py";  DestDir: "{app}\app\modules";         Flags: ignoreversion
+Source: "..\app\modules\search\*";     DestDir: "{app}\app\modules\search";  Flags: ignoreversion recursesubdirs createallsubdirs
+#else
+; Full Python source tree, every module (runs via runtime\pythonw.exe).
+Source: "..\app\*";                    DestDir: "{app}\app";                 Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
 
 ; Embedded Python 3.12 runtime with pre-installed dependencies
 Source: "..\runtime\*";            DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -134,50 +161,21 @@ begin
   end;
 end;
 
-procedure InitializeWizard();
-{ Pre-check the Read-Only task if that's what was selected on a previous
-  install of this app, so an update installer defaults to the same variant
-  instead of silently reverting a read-only (search-only) machine to full.
-
-  Selects by the task's [Tasks] Name ("readonly"), the stable identifier,
-  via WizardSelectTasks — not by matching the Description text shown in
-  WizardForm.TasksList, which would silently stop matching if that text
-  ever changes. }
-begin
-  if GetPreviousData('InstallType', 'full') = 'readonly' then
-    WizardSelectTasks('readonly');
-end;
-
-procedure RegisterPreviousData(PreviousDataKey: Integer);
-{ Setup calls this automatically to persist "previous data" for this AppId
-  (keyed by PreviousDataKey, independent of install path) so the next
-  install/update of this app can recall the chosen install type. }
-begin
-  if WizardIsTaskSelected('readonly') then
-    SetPreviousData(PreviousDataKey, 'InstallType', 'readonly')
-  else
-    SetPreviousData(PreviousDataKey, 'InstallType', 'full');
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
-var
-  MarkerFile: String;
 begin
   if CurStep = ssPostInstall then
   begin
     AddToPath(ExpandConstant('{app}'));
 
+#ifdef KIOSK
     { Drop a marker file the app itself reads at startup to switch into
-      read-only (search-only) mode. This is a UI/kiosk convenience, not
-      access control -- a per-user install grants the same account write
-      access to this file, so it can be deleted to unlock the full app.
-      Real enforcement needs a separately managed account with the install
-      directory locked down. }
-    MarkerFile := ExpandConstant('{app}\readonly.marker');
-    if WizardIsTaskSelected('readonly') then
-      SaveStringToFile(MarkerFile, 'search-only' + #13#10, False)
-    else if FileExists(MarkerFile) then
-      DeleteFile(MarkerFile);
+      read-only (search-only) mode (window title, hidden menu bar, and the
+      AppContext persistence guard -- see main.py). The real containment is
+      the [Files] selection above: JobDocs Kiosk never has the
+      write-capable modules on disk, so deleting this marker unlocks
+      nothing that isn't already there. }
+    SaveStringToFile(ExpandConstant('{app}\readonly.marker'), 'search-only' + #13#10, False);
+#endif
   end;
 end;
 
