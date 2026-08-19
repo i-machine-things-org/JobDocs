@@ -455,9 +455,11 @@ class SearchIndex:
                         # that hold job folders). Checking these — not just the customer
                         # root — detects new/deleted jobs inside existing subdirs.
                         scan_errors: List[Exception] = []
+                        po_containers: List[str] = []
                         try:
                             jobs = app_context.find_job_folders(
                                 customer_path, errors=scan_errors, include_po_number=True,
+                                containers=po_containers,
                             )
                         except OSError as exc:
                             logger.warning("search_index: find_job_folders(%s): %s", customer_path, exc)
@@ -475,10 +477,14 @@ class SearchIndex:
                         # in indexed_dirs. customer_path must be included so the
                         # precheck can confirm it was indexed and avoid calling
                         # find_job_folders every run.
+                        # po_containers additionally covers PO folders that matched
+                        # the naming convention but currently hold zero jobs --
+                        # without them, an empty PO container is never recorded, so
+                        # a job created in it later goes undetected by is_fully_covered().
                         # Also track the quotes dir so a new quote folder triggers
                         # re-indexing even when no job folders changed.
                         customer_p = Path(customer_path)
-                        container_dirs: set = {customer_path}
+                        container_dirs: set = {customer_path, *po_containers}
                         for _, job_docs_path, _ in jobs:
                             for p in Path(job_docs_path).parents:
                                 if p == customer_p:
@@ -735,15 +741,21 @@ class SearchIndex:
         self, cf_dirs: List[Tuple[str, str]], bp_dirs: List[Tuple[str, str]],
     ) -> bool:
         """Return True if every customer directory currently on disk under
-        cf_dirs/bp_dirs has been successfully indexed.
+        cf_dirs/bp_dirs is indexed and unchanged since its last successful scan.
 
         Lets a zero-result search trust the index instead of always falling
         back to a live filesystem walk: a customer folder is only marked in
         indexed_dirs once its scan completes successfully (update() skips
-        marking it on cancellation/scan failure), so an unmarked customer
-        means the index hasn't caught up yet — e.g. a folder created after
-        the last background index run. Only does one shallow os.listdir()
-        per configured base directory, not a recursive walk.
+        marking it on cancellation/scan failure), so an unmarked or
+        since-modified customer means the index hasn't caught up yet — e.g.
+        a folder created after the last background index run. For cf, a
+        customer directory's own mtime only reflects changes to its *direct*
+        children, so a new job added inside an existing PO-container
+        subdirectory doesn't touch it — every previously-recorded container
+        beneath the customer dir is checked too, mirroring update()'s own
+        prev_containers staleness check. bp coverage reuses its single-row
+        recursive mtime check since update() indexes each bp customer as one
+        unit. Only os.listdir()/getmtime() calls, no directory walk of its own.
         """
         try:
             with closing(self._connect(timeout=2.0)) as conn:
@@ -758,12 +770,17 @@ class SearchIndex:
                             continue
                         for customer in customers:
                             customer_path = os.path.join(base_dir, customer)
-                            row = conn.execute(
-                                "SELECT 1 FROM indexed_dirs WHERE dir_path=? AND prefix=? AND kind=?",
-                                (customer_path, prefix, kind),
-                            ).fetchone()
-                            if row is None:
+                            if self._is_stale(conn, customer_path, prefix, kind, recursive=(kind == 'bp')):
                                 return False
+                            if kind == 'cf':
+                                containers = conn.execute(
+                                    "SELECT dir_path FROM indexed_dirs"
+                                    " WHERE prefix=? AND kind=? AND dir_path LIKE ? ESCAPE '!'",
+                                    (prefix, kind, _like_prefix(customer_path)),
+                                ).fetchall()
+                                for row in containers:
+                                    if self._is_stale(conn, row['dir_path'], prefix, kind):
+                                        return False
         except sqlite3.Error:
             return False
         return True

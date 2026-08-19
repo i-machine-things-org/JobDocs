@@ -156,6 +156,73 @@ class TestIsFullyCovered:
             conn.execute("DROP TABLE indexed_dirs")
         assert index.is_fully_covered([('', str(cf_root))], []) is False
 
+    def test_new_job_in_existing_po_container_is_not_covered(self, tmp_path):
+        # A customer directory's own mtime only reflects changes to its
+        # *direct* children -- adding a job folder inside an already-indexed
+        # PO-container subdirectory changes that container's mtime, not the
+        # customer dir's. is_fully_covered() must check previously-recorded
+        # containers too, not just the customer-level indexed_dirs row
+        # (CodeRabbit finding, PR #305 independent review).
+        cf_root = tmp_path / 'customer_files'
+        customer_path = cf_root / 'Acme'
+        po_dir = customer_path / 'job documents' / 'PO-1001'
+        (po_dir / '11111_LegacyBracket').mkdir(parents=True)
+
+        ctx = _make_app_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+        assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+        # A new job shows up inside the existing PO-1001 container after the
+        # last index run -- customer_path itself is untouched.
+        (po_dir / '22222_NewShaft').mkdir(parents=True)
+        assert index.is_fully_covered([('', str(cf_root))], []) is False
+
+    def test_new_job_in_initially_empty_po_container_is_not_covered(self, tmp_path):
+        # CodeRabbit finding on PR #316: update() used to derive container_dirs
+        # only from *found* jobs' ancestor paths, so a PO folder that matched
+        # the naming convention but held zero jobs at index time was never
+        # recorded in indexed_dirs at all. A job created in it afterward left
+        # is_fully_covered() with no row to compare a changed mtime against,
+        # so it kept trusting a zero-result search. find_job_folders() now
+        # reports every examined PO container via its `containers` out-param,
+        # whether or not it currently holds any jobs.
+        cf_root = tmp_path / 'customer_files'
+        customer_path = cf_root / 'Acme'
+        po_dir = customer_path / 'job documents' / 'PO-1001'
+        po_dir.mkdir(parents=True)  # PO folder exists but is empty
+
+        ctx = _make_app_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+        assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+        # A job is created inside the previously-empty PO-1001 container.
+        (po_dir / '22222_NewShaft').mkdir(parents=True)
+        assert index.is_fully_covered([('', str(cf_root))], []) is False
+
+    def test_new_job_in_po_container_missing_its_subdir_is_not_covered(self, tmp_path):
+        # CodeRabbit finding on PR #316 (a gap in the fix directly above): the
+        # prior fix only appended po_path to `containers` *after* confirming
+        # sub_path exists. For a structure with a literal subdirectory between
+        # the PO folder and {job_folder} (post_po non-empty, e.g. "job
+        # documents"), a PO folder that exists but doesn't have that
+        # subdirectory yet (truly empty, not even the container dir) was never
+        # recorded at all -- not just stale, invisible to is_fully_covered().
+        cf_root = tmp_path / 'customer_files'
+        customer_path = cf_root / 'Acme'
+        po_dir = customer_path / 'PO-1001'
+        po_dir.mkdir(parents=True)  # PO-1001 exists but has no "job documents" yet
+
+        ctx = _make_app_context('{customer}/PO-{po_number}/job documents/{job_folder}')
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+        assert index.is_fully_covered([('', str(cf_root))], []) is True
+
+        # "job documents" is created inside PO-1001, with a job inside it.
+        (po_dir / 'job documents' / '22222_NewShaft').mkdir(parents=True)
+        assert index.is_fully_covered([('', str(cf_root))], []) is False
+
 
 def _assert_no_recursive_walk_needed(monkeypatch):
     """Fail the test if os.walk is called — is_fully_covered must only use

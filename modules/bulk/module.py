@@ -316,10 +316,15 @@ class BulkCreateDialog(QDialog):
         # filesystem for the same (customer, job_number) a second time.
         duplicates = []
         pre_existing: set = set()
+        scanned_keys: set = set()
         for job in jobs:
-            if self.job_exists(job['customer'], job['job_number'], is_itar):
+            key = (job['customer'], job['job_number'])
+            if key in scanned_keys:
+                continue
+            scanned_keys.add(key)
+            if self.job_exists(*key, is_itar):
                 duplicates.append(f"{job['customer']} - Job #{job['job_number']}")
-                pre_existing.add((job['customer'], job['job_number']))
+                pre_existing.add(key)
 
         if duplicates:
             dup_list = "\n".join(duplicates[:10])

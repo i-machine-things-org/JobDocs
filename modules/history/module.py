@@ -83,29 +83,33 @@ class HistoryModule(BaseModule):
             + [('Quote', quote) for quote in self.app_context.history.get('recent_quotes', [])]
         )
 
-        def _sort_key(entry):
-            # Returns a numeric timestamp, not a raw datetime: entries can
-            # mix naive and offset-aware ISO strings (e.g. a synced entry
-            # with a "+00:00" suffix next to a locally-written naive one),
-            # and datetime objects with different tzinfo-awareness raise
-            # TypeError when compared directly during sort(). Floats from
-            # .timestamp() are always comparable regardless of awareness.
-            _kind, data = entry
+        def _sort_key_and_date(entry):
+            # Entries can mix naive and offset-aware ISO strings (e.g. a
+            # synced entry with a "+00:00" suffix next to a locally-written
+            # naive one), and datetime objects with different
+            # tzinfo-awareness raise TypeError when compared directly
+            # during sort(). Parsed once here and reused for both the sort
+            # key (a timestamp float, always comparable regardless of
+            # awareness) and the display string.
             try:
-                return datetime.fromisoformat(data.get('date', '')).timestamp()
+                parsed = datetime.fromisoformat(entry.get('date') or '')
+                return parsed.timestamp(), parsed.strftime("%Y-%m-%d %H:%M")
             except (ValueError, TypeError, OSError, OverflowError):
-                return float('-inf')
+                return float('-inf'), "Unknown"
 
-        entries.sort(key=_sort_key, reverse=True)
-
+        # (timestamp_for_sort, display_date, kind, entry) -- an unparseable
+        # date sorts last (-inf) and displays as "Unknown" rather than
+        # raising or silently dropping the row.
+        rows = []
         for kind, entry in entries:
+            sort_key, date = _sort_key_and_date(entry)
+            rows.append((sort_key, date, kind, entry))
+
+        rows.sort(key=lambda r: r[0], reverse=True)
+
+        for _sort_key, date, kind, entry in rows:
             row = self.history_table.rowCount()
             self.history_table.insertRow(row)
-
-            try:
-                date = datetime.fromisoformat(entry['date']).strftime("%Y-%m-%d %H:%M")
-            except Exception:
-                date = "Unknown"
 
             number = entry.get('job_number', '') or entry.get('quote_number', '')
 
@@ -127,10 +131,14 @@ class HistoryModule(BaseModule):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            # Clear history
+            # Clear every recent_* collection (add_to_history() stores
+            # plugin entry types the same way, e.g. 'recent_my_entry_types' —
+            # not just the built-in recent_jobs/recent_quotes), not just
+            # the ones this module happens to know about.
+            for history_key, entries in tuple(self.app_context.history.items()):
+                if history_key.startswith('recent_') and isinstance(entries, list):
+                    self.app_context.history[history_key] = []
             self.app_context.history['customers'] = {}
-            self.app_context.history['recent_jobs'] = []
-            self.app_context.history['recent_quotes'] = []
             self.app_context.save_history()
             self.refresh_history()
             self.show_info("History", "History cleared")

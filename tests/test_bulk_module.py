@@ -255,7 +255,7 @@ def test_close_attempt_during_processing_loop_is_handled_gracefully(qapp, tmp_pa
 
 def test_bulk_create_still_works_end_to_end(qapp, tmp_path, monkeypatch):
     # Sanity check that the guard doesn't break the ordinary happy path.
-    dialog, job_module = _make_dialog(qapp, tmp_path)
+    dialog, _job_module = _make_dialog(qapp, tmp_path)
     dialog.bulk_text.setPlainText(
         "Acme,12345,PO1,New Bracket\n"
         "NewCo,55555,PO2,Another Job\n"
@@ -314,14 +314,15 @@ def test_bulk_create_does_not_rescan_filesystem_per_job(qapp, tmp_path, monkeypa
 
     dialog.create_bulk_jobs()
 
-    # One job_exists() call per parsed job (4) during the initial duplicate
-    # scan. Because a duplicate was found, the confirmation dialog is shown,
-    # so the post-dialog recheck (finding 2 fix) re-verifies the 2 unique
-    # (customer, job_number) keys that weren't already flagged as duplicates
-    # (Acme/99999 and NewCo/55555 — the second 99999 row is deduped, and
+    # One job_exists() call per unique (customer, job_number) key (3) during
+    # the initial duplicate scan — the second 99999 row is deduped before
+    # ever calling job_exists() (CodeRabbit finding on PR #305). Because a
+    # duplicate was found, the confirmation dialog is shown, so the
+    # post-dialog recheck (finding 2 fix) re-verifies the 2 unique keys that
+    # weren't already flagged as duplicates (Acme/99999 and NewCo/55555 —
     # Acme/12345 is skipped since it's already known to be a duplicate).
     # Zero further calls happen during creation — the loop reuses pre_existing.
-    assert call_count['n'] == 6
+    assert call_count['n'] == 5
 
     # 12345 (pre-existing) and the second 99999 (intra-batch dup) are skipped;
     # 99999 (first occurrence) and 55555 are created.

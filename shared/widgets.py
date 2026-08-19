@@ -15,12 +15,37 @@ from PyQt6.QtGui import QBrush, QColor, QDragEnterEvent, QDropEvent, QImage, QIm
 from pathlib import Path
 import atexit
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import shutil
 import struct
 import tempfile
 
 logger = logging.getLogger(__name__)
+
+
+def _setup_dropzone_debug_log() -> None:
+    """Attach a rotating file handler so DropZone's debug logging is visible
+    without a console — the packaged app is launched windowed (pythonw-style),
+    and this repo has no logging config anywhere else (see CODING_NOTES.md:
+    Python Style & Error Handling), so `logger.debug(...)` calls would
+    otherwise silently go nowhere. Best-effort: a log-setup failure must never
+    block drag-and-drop itself.
+    """
+    if any(isinstance(h, RotatingFileHandler) for h in logger.handlers):
+        return  # already set up (e.g. module reloaded)
+    try:
+        from shared.utils import get_config_dir
+        log_path = get_config_dir() / 'dropzone_debug.log'
+        handler = RotatingFileHandler(log_path, maxBytes=2 * 1024 * 1024, backupCount=2, encoding='utf-8')
+        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+    except OSError as e:
+        print(f"[DropZone] Could not set up debug log file: {e}", flush=True)
+
+
+_setup_dropzone_debug_log()
 
 
 # Single atexit handler for all DropZone temp directories — avoids accumulating
@@ -86,11 +111,34 @@ class DropZone(QFrame):
 
     @staticmethod
     def _outlook_descriptor_format(mime_data) -> str:
-        """Return the FileGroupDescriptor format name if present, else empty string."""
+        """Return the FileGroupDescriptor format name if present, else empty string.
+
+        Prefers the Unicode (W) format over the ANSI one when a drag source
+        offers both — Qt's QMimeData.formats() order reflects how the source
+        registered them, not a fixed preference, so picking the first match
+        could pick ANSI and misdecode/truncate Unicode filenames even though
+        the better format was also available.
+        """
+        fallback = ''
         for fmt in mime_data.formats():
             if 'filegroupdescriptor' in fmt.lower():
-                return fmt
-        return ''
+                if DropZone._is_unicode_descriptor_format(fmt):
+                    return fmt
+                fallback = fallback or fmt
+        return fallback
+
+    @staticmethod
+    def _is_unicode_descriptor_format(fmt: str) -> bool:
+        """Return True if fmt identifies the Unicode (W) FileGroupDescriptor format.
+
+        Qt exposes this as a MIME identifier like
+        'application/x-qt-windows-mime;value="FileGroupDescriptorW"' — the
+        string ends with a closing quote, not 'W', so a plain
+        fmt.endswith('W') never matches and Unicode filenames get parsed as
+        Latin-1, truncating them at the first null byte. Match the token
+        itself instead.
+        """
+        return 'filegroupdescriptorw' in fmt.lower()
 
     @staticmethod
     def _is_classic_outlook(mime_data) -> bool:
@@ -111,8 +159,20 @@ class DropZone(QFrame):
     def dragEnterEvent(self, event: QDragEnterEvent):
         mime = event.mimeData()
         print(f"[DropZone] dragEnter formats: {mime.formats()}", flush=True)
-        if (mime.hasUrls() or self._outlook_descriptor_format(mime)
-                or self._is_classic_outlook(mime) or self._is_new_outlook(mime)):
+
+        has_urls = mime.hasUrls()
+        descriptor_fmt = self._outlook_descriptor_format(mime)
+        is_classic_outlook = self._is_classic_outlook(mime)
+        is_new_outlook = self._is_new_outlook(mime)
+        accepted = has_urls or descriptor_fmt or is_classic_outlook or is_new_outlook
+
+        logger.debug(
+            "dragEnterEvent: accepted=%s hasUrls=%s descriptor_fmt=%r "
+            "is_classic_outlook=%s is_new_outlook=%s formats=%s",
+            accepted, has_urls, descriptor_fmt, is_classic_outlook, is_new_outlook, mime.formats(),
+        )
+
+        if accepted:
             event.acceptProposedAction()
             self.setStyleSheet("""
                 DropZone {
@@ -181,6 +241,12 @@ class DropZone(QFrame):
         is_outlook_web = DropZone._is_new_outlook(mime)
         is_classic_outlook = DropZone._is_classic_outlook(mime) and not is_outlook_web
 
+        logger.debug(
+            "dropEvent: hasUrls=%s descriptor_fmt=%r is_outlook_web=%s "
+            "is_classic_outlook=%s formats=%s",
+            mime.hasUrls(), descriptor_fmt, is_outlook_web, is_classic_outlook, mime.formats(),
+        )
+
         files: list = []
         if is_outlook_web:
             files = DropZone._handle_outlook_web_drop(mime)
@@ -235,6 +301,7 @@ class DropZone(QFrame):
         print(f"[DropZone] emitting {len(files)} file(s)", flush=True)
         for f in files:
             print(f"  - {f}", flush=True)
+        logger.debug("dropEvent: emitting %d file(s)", len(files))
         if files:
             self.files_dropped.emit(files)
 
@@ -570,7 +637,7 @@ class DropZone(QFrame):
             if descriptor_fmt:
                 try:
                     descriptor_bytes = bytes(mime_data.data(descriptor_fmt))
-                    is_unicode = descriptor_fmt.upper().endswith('W')
+                    is_unicode = DropZone._is_unicode_descriptor_format(descriptor_fmt)
                     subjects = [
                         os.path.splitext(name)[0]
                         for name in DropZone._parse_descriptor_filenames(descriptor_bytes, is_unicode)
@@ -713,7 +780,7 @@ class DropZone(QFrame):
             )
             return []
 
-        is_unicode = descriptor_fmt.upper().endswith('W')
+        is_unicode = DropZone._is_unicode_descriptor_format(descriptor_fmt)
         filenames = DropZone._parse_descriptor_filenames(descriptor_bytes, is_unicode)
         # Descriptor filenames come from the drag source (untrusted) — strip any
         # path components before joining into tmp_dir to prevent traversal.
