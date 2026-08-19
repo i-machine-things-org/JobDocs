@@ -168,7 +168,11 @@ begin
     AddToPath(ExpandConstant('{app}'));
 
     { Drop a marker file the app itself reads at startup to switch into
-      read-only (search-only) mode. }
+      read-only (search-only) mode. This is a UI/kiosk convenience, not
+      access control -- a per-user install grants the same account write
+      access to this file, so it can be deleted to unlock the full app.
+      Real enforcement needs a separately managed account with the install
+      directory locked down. }
     MarkerFile := ExpandConstant('{app}\readonly.marker');
     if WizardIsTaskSelected('readonly') then
       SaveStringToFile(MarkerFile, 'search-only' + #13#10, False)

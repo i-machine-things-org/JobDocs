@@ -48,6 +48,13 @@ machines that should look up jobs but not create or edit them. Updating a read-o
 install automatically re-selects Read-Only, so it stays search-only across upgrades
 without re-checking the box each time.
 
+**This is a UI convenience, not access control.** On a per-user install, the same
+Windows account running JobDocs can delete the install's `readonly.marker` file and
+relaunch to unlock the full app. To actually restrict what a shared machine's user
+can do, run the install under a separately managed Windows account with the
+installation directory locked down (e.g. an admin-only "Install for all users" install
+under a standard, non-admin shop-floor login).
+
 ### Linux (Flatpak)
 
 Add the JobDocs repository and install:
