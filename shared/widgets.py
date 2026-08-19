@@ -301,7 +301,7 @@ class DropZone(QFrame):
         print(f"[DropZone] emitting {len(files)} file(s)", flush=True)
         for f in files:
             print(f"  - {f}", flush=True)
-        logger.debug("dropEvent: emitting %d file(s): %s", len(files), files)
+        logger.debug("dropEvent: emitting %d file(s)", len(files))
         if files:
             self.files_dropped.emit(files)
 

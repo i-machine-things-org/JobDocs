@@ -57,6 +57,7 @@
 - **A mode flag (e.g. `readonly_mode`) only enforces anything once it's on `AppContext`, not just `main.py`.** Skipping module *loading* isn't a write guarantee — audit every still-loaded module's write paths and gate each on `app_context.readonly_mode`.
 - **`QMimeData.formats()`'s ordering between format variants (e.g. ANSI vs. Unicode `FileGroupDescriptor(W)`) isn't guaranteed by Qt.** (CodeRabbit, PR #316) Picking the first substring match can select the ANSI format even when Unicode was also offered, truncating filenames at the first null byte. Explicitly prefer the better variant; don't rely on list order.
 - **A full Qt MIME identifier like `application/x-qt-windows-mime;value="FileGroupDescriptorW"` ends with a closing quote, not the format's own suffix.** `fmt.endswith('W')` silently never matches it — match a lowercased token/substring instead of relying on string-end position.
+- **Once a `logger.debug()` call is backed by a real persistent file handler (not just a no-op default config), audit what it logs.** (CodeRabbit, PR #316) A diagnostic log line emitting the full dropped-files list — paths often derived from Outlook email subjects — becomes a standing privacy leak once `RotatingFileHandler` makes it durable on disk. Log counts/shapes, not full untrusted content, once logging actually persists.
 
 ## Print & Rendering
 
