@@ -184,7 +184,7 @@ begin
 
   { Pre-fill from a previous install of this same Kiosk product, if updating
     or reinstalling -- SetPreviousData below persists these in the registry
-    keyed by AppId, independent of {app}\kiosk_dirs.json's own lifecycle. }
+    keyed by AppId, independent of the app dir's kiosk_dirs.json file. }
   KioskDirsPage.Values[0] := GetPreviousData('CustomerFilesDir', '');
   KioskDirsPage.Values[1] := GetPreviousData('ItarCustomerFilesDir', '');
   KioskDirsPage.Values[2] := GetPreviousData('BlueprintsDir', '');
