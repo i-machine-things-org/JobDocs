@@ -63,6 +63,12 @@ modules present to load either way). To actually restrict what a shared machine'
 can do (e.g. prevent them from installing the full app themselves), run it under a
 separately managed Windows account with the installation directory locked down.
 
+JobDocs Kiosk has no Settings dialog and no first-run setup wizard (both are write-capable
+admin tools, so neither is installed) — the JobDocs Kiosk installer itself prompts for the
+customer files, ITAR customer files, blueprints, and ITAR blueprints directories. Leave the
+ITAR fields blank if the site doesn't use them. Re-run the installer to change these later;
+it pre-fills your previous answers.
+
 ### Linux (Flatpak)
 
 Add the JobDocs repository and install:
