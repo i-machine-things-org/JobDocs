@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
 from core.module_loader import ModuleLoader
 from core.app_context import AppContext
 from core.base_module import BaseModule
-from shared.utils import atomic_write_json, get_config_dir, get_os_text
+from shared.utils import atomic_write_json, get_config_dir, get_os_text, is_kiosk_install
 from shared.remote_sync import RemoteSyncManager
 
 logger = logging.getLogger(__name__)
@@ -75,13 +75,13 @@ def _is_readonly_install() -> bool:
     marker on a Kiosk install has nothing to unlock. Real access control
     for a shared machine still requires a separately managed Windows account
     with the install directory locked down.
+
+    Delegates to shared.utils.is_kiosk_install() — the single source of
+    truth, also used by get_config_dir() to isolate Kiosk's settings/
+    history/search index from a regular JobDocs install on the same
+    machine.
     """
-    if os.getenv('FLATPAK_ID'):
-        return False
-    app_dir = Path(__file__).resolve().parent
-    if not (app_dir.parent / 'runtime').is_dir():
-        return False  # dev checkout, not an embedded install
-    return (app_dir.parent / 'readonly.marker').exists()
+    return is_kiosk_install()
 
 
 APP_VERSION = _get_app_version()
