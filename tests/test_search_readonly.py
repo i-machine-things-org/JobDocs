@@ -363,10 +363,15 @@ class TestNoFilesystemEscapeOnReadonly:
 
         qds.openUrl.assert_not_called()
 
-    def test_open_item_externally_still_opens_file_when_readonly(self, tmp_path):
+    def test_open_item_externally_opens_a_temp_copy_when_readonly(self, tmp_path):
+        """The external viewer must never see the real customer-directory
+        path — its own "Save As" / "Recent Files" would hand it straight
+        back to the user, undoing every other kiosk restriction."""
         app_context = self._context(tmp_path, readonly_mode=True)
         module = _make_bare_module(app_context)
-        a_file = tmp_path / 'drawing.pdf'
+        source_dir = tmp_path / 'Z_Customer_Files' / 'Acme' / 'job documents'
+        source_dir.mkdir(parents=True)
+        a_file = source_dir / 'drawing.pdf'
         a_file.write_text('contents')
         item = QTreeWidgetItem()
         item.setData(0, Qt.ItemDataRole.UserRole, str(a_file))
@@ -375,6 +380,30 @@ class TestNoFilesystemEscapeOnReadonly:
             module._open_item_externally(item)
 
         qds.openUrl.assert_called_once()
+        opened_path = Path(qds.openUrl.call_args[0][0].toLocalFile())
+        assert opened_path != a_file, "must open a copy, not the real path"
+        assert str(source_dir) not in str(opened_path), \
+            "temp copy must not reveal the real customer directory path"
+        assert opened_path.name == 'drawing.pdf', "filename should still look sane in the viewer"
+        assert opened_path.read_text() == 'contents'
+
+    def test_open_item_externally_fails_closed_on_temp_copy_error(self, tmp_path):
+        """If the temp copy can't be made, never fall back to opening the
+        real path — that would silently defeat the whole guard."""
+        app_context = self._context(tmp_path, readonly_mode=True)
+        module = _make_bare_module(app_context)
+        module.show_error = MagicMock()
+        a_file = tmp_path / 'drawing.pdf'
+        a_file.write_text('contents')
+        item = QTreeWidgetItem()
+        item.setData(0, Qt.ItemDataRole.UserRole, str(a_file))
+
+        with _patched_qdesktopservices() as qds, \
+                patch('modules.search.module.shutil.copy2', side_effect=OSError("disk full")):
+            module._open_item_externally(item)
+
+        qds.openUrl.assert_not_called()
+        module.show_error.assert_called_once()
 
     def test_open_item_externally_opens_directory_when_not_readonly(self, tmp_path):
         app_context = self._context(tmp_path, readonly_mode=False)

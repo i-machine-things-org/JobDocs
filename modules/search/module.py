@@ -6,11 +6,14 @@ Supports both strict format (fast) and legacy recursive search modes.
 Uses background threading to prevent UI lockup during searches.
 """
 
+import atexit
 import logging
 import os
+import shutil
 import sys
 import re
 import ctypes
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from types import MappingProxyType
@@ -36,6 +39,20 @@ logger = logging.getLogger(__name__)
 # constant so every readonly/ITAR-visibility check stays in sync (CODING_NOTES:
 # ITAR / Filter Consistency).
 _ITAR_LABEL_PREFIXES = ('[ITAR] ', '[ITAR-BP] ', '[ITAR Quote] ')
+
+# Temp dirs created to view a file on a read-only (search-only) install
+# without exposing its real path to the external viewer — see
+# SearchModule._open_item_externally(). Single atexit handler mirrors
+# shared/widgets.py's _dropzone_tmp_dirs pattern.
+_kiosk_view_tmp_dirs: list = []
+
+
+def _cleanup_kiosk_view_tmp_dirs() -> None:
+    for d in _kiosk_view_tmp_dirs:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+atexit.register(_cleanup_kiosk_view_tmp_dirs)
 
 
 def _is_hidden_file(full_path: str, name: str) -> bool:
@@ -1046,7 +1063,12 @@ class SearchModule(BaseModule):
             self._populate_tree_level(item, dir_path)
 
     def _on_tree_double_clicked(self, index):
-        """Expand/collapse directories in-tree; open files externally."""
+        """Expand/collapse directories in-tree; open files externally.
+
+        Delegates file-opening to _open_item_externally() rather than
+        calling QDesktopServices directly, so the read-only temp-copy
+        guard applies here too, not just from the context menu.
+        """
         item = self.folder_tree.itemFromIndex(index)
         if item is None:
             return
@@ -1055,8 +1077,8 @@ class SearchModule(BaseModule):
             return
         if os.path.isdir(path):
             item.setExpanded(not item.isExpanded())
-        elif os.path.isfile(path) and os.path.exists(path):
-            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        else:
+            self._open_item_externally(item)
 
     def _open_item_externally(self, item):
         """Open the given tree item's path in the OS.
@@ -1064,15 +1086,36 @@ class SearchModule(BaseModule):
         Refuses directories on a read-only (search-only) install: opening a
         directory via QDesktopServices launches Explorer on Windows, which
         is exactly the filesystem access a kiosk install must not offer.
-        Files still open in their associated viewer — that's allowed.
+
+        Files open from a temp copy on a read-only install, never the
+        original path: the external viewer's own "Save As" / "Recent
+        Files" would otherwise hand the user the real customer network
+        path, working around every other restriction in this module. See
+        _cleanup_kiosk_view_tmp_dirs for why cleanup happens at app exit
+        rather than "when the viewer closes" — QDesktopServices hands off
+        to the OS shell association, not a process JobDocs can track.
         """
         if item is None:
             return
         path = item.data(0, Qt.ItemDataRole.UserRole)
         if not path or not os.path.exists(path):
             return
-        if self.app_context.is_readonly() and os.path.isdir(path):
+        readonly = self.app_context.is_readonly()
+        if readonly and os.path.isdir(path):
             return
+        if readonly and os.path.isfile(path):
+            try:
+                tmp_dir = tempfile.mkdtemp(prefix='jobdocs_kiosk_view_')
+                _kiosk_view_tmp_dirs.append(tmp_dir)
+                tmp_path = os.path.join(tmp_dir, os.path.basename(path))
+                shutil.copy2(path, tmp_path)
+            except OSError as exc:
+                logger.warning(
+                    "_open_item_externally: temp copy failed (%s): %s", type(exc).__name__, exc
+                )
+                self.show_error("Error", f"Could not open file: {exc}")
+                return
+            path = tmp_path
         QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _show_file_context_menu(self, pos):
