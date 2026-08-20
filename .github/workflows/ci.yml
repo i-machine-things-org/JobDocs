@@ -181,7 +181,6 @@ jobs:
       - name: Build Windows installers (full + Kiosk)
         shell: pwsh
         run: |
-          $env:RELEASE_VERSION = "${{ env.RELEASE_VERSION }}"
           iscc build_scripts\JobDocs.iss
           iscc /DKIOSK build_scripts\JobDocs.iss
 
