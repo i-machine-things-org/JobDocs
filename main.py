@@ -761,6 +761,41 @@ class JobDocsMainWindow(QMainWindow):
 
     # ==================== Settings & History ====================
 
+    _KIOSK_DIR_SETTING_KEYS = (
+        'customer_files_dir', 'itar_customer_files_dir',
+        'blueprints_dir', 'itar_blueprints_dir',
+    )
+
+    def _apply_kiosk_dirs_override(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        """Override the four directory settings from {app}/kiosk_dirs.json
+        on a Kiosk install.
+
+        JobDocs Kiosk has no Settings UI and doesn't ship the OOBE wizard
+        (both write-capable admin tools, excluded from its installer's
+        [Files] selection) — its search directories are configured once at
+        install time instead (build_scripts/JobDocs.iss's custom wizard
+        pages write this file). Always wins over settings.json for these
+        four keys on a Kiosk install: kiosk_dirs.json is the actual source
+        of truth here, and a Kiosk install never writes settings.json
+        itself (see save_settings()'s readonly_mode guard) so there would
+        be no other way to reconfigure them short of reinstalling anyway.
+        """
+        if not self.readonly_mode:
+            return settings
+        kiosk_dirs_file = Path(__file__).resolve().parent.parent / 'kiosk_dirs.json'
+        if not kiosk_dirs_file.exists():
+            return settings
+        try:
+            with open(kiosk_dirs_file, 'r', encoding='utf-8') as f:
+                kiosk_dirs = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"Warning: Could not load kiosk_dirs.json: {e}")
+            return settings
+        for key in self._KIOSK_DIR_SETTING_KEYS:
+            if key in kiosk_dirs:
+                settings[key] = kiosk_dirs[key]
+        return settings
+
     def load_settings(self) -> Dict[str, Any]:
         """Load settings from file, trying remote server first if configured"""
         # First try to load from local to get remote_server_path
@@ -787,15 +822,15 @@ class JobDocsMainWindow(QMainWindow):
                         atomic_write_json(self.settings_file, merged)
                     except OSError:
                         pass
-                return merged
+                return self._apply_kiosk_dirs_override(merged)
 
         # Fall back to local settings
         if local_settings:
             merged = self.DEFAULT_SETTINGS.copy()
             merged.update(local_settings)
-            return merged
+            return self._apply_kiosk_dirs_override(merged)
 
-        return self.DEFAULT_SETTINGS.copy()
+        return self._apply_kiosk_dirs_override(self.DEFAULT_SETTINGS.copy())
 
     def save_settings(self):
         """Save settings to file and sync to remote server if configured"""

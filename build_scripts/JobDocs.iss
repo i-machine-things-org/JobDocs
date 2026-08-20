@@ -96,6 +96,9 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 [Code]
 var
   KeepSettings: Boolean;
+#ifdef KIOSK
+  KioskDirsPage: TInputDirWizardPage;
+#endif
 
 const
   SysEnvKey  = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';
@@ -161,6 +164,58 @@ begin
   end;
 end;
 
+#ifdef KIOSK
+procedure InitializeWizard();
+{ JobDocs Kiosk has no Settings UI and doesn't ship the OOBE wizard (both
+  write-capable admin tools, excluded from [Files] above) -- its search
+  directories are configured here instead, once, at install time. }
+begin
+  KioskDirsPage := CreateInputDirPage(wpSelectDir,
+    'Job Data Locations', 'Where should JobDocs Kiosk search for jobs?',
+    'Enter the network paths for customer job folders and blueprint files. ' +
+    'Ask your JobDocs administrator if you''re not sure. The ITAR fields are ' +
+    'optional -- leave blank if this site doesn''t use them. You can change ' +
+    'these later by re-running this installer.',
+    False, '');
+  KioskDirsPage.Add('Customer Files Directory:');
+  KioskDirsPage.Add('ITAR Customer Files Directory (optional):');
+  KioskDirsPage.Add('Blueprints Directory:');
+  KioskDirsPage.Add('ITAR Blueprints Directory (optional):');
+
+  { Pre-fill from a previous install of this same Kiosk product, if updating
+    or reinstalling -- SetPreviousData below persists these in the registry
+    keyed by AppId, independent of {app}\kiosk_dirs.json's own lifecycle. }
+  KioskDirsPage.Values[0] := GetPreviousData('CustomerFilesDir', '');
+  KioskDirsPage.Values[1] := GetPreviousData('ItarCustomerFilesDir', '');
+  KioskDirsPage.Values[2] := GetPreviousData('BlueprintsDir', '');
+  KioskDirsPage.Values[3] := GetPreviousData('ItarBlueprintsDir', '');
+end;
+
+procedure RegisterPreviousData(PreviousDataKey: Integer);
+begin
+  SetPreviousData(PreviousDataKey, 'CustomerFilesDir', KioskDirsPage.Values[0]);
+  SetPreviousData(PreviousDataKey, 'ItarCustomerFilesDir', KioskDirsPage.Values[1]);
+  SetPreviousData(PreviousDataKey, 'BlueprintsDir', KioskDirsPage.Values[2]);
+  SetPreviousData(PreviousDataKey, 'ItarBlueprintsDir', KioskDirsPage.Values[3]);
+end;
+
+function JSONEscape(S: String): String;
+var
+  I: Integer;
+  C: Char;
+begin
+  Result := '';
+  for I := 1 to Length(S) do
+  begin
+    C := S[I];
+    if (C = '\') or (C = '"') then
+      Result := Result + '\' + C
+    else
+      Result := Result + C;
+  end;
+end;
+#endif
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
@@ -175,6 +230,19 @@ begin
       write-capable modules on disk, so deleting this marker unlocks
       nothing that isn't already there. }
     SaveStringToFile(ExpandConstant('{app}\readonly.marker'), 'search-only' + #13#10, False);
+
+    { main.py's AppContext.load_settings() reads this and overrides the
+      four directory settings on every launch -- the actual source of
+      truth for a Kiosk install, since it has no UI to edit settings.json
+      itself. See MainWindow._apply_kiosk_dirs_override(). }
+    SaveStringToFile(ExpandConstant('{app}\kiosk_dirs.json'),
+      '{' + #13#10 +
+      '  "customer_files_dir": "' + JSONEscape(KioskDirsPage.Values[0]) + '",' + #13#10 +
+      '  "itar_customer_files_dir": "' + JSONEscape(KioskDirsPage.Values[1]) + '",' + #13#10 +
+      '  "blueprints_dir": "' + JSONEscape(KioskDirsPage.Values[2]) + '",' + #13#10 +
+      '  "itar_blueprints_dir": "' + JSONEscape(KioskDirsPage.Values[3]) + '"' + #13#10 +
+      '}' + #13#10,
+      False);
 #endif
   end;
 end;
