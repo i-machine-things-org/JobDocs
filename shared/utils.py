@@ -94,19 +94,47 @@ def atomic_write_json(path: Path, data: Any) -> None:
             os.unlink(tmp_path)
 
 
+def is_kiosk_install() -> bool:
+    """True when running as JobDocs Kiosk — see build_scripts/JobDocs.iss.
+
+    Single source of truth for this check: main.py's _is_readonly_install()
+    delegates here rather than duplicating the marker-file detection, and
+    get_config_dir() below uses it to keep Kiosk's settings/history/search
+    index isolated from a regular JobDocs install on the same machine.
+    Windows-only; always False in dev checkouts, Flatpak, and a regular
+    JobDocs install.
+    """
+    if os.getenv('FLATPAK_ID'):
+        return False
+    # This file lives at <install>/app/shared/utils.py; main.py lives at
+    # <install>/app/main.py — one more parent hop to reach the same app/ dir.
+    app_dir = Path(__file__).resolve().parent.parent
+    if not (app_dir.parent / 'runtime').is_dir():
+        return False  # dev checkout, not an embedded install
+    return (app_dir.parent / 'readonly.marker').exists()
+
+
 def get_config_dir() -> Path:
-    """Get the appropriate config directory for the current OS"""
+    """Get the appropriate config directory for the current OS.
+
+    JobDocs Kiosk gets its own subdirectory (a "Kiosk" suffix), isolated
+    from a regular JobDocs install's settings/history/search index. The two
+    are separate installers meant to coexist on one machine (see
+    build_scripts/JobDocs.iss); sharing a config dir would mean uninstalling
+    either one wipes the other's data.
+    """
+    suffix = ' Kiosk' if is_kiosk_install() else ''
     if platform.system() == "Windows":
-        # Windows: C:\Users\<Username>\AppData\Local\JobDocs
+        # Windows: C:\Users\<Username>\AppData\Local\JobDocs[ Kiosk]
         base = Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local'))
-        config_dir = base / 'JobDocs'
+        config_dir = base / f'JobDocs{suffix}'
     elif platform.system() == "Darwin":
-        # macOS: ~/Library/Application Support/JobDocs
-        config_dir = Path.home() / 'Library' / 'Application Support' / 'JobDocs'
+        # macOS: ~/Library/Application Support/JobDocs[ Kiosk]
+        config_dir = Path.home() / 'Library' / 'Application Support' / f'JobDocs{suffix}'
     else:
-        # Linux/other: ~/.local/share/JobDocs
+        # Linux/other: ~/.local/share/JobDocs[ Kiosk]
         xdg_data = os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')
-        config_dir = Path(xdg_data) / 'JobDocs'
+        config_dir = Path(xdg_data) / f'JobDocs{suffix}'
 
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir

@@ -198,7 +198,15 @@ begin
     RemoveFromPath(ExpandConstant('{app}'));
     if not KeepSettings then
     begin
+      { Must match shared/utils.py's get_config_dir() exactly -- Kiosk uses
+        its own "JobDocs Kiosk" subdirectory so uninstalling one variant
+        never touches the other's settings/history/search index; they're
+        separate installers meant to coexist on one machine. }
+#ifdef KIOSK
+      ConfigDir := ExpandConstant('{localappdata}\JobDocs Kiosk');
+#else
       ConfigDir := ExpandConstant('{localappdata}\JobDocs');
+#endif
       if DirExists(ConfigDir) then
         DelTree(ConfigDir, True, True, True);
     end;
