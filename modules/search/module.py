@@ -1140,9 +1140,10 @@ class SearchModule(BaseModule):
 
         menu = QMenu(self._widget)
 
-        if is_file or not readonly:
-            open_action = menu.addAction("Open")
-            open_action.triggered.connect(lambda: self._open_item_externally(item))
+        # Always valid here: the guard above already returned for the one
+        # case that wouldn't be (a directory on a read-only install).
+        open_action = menu.addAction("Open")
+        open_action.triggered.connect(lambda: self._open_item_externally(item))
 
         if not readonly:
             copy_action = menu.addAction("Copy Path")
@@ -1276,3 +1277,6 @@ class SearchModule(BaseModule):
             self._index_worker.cancel()
             self._index_worker.wait()
         self.search_results.clear()
+        # Best-effort now, on normal shutdown; the atexit.register fallback
+        # in _cleanup_kiosk_view_tmp_dirs still covers a hard exit/crash.
+        _cleanup_kiosk_view_tmp_dirs()
