@@ -45,9 +45,9 @@ def _qapp() -> QApplication:
 
 
 @contextmanager
-def _patched_qdesktopservices():
-    """patch.dict on SearchModule._open_item_externally's own __globals__,
-    not patch('modules.search.module.QDesktopServices').
+def _patched_search_module_global(name: str, **mock_kwargs):
+    """patch.dict on a name in modules.search.module's own globals (read via
+    a known method's __globals__), not patch('modules.search.module.<name>').
 
     The latter resolves sys.modules['modules.search.module'] by string at
     patch time. core.module_loader can register a second, distinct module
@@ -58,9 +58,13 @@ def _patched_qdesktopservices():
     actually read from. Patching the function's own __globals__ dict is
     correct regardless of which module object sys.modules currently holds.
     """
-    qds = MagicMock()
-    with patch.dict(SearchModule._open_item_externally.__globals__, {'QDesktopServices': qds}):
-        yield qds
+    mock = MagicMock(**mock_kwargs)
+    with patch.dict(SearchModule._open_item_externally.__globals__, {name: mock}):
+        yield mock
+
+
+def _patched_qdesktopservices():
+    return _patched_search_module_global('QDesktopServices')
 
 
 class _FakeTable:
@@ -322,7 +326,7 @@ class TestNoFilesystemEscapeOnReadonly:
         module.search_table = _FakeTable(0)
         module.search_results = [{'customer': 'Acme', 'path': str(tmp_path)}]
 
-        with patch('modules.search.module.open_folder') as open_folder:
+        with _patched_search_module_global('open_folder') as open_folder:
             module.open_selected_search_job()
 
         open_folder.assert_not_called()
@@ -333,7 +337,7 @@ class TestNoFilesystemEscapeOnReadonly:
         module.search_table = _FakeTable(0)
         module.search_results = [{'customer': 'Acme', 'path': str(tmp_path)}]
 
-        with patch('modules.search.module.open_folder') as open_folder:
+        with _patched_search_module_global('open_folder') as open_folder:
             module.open_selected_blueprints()
 
         open_folder.assert_not_called()
@@ -399,7 +403,7 @@ class TestNoFilesystemEscapeOnReadonly:
         item.setData(0, Qt.ItemDataRole.UserRole, str(a_file))
 
         with _patched_qdesktopservices() as qds, \
-                patch('modules.search.module.shutil.copy2', side_effect=OSError("disk full")):
+                _patched_search_module_global('shutil', copy2=MagicMock(side_effect=OSError("disk full"))):
             module._open_item_externally(item)
 
         qds.openUrl.assert_not_called()
