@@ -275,9 +275,9 @@ class TestPopulateTreeLevelReparsePointFilter:
     skips gracefully where unsupported.
     """
 
-    def _context(self, tmp_path: Path, *, readonly_mode: bool) -> AppContext:
+    def _context(self, tmp_path: Path, *, readonly_mode: bool, settings: dict = None) -> AppContext:
         return AppContext(
-            settings={},
+            settings=settings or {},
             history={},
             config_dir=tmp_path,
             save_settings_callback=MagicMock(),
@@ -296,7 +296,9 @@ class TestPopulateTreeLevelReparsePointFilter:
         linked_dir = tmp_path / 'linked_job'
         linked_dir.mkdir()  # stand-in path; _is_reparse_point is mocked below
 
-        app_context = self._context(tmp_path, readonly_mode=True)
+        app_context = self._context(
+            tmp_path, readonly_mode=True, settings={'customer_files_dir': str(tmp_path)}
+        )
         module = _make_bare_module(app_context)
         tree = QTreeWidget()
 
@@ -312,6 +314,51 @@ class TestPopulateTreeLevelReparsePointFilter:
         names = [root.child(i).text(0) for i in range(root.childCount())]
         assert 'real_job' in names
         assert 'linked_job' not in names
+
+    def test_reparse_point_root_itself_is_rejected_before_listing(self, tmp_path):
+        """The *root* call (from _on_result_selected(), passing a search
+        result's path straight through) must validate dir_path itself, not
+        just its children — recursive calls via _on_tree_item_expanded()
+        only ever reach an already-filtered child, but nothing filtered the
+        very first call before this fix (CodeRabbit, PR #315)."""
+        customer_dir = tmp_path / 'Z_Customer_Files'
+        customer_dir.mkdir()
+        linked_root = tmp_path / 'linked_job'
+        linked_root.mkdir()
+        (linked_root / 'classified.pdf').write_text('secret')
+
+        app_context = self._context(
+            tmp_path, readonly_mode=True, settings={'customer_files_dir': str(customer_dir)},
+        )
+        module = _make_bare_module(app_context)
+        tree = QTreeWidget()
+
+        with _patched_search_module_global('_is_reparse_point', return_value=True):
+            module._populate_tree_level(tree.invisibleRootItem(), str(linked_root))
+
+        assert tree.invisibleRootItem().childCount() == 0, \
+            "a reparse-point root must not be listed at all"
+
+    def test_root_outside_permitted_roots_is_rejected_before_listing(self, tmp_path):
+        """Same as above but for a root that isn't a reparse point, just
+        outside every configured (non-ITAR) root entirely — e.g. a stale
+        index entry pointing at a since-reconfigured or ITAR path
+        (CodeRabbit, PR #315)."""
+        customer_dir = tmp_path / 'Z_Customer_Files'
+        customer_dir.mkdir()
+        outside_root = tmp_path / 'itar_customers' / 'secret_job'
+        outside_root.mkdir(parents=True)
+        (outside_root / 'classified.pdf').write_text('secret')
+
+        app_context = self._context(
+            tmp_path, readonly_mode=True, settings={'customer_files_dir': str(customer_dir)},
+        )
+        module = _make_bare_module(app_context)
+        tree = QTreeWidget()
+
+        module._populate_tree_level(tree.invisibleRootItem(), str(outside_root))
+
+        assert tree.invisibleRootItem().childCount() == 0
 
     def test_reparse_point_included_when_not_readonly(self, tmp_path):
         real_dir = tmp_path / 'real_job'
