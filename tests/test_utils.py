@@ -1,11 +1,15 @@
 """Tests for shared/utils.py — pure functions only (no Qt, no filesystem side-effects)."""
 
+import os
+
+import shared.utils as utils
 from shared.utils import (
     is_blueprint_file,
     parse_job_numbers,
     sanitize_filename,
     get_os_text,
     get_next_number,
+    is_reparse_point,
 )
 
 
@@ -121,6 +125,59 @@ class TestGetNextNumber:
     def test_non_numeric_entries_ignored(self):
         history = {'recent_jobs': [{'job_number': 'N/A'}, {'job_number': '10003'}]}
         assert get_next_number(history, 'job') == '10004'
+
+
+# ---------------------------------------------------------------------------
+# is_reparse_point
+# ---------------------------------------------------------------------------
+
+class _FakeKernel32:
+    def __init__(self, attrs=None, raises=None):
+        self._attrs = attrs
+        self._raises = raises
+
+    def GetFileAttributesW(self, _path):
+        if self._raises is not None:
+            raise self._raises
+        return self._attrs
+
+
+class TestIsReparsePoint:
+    """A junction/symlink under a permitted customer/blueprint folder can
+    target an excluded ITAR directory. This must fail closed: a
+    GetFileAttributesW lookup failure on Windows is treated as a reparse
+    point rather than falling through to os.path.islink(), which doesn't
+    reliably detect junctions/mount points there (CodeRabbit, PR #315)."""
+
+    def _set_windows(self, monkeypatch, attrs=None, raises=None):
+        monkeypatch.setattr(os, 'name', 'nt')
+        fake_windll = type('FakeWindll', (), {'kernel32': _FakeKernel32(attrs=attrs, raises=raises)})()
+        monkeypatch.setattr(utils.ctypes, 'windll', fake_windll, raising=False)
+
+    def test_windows_reparse_bit_set(self, monkeypatch):
+        self._set_windows(monkeypatch, attrs=0x400)
+        assert is_reparse_point(r'Z:\link') is True
+
+    def test_windows_ordinary_directory(self, monkeypatch):
+        self._set_windows(monkeypatch, attrs=0x10)  # FILE_ATTRIBUTE_DIRECTORY
+        assert is_reparse_point(r'Z:\dir') is False
+
+    def test_windows_invalid_file_attributes_fails_closed(self, monkeypatch):
+        self._set_windows(monkeypatch, attrs=-1)  # INVALID_FILE_ATTRIBUTES
+        assert is_reparse_point(r'Z:\missing') is True
+
+    def test_windows_api_exception_fails_closed(self, monkeypatch):
+        self._set_windows(monkeypatch, raises=OSError('access denied'))
+        assert is_reparse_point(r'Z:\denied') is True
+
+    def test_non_windows_uses_islink(self, monkeypatch):
+        monkeypatch.setattr(os, 'name', 'posix')
+        monkeypatch.setattr(utils.os.path, 'islink', lambda p: True)
+        assert is_reparse_point('/mnt/link') is True
+
+    def test_non_windows_real_directory_is_not_a_reparse_point(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(os, 'name', 'posix')
+        assert is_reparse_point(str(tmp_path)) is False
 
     def test_unknown_type_returns_start(self):
         assert get_next_number({}, 'unknown') == '10000'

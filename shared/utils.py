@@ -103,14 +103,22 @@ def is_reparse_point(full_path: str) -> bool:
     indexing) so a link planted under a permitted customer/blueprint
     directory can't be used to reach an excluded ITAR directory through any
     of those paths (CodeRabbit, PR #315).
+
+    Fails closed on Windows: os.path.islink() doesn't reliably detect
+    junctions/mount points there, so a GetFileAttributesW lookup failure
+    (INVALID_FILE_ATTRIBUTES, or a raised exception) is treated as a
+    reparse point rather than falling through to a check that could miss
+    one (CodeRabbit, PR #315).
     """
+    if os.name != "nt":
+        return os.path.islink(full_path)
     try:
         attrs = ctypes.windll.kernel32.GetFileAttributesW(full_path)
-        if attrs != -1 and (attrs & 0x400):  # FILE_ATTRIBUTE_REPARSE_POINT
-            return True
     except (AttributeError, OSError):
-        pass
-    return os.path.islink(full_path)
+        return True
+    if attrs == -1:  # INVALID_FILE_ATTRIBUTES
+        return True
+    return bool(attrs & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
 
 
 def is_kiosk_install() -> bool:
