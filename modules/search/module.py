@@ -1082,13 +1082,23 @@ class SearchModule(BaseModule):
         permitted customer/blueprint folder could otherwise point at the
         excluded ITAR directory (or anywhere else) and bypass the
         exclusion (CodeRabbit, PR #315).
+
+        Also validates dir_path itself before listing it, not just its
+        children: recursive calls via _on_tree_item_expanded() only ever
+        reach an already-filtered child, but the *root* call from
+        _on_result_selected() passes a search result's path directly —
+        live or index-derived, so a stale or reparse-point path there
+        would otherwise have its contents listed before any check ran
+        (CodeRabbit, PR #315).
         """
+        readonly = self.app_context.is_readonly()
+        if readonly and (_is_reparse_point(dir_path) or not self._is_within_permitted_roots(dir_path)):
+            return
         try:
             raw = os.listdir(dir_path)
         except OSError:
             return
 
-        readonly = self.app_context.is_readonly()
         entries = sorted(
             [
                 n for n in raw
