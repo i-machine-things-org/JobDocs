@@ -170,6 +170,10 @@ class TestIsReparsePoint:
         self._set_windows(monkeypatch, raises=OSError('access denied'))
         assert is_reparse_point(r'Z:\denied') is True
 
+    def test_windows_missing_api_binding_fails_closed(self, monkeypatch):
+        self._set_windows(monkeypatch, raises=AttributeError('kernel32 unavailable'))
+        assert is_reparse_point(r'Z:\denied') is True
+
     def test_non_windows_uses_islink(self, monkeypatch):
         monkeypatch.setattr(os, 'name', 'posix')
         monkeypatch.setattr(utils.os.path, 'islink', lambda p: True)
