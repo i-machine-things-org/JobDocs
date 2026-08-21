@@ -63,18 +63,21 @@ def _is_readonly_install() -> bool:
 
     JobDocs Kiosk is a separate installer/product (own AppId, own release
     asset — not a Task checkbox on the main installer): a search-only kiosk
-    build for shared/shop-floor machines. Detected via a marker file its
-    installer drops next to app/runtime/plugins. Windows-only; always False
-    in dev checkouts, Flatpak, and the regular JobDocs install.
+    build for shared/shop-floor machines. Detected via a marker file baked
+    into the Kiosk installer's payload at build time (kiosk_build.marker —
+    see shared.utils.is_kiosk_install()), not one written post-install, so
+    nothing on a running install can be deleted to flip the answer.
+    Windows-only; always False in dev checkouts, Flatpak, and the regular
+    JobDocs install.
 
-    This flag only controls UI chrome and the AppContext persistence guard —
-    the window title, hidden menu bar, and forced "search only" module list
-    (see load_modules() below). It is not itself the containment: the Kiosk
-    build's [Files] selection (build_scripts/JobDocs.iss) never copies
-    write-capable modules to disk in the first place, so deleting this
-    marker on a Kiosk install has nothing to unlock. Real access control
-    for a shared machine still requires a separately managed Windows account
-    with the install directory locked down.
+    This flag controls UI chrome (window title, hidden menu bar, forced
+    "search only" module list — see load_modules() below), the AppContext
+    persistence guard, and get_config_dir()'s directory isolation. It is
+    not the sole containment for module code: the Kiosk build's [Files]
+    selection (build_scripts/JobDocs.iss) never copies write-capable
+    modules to disk in the first place. Real access control for a shared
+    machine still requires a separately managed Windows account with the
+    install directory locked down.
 
     Delegates to shared.utils.is_kiosk_install() — the single source of
     truth, also used by get_config_dir() to isolate Kiosk's settings/
