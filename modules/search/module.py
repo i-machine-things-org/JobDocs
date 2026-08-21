@@ -936,14 +936,24 @@ class SearchModule(BaseModule):
         anything that reaches here anyway by resolving the real path (which
         follows symlinks/junctions, unlike the raw path) and checking
         containment directly (CodeRabbit, PR #315).
+
+        Uses os.path.commonpath() rather than a string-prefix check, and
+        normcase()s both sides first -- Windows paths are case-insensitive
+        and realpath() doesn't normalize case, so "C:\\Foo" and "c:\\foo"
+        must still compare equal. commonpath() raises ValueError for paths
+        on different drives; that's not a match, not an error.
         """
-        real = os.path.realpath(path)
+        real = os.path.normcase(os.path.realpath(path))
         roots = [os.path.realpath(d) for _, d in self._get_customer_files_dirs()]
         roots += [os.path.realpath(d) for _, d in self._get_blueprint_dirs()]
-        return any(
-            real == root or real.startswith(root + os.sep)
-            for root in roots
-        )
+        for root in roots:
+            root = os.path.normcase(root)
+            try:
+                if os.path.commonpath([real, root]) == root:
+                    return True
+            except ValueError:
+                continue  # different drive/mount -- not a match
+        return False
 
     # ==================== Context Menu ====================
 
