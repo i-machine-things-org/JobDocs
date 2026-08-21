@@ -26,8 +26,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QTreeWidgetItem
+from PyQt6.QtWidgets import QApplication, QTreeWidget, QTreeWidgetItem
 
 from core.app_context import AppContext
 from modules.search.module import SearchModule
@@ -199,6 +200,81 @@ def _make_bare_module(app_context: AppContext) -> SearchModule:
     return module
 
 
+class TestPopulateTreeLevelReparsePointFilter:
+    """_populate_tree_level() must exclude reparse points (symlinks,
+    junctions) outright on a read-only install, not follow them — a link
+    under a permitted folder could target the excluded ITAR directory
+    (CodeRabbit, PR #315).
+
+    Mocks _is_reparse_point() directly rather than creating a real
+    symlink/junction, since that requires Developer Mode or elevation on
+    Windows and would otherwise skip on many CI runners — see
+    TestReparsePointExclusionOnReadonly below for a real-symlink test that
+    skips gracefully where unsupported.
+    """
+
+    def _context(self, tmp_path: Path, *, readonly_mode: bool) -> AppContext:
+        return AppContext(
+            settings={},
+            history={},
+            config_dir=tmp_path,
+            save_settings_callback=MagicMock(),
+            save_history_callback=MagicMock(),
+            log_message_callback=MagicMock(),
+            show_error_callback=MagicMock(),
+            show_info_callback=MagicMock(),
+            get_customer_list_callback=MagicMock(return_value=[]),
+            add_to_history_callback=MagicMock(),
+            readonly_mode=readonly_mode,
+        )
+
+    def test_reparse_point_excluded_when_readonly(self, tmp_path):
+        real_dir = tmp_path / 'real_job'
+        real_dir.mkdir()
+        linked_dir = tmp_path / 'linked_job'
+        linked_dir.mkdir()  # stand-in path; _is_reparse_point is mocked below
+
+        app_context = self._context(tmp_path, readonly_mode=True)
+        module = _make_bare_module(app_context)
+        tree = QTreeWidget()
+
+        def fake_is_reparse_point(full_path):
+            return os.path.basename(full_path) == 'linked_job'
+
+        with _patched_search_module_global(
+            '_is_reparse_point', side_effect=fake_is_reparse_point
+        ):
+            module._populate_tree_level(tree.invisibleRootItem(), str(tmp_path))
+
+        root = tree.invisibleRootItem()
+        names = [root.child(i).text(0) for i in range(root.childCount())]
+        assert 'real_job' in names
+        assert 'linked_job' not in names
+
+    def test_reparse_point_included_when_not_readonly(self, tmp_path):
+        real_dir = tmp_path / 'real_job'
+        real_dir.mkdir()
+        linked_dir = tmp_path / 'linked_job'
+        linked_dir.mkdir()
+
+        app_context = self._context(tmp_path, readonly_mode=False)
+        module = _make_bare_module(app_context)
+        tree = QTreeWidget()
+
+        def fake_is_reparse_point(full_path):
+            return os.path.basename(full_path) == 'linked_job'
+
+        with _patched_search_module_global(
+            '_is_reparse_point', side_effect=fake_is_reparse_point
+        ):
+            module._populate_tree_level(tree.invisibleRootItem(), str(tmp_path))
+
+        root = tree.invisibleRootItem()
+        names = [root.child(i).text(0) for i in range(root.childCount())]
+        assert 'real_job' in names
+        assert 'linked_job' in names, "the exclusion is a read-only restriction, not general"
+
+
 class TestItarExclusionFromSearchDirs:
     """A read-only (search-only) install must never search, index, or
     otherwise surface the ITAR customer/blueprint directories — it's meant
@@ -305,9 +381,9 @@ class TestNoFilesystemEscapeOnReadonly:
     the user a pasteable filesystem path — only printing and opening
     individual files in their own viewer are available."""
 
-    def _context(self, tmp_path: Path, *, readonly_mode: bool) -> AppContext:
+    def _context(self, tmp_path: Path, *, readonly_mode: bool, settings: dict = None) -> AppContext:
         return AppContext(
-            settings={},
+            settings=settings or {},
             history={},
             config_dir=tmp_path,
             save_settings_callback=MagicMock(),
@@ -355,10 +431,12 @@ class TestNoFilesystemEscapeOnReadonly:
         module.search_status_label.setText.assert_not_called()
 
     def test_open_item_externally_refuses_directory_when_readonly(self, tmp_path):
-        app_context = self._context(tmp_path, readonly_mode=True)
-        module = _make_bare_module(app_context)
         a_dir = tmp_path / 'subfolder'
         a_dir.mkdir()
+        app_context = self._context(
+            tmp_path, readonly_mode=True, settings={'customer_files_dir': str(tmp_path)}
+        )
+        module = _make_bare_module(app_context)
         item = QTreeWidgetItem()
         item.setData(0, Qt.ItemDataRole.UserRole, str(a_dir))
 
@@ -371,12 +449,15 @@ class TestNoFilesystemEscapeOnReadonly:
         """The external viewer must never see the real customer-directory
         path — its own "Save As" / "Recent Files" would hand it straight
         back to the user, undoing every other kiosk restriction."""
-        app_context = self._context(tmp_path, readonly_mode=True)
-        module = _make_bare_module(app_context)
         source_dir = tmp_path / 'Z_Customer_Files' / 'Acme' / 'job documents'
         source_dir.mkdir(parents=True)
         a_file = source_dir / 'drawing.pdf'
         a_file.write_text('contents')
+        app_context = self._context(
+            tmp_path, readonly_mode=True,
+            settings={'customer_files_dir': str(tmp_path / 'Z_Customer_Files')},
+        )
+        module = _make_bare_module(app_context)
         item = QTreeWidgetItem()
         item.setData(0, Qt.ItemDataRole.UserRole, str(a_file))
 
@@ -394,11 +475,13 @@ class TestNoFilesystemEscapeOnReadonly:
     def test_open_item_externally_fails_closed_on_temp_copy_error(self, tmp_path):
         """If the temp copy can't be made, never fall back to opening the
         real path — that would silently defeat the whole guard."""
-        app_context = self._context(tmp_path, readonly_mode=True)
-        module = _make_bare_module(app_context)
-        module.show_error = MagicMock()
         a_file = tmp_path / 'drawing.pdf'
         a_file.write_text('contents')
+        app_context = self._context(
+            tmp_path, readonly_mode=True, settings={'customer_files_dir': str(tmp_path)}
+        )
+        module = _make_bare_module(app_context)
+        module.show_error = MagicMock()
         item = QTreeWidgetItem()
         item.setData(0, Qt.ItemDataRole.UserRole, str(a_file))
 
@@ -408,6 +491,59 @@ class TestNoFilesystemEscapeOnReadonly:
 
         qds.openUrl.assert_not_called()
         module.show_error.assert_called_once()
+
+    def test_open_item_externally_refuses_path_outside_permitted_roots(self, tmp_path):
+        """A path whose canonical location isn't under any currently
+        configured (non-ITAR) customer/blueprint root must be refused, even
+        if it somehow reached this call — the primary guard is the
+        reparse-point filter in _populate_tree_level(), this is
+        defense-in-depth (CodeRabbit, PR #315)."""
+        customer_dir = tmp_path / 'Z_Customer_Files'
+        customer_dir.mkdir()
+        outside_file = tmp_path / 'itar_customers' / 'secret.pdf'
+        outside_file.parent.mkdir()
+        outside_file.write_text('classified')
+        app_context = self._context(
+            tmp_path, readonly_mode=True, settings={'customer_files_dir': str(customer_dir)},
+        )
+        module = _make_bare_module(app_context)
+        item = QTreeWidgetItem()
+        item.setData(0, Qt.ItemDataRole.UserRole, str(outside_file))
+
+        with _patched_qdesktopservices() as qds:
+            module._open_item_externally(item)
+
+        qds.openUrl.assert_not_called()
+
+    def test_print_selected_folder_files_skips_path_outside_permitted_roots(self, tmp_path):
+        """Printing reads file content just like opening does, so it needs
+        the same permitted-roots check (CodeRabbit, PR #315)."""
+        customer_dir = tmp_path / 'Z_Customer_Files'
+        customer_dir.mkdir()
+        allowed_file = customer_dir / 'drawing.pdf'
+        allowed_file.write_text('ok')
+        outside_file = tmp_path / 'itar_customers' / 'secret.pdf'
+        outside_file.parent.mkdir()
+        outside_file.write_text('classified')
+
+        app_context = self._context(
+            tmp_path, readonly_mode=True, settings={'customer_files_dir': str(customer_dir)},
+        )
+        module = _make_bare_module(app_context)
+        allowed_item = QTreeWidgetItem()
+        allowed_item.setData(0, Qt.ItemDataRole.UserRole, str(allowed_file))
+        outside_item = QTreeWidgetItem()
+        outside_item.setData(0, Qt.ItemDataRole.UserRole, str(outside_file))
+        module.folder_tree = MagicMock(selectedItems=MagicMock(
+            return_value=[allowed_item, outside_item]
+        ))
+
+        with _patched_search_module_global('print_files_with_dialog') as print_dialog:
+            module._print_selected_folder_files()
+
+        print_dialog.assert_called_once()
+        printed_paths = print_dialog.call_args[0][0]
+        assert printed_paths == [str(allowed_file)]
 
     def test_open_item_externally_opens_directory_when_not_readonly(self, tmp_path):
         app_context = self._context(tmp_path, readonly_mode=False)
@@ -421,3 +557,80 @@ class TestNoFilesystemEscapeOnReadonly:
             module._open_item_externally(item)
 
         qds.openUrl.assert_called_once()
+
+
+class TestReparsePointExclusionOnReadonly:
+    """A junction/symlink planted under a permitted customer/blueprint
+    folder can target an arbitrary path, including the excluded ITAR
+    directory. On a read-only (search-only) install, the folder tree must
+    exclude it outright rather than follow it (CodeRabbit, PR #315)."""
+
+    def _context(self, tmp_path: Path, *, readonly_mode: bool, settings: dict = None) -> AppContext:
+        return AppContext(
+            settings=settings or {},
+            history={},
+            config_dir=tmp_path,
+            save_settings_callback=MagicMock(),
+            save_history_callback=MagicMock(),
+            log_message_callback=MagicMock(),
+            show_error_callback=MagicMock(),
+            show_info_callback=MagicMock(),
+            get_customer_list_callback=MagicMock(return_value=[]),
+            add_to_history_callback=MagicMock(),
+            readonly_mode=readonly_mode,
+        )
+
+    def _make_symlinked_layout(self, tmp_path: Path):
+        """Real (non-ITAR) folder with an ordinary subfolder plus a symlink
+        pointing at a separate "secret" folder standing in for ITAR data.
+        Skips the test if this environment won't allow creating a symlink
+        (e.g. no Developer Mode / elevation on this Windows runner)."""
+        customer_dir = tmp_path / 'Z_Customer_Files' / 'Acme'
+        customer_dir.mkdir(parents=True)
+        real_subdir = customer_dir / 'real_job'
+        real_subdir.mkdir()
+        (real_subdir / 'drawing.pdf').write_text('ok')
+
+        secret_target = tmp_path / 'itar_customers' / 'secret_job'
+        secret_target.mkdir(parents=True)
+        (secret_target / 'classified.pdf').write_text('secret')
+
+        link_path = customer_dir / 'linked_job'
+        try:
+            os.symlink(secret_target, link_path, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlink creation not permitted in this environment")
+        return customer_dir, real_subdir, link_path
+
+    def test_symlinked_subdirectory_excluded_from_readonly_tree(self, tmp_path):
+        customer_dir, real_subdir, link_path = self._make_symlinked_layout(tmp_path)
+        app_context = self._context(
+            tmp_path, readonly_mode=True,
+            settings={'customer_files_dir': str(customer_dir.parent)},
+        )
+        module = _make_bare_module(app_context)
+        tree = QTreeWidget()
+
+        module._populate_tree_level(tree.invisibleRootItem(), str(customer_dir))
+
+        root = tree.invisibleRootItem()
+        names = [root.child(i).text(0) for i in range(root.childCount())]
+        assert 'real_job' in names, "an ordinary subfolder must still show up"
+        assert 'linked_job' not in names, "a symlinked subfolder must be excluded, not followed"
+
+    def test_symlinked_subdirectory_included_when_not_readonly(self, tmp_path):
+        """The exclusion is a read-only (kiosk) restriction, not a general
+        one — the full app has no ITAR-exclusion concern to defend here."""
+        customer_dir, real_subdir, link_path = self._make_symlinked_layout(tmp_path)
+        app_context = self._context(
+            tmp_path, readonly_mode=False,
+            settings={'customer_files_dir': str(customer_dir.parent)},
+        )
+        module = _make_bare_module(app_context)
+        tree = QTreeWidget()
+
+        module._populate_tree_level(tree.invisibleRootItem(), str(customer_dir))
+
+        root = tree.invisibleRootItem()
+        names = [root.child(i).text(0) for i in range(root.childCount())]
+        assert 'linked_job' in names

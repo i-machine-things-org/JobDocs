@@ -68,6 +68,23 @@ def _is_hidden_file(full_path: str, name: str) -> bool:
     return False
 
 
+def _is_reparse_point(full_path: str) -> bool:
+    """True for a symlink or (Windows) NTFS junction/mount point.
+
+    A directory link planted under a permitted customer/blueprint folder
+    can target an arbitrary path, including an excluded ITAR directory —
+    read-only tree traversal must not follow it, and _open_item_externally()
+    must not copy/open through it either (CodeRabbit, PR #315).
+    """
+    try:
+        attrs = ctypes.windll.kernel32.GetFileAttributesW(full_path)
+        if attrs != -1 and (attrs & 0x400):  # FILE_ATTRIBUTE_REPARSE_POINT
+            return True
+    except (AttributeError, OSError):
+        pass
+    return os.path.islink(full_path)
+
+
 class SearchWorker(QThread):
     """Background worker for performing searches without blocking UI"""
 
@@ -909,6 +926,25 @@ class SearchModule(BaseModule):
                 dirs.append((prefix, d))
         return dirs
 
+    def _is_within_permitted_roots(self, path: str) -> bool:
+        """True if path's canonical location is under a currently non-ITAR
+        customer/blueprint root.
+
+        Defense-in-depth for _open_item_externally(): the reparse-point
+        filter in _populate_tree_level() is the primary guard against a
+        junction/symlink escaping a permitted folder, but this catches
+        anything that reaches here anyway by resolving the real path (which
+        follows symlinks/junctions, unlike the raw path) and checking
+        containment directly (CodeRabbit, PR #315).
+        """
+        real = os.path.realpath(path)
+        roots = [os.path.realpath(d) for _, d in self._get_customer_files_dirs()]
+        roots += [os.path.realpath(d) for _, d in self._get_blueprint_dirs()]
+        return any(
+            real == root or real.startswith(root + os.sep)
+            for root in roots
+        )
+
     # ==================== Context Menu ====================
 
     def show_search_context_menu(self, pos):
@@ -1029,14 +1065,26 @@ class SearchModule(BaseModule):
 
     def _populate_tree_level(self, parent_item, dir_path: str):
         """Read one level of dir_path and add children to parent_item.
-        Subdirectories get a placeholder child so Qt shows the expand arrow."""
+        Subdirectories get a placeholder child so Qt shows the expand arrow.
+
+        On a read-only (search-only) install, symlinks/junctions are
+        excluded entirely rather than followed — one planted under a
+        permitted customer/blueprint folder could otherwise point at the
+        excluded ITAR directory (or anywhere else) and bypass the
+        exclusion (CodeRabbit, PR #315).
+        """
         try:
             raw = os.listdir(dir_path)
         except OSError:
             return
 
+        readonly = self.app_context.is_readonly()
         entries = sorted(
-            [n for n in raw if not _is_hidden_file(os.path.join(dir_path, n), n)],
+            [
+                n for n in raw
+                if not _is_hidden_file(os.path.join(dir_path, n), n)
+                and not (readonly and _is_reparse_point(os.path.join(dir_path, n)))
+            ],
             key=lambda n: (not os.path.isdir(os.path.join(dir_path, n)), n.lower()),
         )
 
@@ -1094,6 +1142,11 @@ class SearchModule(BaseModule):
         _cleanup_kiosk_view_tmp_dirs for why cleanup happens at app exit
         rather than "when the viewer closes" — QDesktopServices hands off
         to the OS shell association, not a process JobDocs can track.
+
+        Also refuses a path whose canonical location resolves outside the
+        currently permitted (non-ITAR) roots — see
+        _is_within_permitted_roots() — as defense-in-depth against a
+        symlink/junction that reached this far anyway (CodeRabbit, PR #315).
         """
         if item is None:
             return
@@ -1101,6 +1154,8 @@ class SearchModule(BaseModule):
         if not path or not os.path.exists(path):
             return
         readonly = self.app_context.is_readonly()
+        if readonly and not self._is_within_permitted_roots(path):
+            return
         if readonly and os.path.isdir(path):
             return
         if readonly and os.path.isfile(path):
@@ -1164,12 +1219,19 @@ class SearchModule(BaseModule):
         menu.exec(self.folder_tree.viewport().mapToGlobal(pos))
 
     def _print_selected_folder_files(self):
-        """Print all selected files from the folder tree."""
-        paths = [
-            item.data(0, Qt.ItemDataRole.UserRole)
-            for item in self.folder_tree.selectedItems()
-            if os.path.isfile(item.data(0, Qt.ItemDataRole.UserRole) or '')
-        ]
+        """Print all selected files from the folder tree.
+
+        Same permitted-roots check as _open_item_externally() on a
+        read-only (search-only) install — printing reads file content just
+        like opening does, so it needs the same defense-in-depth against a
+        symlink/junction that reached the tree anyway (CodeRabbit, PR #315).
+        """
+        readonly = self.app_context.is_readonly()
+        paths = []
+        for item in self.folder_tree.selectedItems():
+            p = item.data(0, Qt.ItemDataRole.UserRole)
+            if p and os.path.isfile(p) and (not readonly or self._is_within_permitted_roots(p)):
+                paths.append(p)
         if paths:
             print_files_with_dialog(paths, self._widget, self.app_context)
 

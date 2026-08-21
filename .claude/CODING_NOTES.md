@@ -35,6 +35,7 @@
 - **Don't remove a lazy-construction item from its pending/retry tracking dict until the build actually succeeds.** Popping before the `try` around `get_widget()` permanently bricks that tab as a blank placeholder if construction fails once; pop only in the success path so a later click can retry.
 - **Track a lazily-built widget's "is it built" state with an explicit flag the caller sets, not by inferring it from the module's own internal caching.** A `get_widget()` contract only promises a returned `QWidget`, not that the implementation caches it to `self._widget` — a plugin that builds fresh each call would always read as "not built" otherwise.
 - **Defer a sub-tab's expensive data load until it's actually shown.** `refresh_job_tree`/`refresh_quote_tree` used to walk the whole customer directory tree as soon as the widget was built (via the `populate_*_customer_list` dynamic dispatch). Gate the walk on `<sub_tab_widget>.currentWidget() is <target_tab>`, set a stale flag when skipped, and flush it from `currentChanged` when the tab becomes active.
+- **Excluding a directory from search/indexing isn't enough if the UI also lets a user browse into an arbitrary subfolder.** (CodeRabbit, PR #315) A junction/symlink under a permitted folder can target the excluded directory; `os.listdir`/`isdir` follow it transparently. Reject reparse points during traversal, and re-check the canonical (`realpath`) path against permitted roots at every open/copy/print, not just at discovery.
 
 ## Qt / PyQt6 UI Patterns
 
