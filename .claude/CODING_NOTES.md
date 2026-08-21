@@ -116,6 +116,7 @@
 - **Add a stable-ancestry guard on tag-triggered release workflows.** Verify the tag's commit is an ancestor of the correct branch before building/releasing.
 - **Order artifact upload before any signing step.** The signing action reads from an already-uploaded artifact.
 - **Pin the pip bootstrap; don't rely on `-latest` runner images.** Use `actions/setup-python` with a pinned version and a pinned `pip==` release for reproducible builds.
+- **`ci.yml`'s "Tests" job runs on `ubuntu-latest`, not Windows** — the only job that runs `pytest` at all; `Build (Windows)` never does. A test asserting Windows-only `os.path` semantics (drive letters, `\` separators, case-insensitivity) with a hardcoded `r'C:\...'` literal silently exercises meaningless `posixpath` behavior there instead of failing loudly — verify locally with the real thing (WSL, or `platform.system()`) before trusting it passed for the intended reason. Build such tests on real `tmp_path` dirs (portable) and `@pytest.mark.skipif(os.name != 'nt', ...)` the genuinely OS-only cases.
 
 ## Plugins & Dynamic Loading
 
