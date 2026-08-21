@@ -206,9 +206,17 @@ class TestIsWithinPermittedRootsEdgeCases:
     comparison CodeRabbit flagged as Windows-unsafe: case-insensitivity,
     drive-letter mismatches, and trailing separators (PR #315).
 
-    Uses literal Windows-style paths rather than real files — realpath()
-    normalizes a nonexistent path without requiring it to exist, so this
-    doesn't need actual multi-drive filesystem access to test.
+    CI's "Tests" job runs on ubuntu-latest, so os.path is posixpath there —
+    it has no concept of drive letters or backslash separators, and
+    normcase() is a no-op. Tests for those specifically-Windows behaviors
+    are skipped off Windows rather than faked with literal "C:\\..." strings,
+    which posixpath would treat as a single opaque filename with no
+    separators at all (that's what broke this class in CI the first time:
+    two tests asserted Windows-only semantics using literal path strings and
+    silently exercised meaningless posixpath behavior instead). Tests for
+    the platform-independent parts of the fix (rejecting a same-prefix
+    sibling, honoring a trailing separator on the configured root) use real
+    tmp_path directories so they mean the same thing on either OS.
     """
 
     def _module(self, customer_dirs=(), blueprint_dirs=()):
@@ -217,10 +225,12 @@ class TestIsWithinPermittedRootsEdgeCases:
         module._get_blueprint_dirs = MagicMock(return_value=list(blueprint_dirs))
         return module
 
+    @pytest.mark.skipif(os.name != 'nt', reason="case-insensitive paths are a Windows-only concept")
     def test_matches_regardless_of_case(self):
         module = self._module(customer_dirs=[('', r'C:\Customers')])
         assert module._is_within_permitted_roots(r'c:\CUSTOMERS\Acme\job.pdf') is True
 
+    @pytest.mark.skipif(os.name != 'nt', reason="drive letters are a Windows-only concept")
     def test_different_drive_is_not_a_match(self):
         """A configured root on C: must not "contain" a path on D: — must
         not raise, either (os.path.commonpath() raises ValueError for
@@ -228,19 +238,28 @@ class TestIsWithinPermittedRootsEdgeCases:
         module = self._module(customer_dirs=[('', r'C:\Customers')])
         assert module._is_within_permitted_roots(r'D:\Customers\Acme\job.pdf') is False
 
-    def test_trailing_separator_on_configured_root_still_matches(self):
-        module = self._module(customer_dirs=[('', r'C:\Customers' + '\\')])
-        assert module._is_within_permitted_roots(r'C:\Customers\Acme\job.pdf') is True
+    def test_trailing_separator_on_configured_root_still_matches(self, tmp_path):
+        customer_dir = tmp_path / 'Customers'
+        customer_dir.mkdir()
+        module = self._module(customer_dirs=[('', str(customer_dir) + os.sep)])
+        allowed_path = str(customer_dir / 'Acme' / 'job.pdf')
+        assert module._is_within_permitted_roots(allowed_path) is True
 
-    def test_sibling_directory_with_shared_prefix_is_not_a_match(self):
-        """C:\\Customers2 must not read as "inside" C:\\Customers just
-        because the strings share a prefix."""
-        module = self._module(customer_dirs=[('', r'C:\Customers')])
-        assert module._is_within_permitted_roots(r'C:\Customers2\Acme\job.pdf') is False
+    def test_sibling_directory_with_shared_prefix_is_not_a_match(self, tmp_path):
+        """"Customers2" must not read as "inside" "Customers" just because
+        the strings share a prefix — the bug a naive str.startswith() check
+        had before this fix (CodeRabbit, PR #315)."""
+        customer_dir = tmp_path / 'Customers'
+        customer_dir.mkdir()
+        sibling_dir = tmp_path / 'Customers2'
+        sibling_dir.mkdir()
+        module = self._module(customer_dirs=[('', str(customer_dir))])
+        outside_path = str(sibling_dir / 'Acme' / 'job.pdf')
+        assert module._is_within_permitted_roots(outside_path) is False
 
-    def test_no_configured_roots_matches_nothing(self):
+    def test_no_configured_roots_matches_nothing(self, tmp_path):
         module = self._module()
-        assert module._is_within_permitted_roots(r'C:\Customers\Acme\job.pdf') is False
+        assert module._is_within_permitted_roots(str(tmp_path / 'Customers' / 'Acme' / 'job.pdf')) is False
 
 
 class TestPopulateTreeLevelReparsePointFilter:
