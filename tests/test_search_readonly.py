@@ -31,7 +31,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QTreeWidget, QTreeWidgetItem
 
 from core.app_context import AppContext
-from modules.search.module import SearchModule
+from modules.search.module import SearchModule, SearchWorker
 
 
 # QApplication.clipboard() requires a live QApplication instance. Constructed
@@ -268,14 +268,14 @@ class TestPopulateTreeLevelReparsePointFilter:
     under a permitted folder could target the excluded ITAR directory
     (CodeRabbit, PR #315).
 
-    Mocks _is_reparse_point() directly rather than creating a real
+    Mocks is_reparse_point() directly rather than creating a real
     symlink/junction, since that requires Developer Mode or elevation on
     Windows and would otherwise skip on many CI runners — see
     TestReparsePointExclusionOnReadonly below for a real-symlink test that
     skips gracefully where unsupported.
     """
 
-    def _context(self, tmp_path: Path, *, readonly_mode: bool, settings: dict = None) -> AppContext:
+    def _context(self, tmp_path: Path, *, readonly_mode: bool, settings: dict | None = None) -> AppContext:
         return AppContext(
             settings=settings or {},
             history={},
@@ -294,7 +294,7 @@ class TestPopulateTreeLevelReparsePointFilter:
         real_dir = tmp_path / 'real_job'
         real_dir.mkdir()
         linked_dir = tmp_path / 'linked_job'
-        linked_dir.mkdir()  # stand-in path; _is_reparse_point is mocked below
+        linked_dir.mkdir()  # stand-in path; is_reparse_point is mocked below
 
         app_context = self._context(
             tmp_path, readonly_mode=True, settings={'customer_files_dir': str(tmp_path)}
@@ -306,7 +306,7 @@ class TestPopulateTreeLevelReparsePointFilter:
             return os.path.basename(full_path) == 'linked_job'
 
         with _patched_search_module_global(
-            '_is_reparse_point', side_effect=fake_is_reparse_point
+            'is_reparse_point', side_effect=fake_is_reparse_point
         ):
             module._populate_tree_level(tree.invisibleRootItem(), str(tmp_path))
 
@@ -333,7 +333,7 @@ class TestPopulateTreeLevelReparsePointFilter:
         module = _make_bare_module(app_context)
         tree = QTreeWidget()
 
-        with _patched_search_module_global('_is_reparse_point', return_value=True):
+        with _patched_search_module_global('is_reparse_point', return_value=True):
             module._populate_tree_level(tree.invisibleRootItem(), str(linked_root))
 
         assert tree.invisibleRootItem().childCount() == 0, \
@@ -374,7 +374,7 @@ class TestPopulateTreeLevelReparsePointFilter:
             return os.path.basename(full_path) == 'linked_job'
 
         with _patched_search_module_global(
-            '_is_reparse_point', side_effect=fake_is_reparse_point
+            'is_reparse_point', side_effect=fake_is_reparse_point
         ):
             module._populate_tree_level(tree.invisibleRootItem(), str(tmp_path))
 
@@ -490,7 +490,7 @@ class TestNoFilesystemEscapeOnReadonly:
     the user a pasteable filesystem path — only printing and opening
     individual files in their own viewer are available."""
 
-    def _context(self, tmp_path: Path, *, readonly_mode: bool, settings: dict = None) -> AppContext:
+    def _context(self, tmp_path: Path, *, readonly_mode: bool, settings: dict | None = None) -> AppContext:
         return AppContext(
             settings=settings or {},
             history={},
@@ -674,7 +674,7 @@ class TestReparsePointExclusionOnReadonly:
     directory. On a read-only (search-only) install, the folder tree must
     exclude it outright rather than follow it (CodeRabbit, PR #315)."""
 
-    def _context(self, tmp_path: Path, *, readonly_mode: bool, settings: dict = None) -> AppContext:
+    def _context(self, tmp_path: Path, *, readonly_mode: bool, settings: dict | None = None) -> AppContext:
         return AppContext(
             settings=settings or {},
             history={},
@@ -743,3 +743,70 @@ class TestReparsePointExclusionOnReadonly:
         root = tree.invisibleRootItem()
         names = [root.child(i).text(0) for i in range(root.childCount())]
         assert 'linked_job' in names
+
+
+class TestStrictSearchExcludesReparsePointCustomers:
+    """SearchWorker._strict_search()'s own customer-listing loop must also
+    exclude reparse points on a read-only install. find_job_folders()'s own
+    entry-point guard only protects a "customer" path once it's already
+    been constructed and passed in — this is the earlier listing that
+    builds that path in the first place, and os.walk()'s followlinks=False
+    default doesn't help here since a customer-level link would be the
+    walk's own starting point, not something encountered mid-walk
+    (CodeRabbit, PR #315)."""
+
+    def _context(self, tmp_path: Path, *, readonly_mode: bool, settings: dict) -> AppContext:
+        return AppContext(
+            settings=settings,
+            history={},
+            config_dir=tmp_path,
+            save_settings_callback=MagicMock(),
+            save_history_callback=MagicMock(),
+            log_message_callback=MagicMock(),
+            show_error_callback=MagicMock(),
+            show_info_callback=MagicMock(),
+            get_customer_list_callback=MagicMock(return_value=[]),
+            add_to_history_callback=MagicMock(),
+            readonly_mode=readonly_mode,
+        )
+
+    def _run_strict_search(self, base_dir: str, app_context: AppContext) -> list:
+        worker = SearchWorker(
+            dirs_to_search=[('', base_dir)],
+            search_term='', strict_mode=True,
+            search_customer=True, search_job=False, search_desc=False, search_drawing=False,
+            app_context=app_context,
+        )
+        results = []
+        worker.result_found.connect(results.append)
+        with _patched_search_module_global(
+            'is_reparse_point', side_effect=lambda p: os.path.basename(p) == 'LinkedCustomer'
+        ):
+            worker._strict_search()
+        return results
+
+    def test_reparse_point_customer_excluded_when_readonly(self, tmp_path):
+        base_dir = tmp_path / 'Z_Customer_Files'
+        (base_dir / 'Acme' / '10001_Widget').mkdir(parents=True)
+        (base_dir / 'LinkedCustomer' / '99999_Secret').mkdir(parents=True)
+
+        app_context = self._context(
+            tmp_path, readonly_mode=True, settings={'customer_files_dir': str(base_dir)},
+        )
+        results = self._run_strict_search(str(base_dir), app_context)
+
+        customers = {r['customer'] for r in results}
+        assert 'Acme' in customers
+        assert 'LinkedCustomer' not in customers
+
+    def test_reparse_point_customer_included_when_not_readonly(self, tmp_path):
+        base_dir = tmp_path / 'Z_Customer_Files'
+        (base_dir / 'LinkedCustomer' / '99999_Secret').mkdir(parents=True)
+
+        app_context = self._context(
+            tmp_path, readonly_mode=False, settings={'customer_files_dir': str(base_dir)},
+        )
+        results = self._run_strict_search(str(base_dir), app_context)
+
+        customers = {r['customer'] for r in results}
+        assert 'LinkedCustomer' in customers

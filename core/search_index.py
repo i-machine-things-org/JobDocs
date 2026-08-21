@@ -16,6 +16,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
+from shared.utils import is_reparse_point
+
 logger = logging.getLogger(__name__)
 
 _SCHEMA = """
@@ -365,6 +367,8 @@ class SearchIndex:
                 return
             bp_prefixes_seen.add(prefix)
 
+        readonly = app_context.is_readonly()
+
         try:
             with closing(self._connect()) as conn, conn:
                 # Purge rows for prefixes that are no longer in config so stale
@@ -413,6 +417,7 @@ class SearchIndex:
                         customers = [
                             d for d in os.listdir(base_dir)
                             if os.path.isdir(os.path.join(base_dir, d))
+                            and not (readonly and is_reparse_point(os.path.join(base_dir, d)))
                         ]
                     except OSError:
                         continue
@@ -623,6 +628,7 @@ class SearchIndex:
                         customers = [
                             d for d in os.listdir(base_dir)
                             if os.path.isdir(os.path.join(base_dir, d))
+                            and not (readonly and is_reparse_point(os.path.join(base_dir, d)))
                         ]
                     except OSError:
                         continue
@@ -756,6 +762,14 @@ class SearchIndex:
         prev_containers staleness check. bp coverage reuses its single-row
         recursive mtime check since update() indexes each bp customer as one
         unit. Only os.listdir()/getmtime() calls, no directory walk of its own.
+
+        Doesn't exclude reparse-point "customer" entries the way update()
+        and find_job_folders()/find_quote_folders() now do (CodeRabbit, PR
+        #315) — this method only decides whether to trust the index or fall
+        back to a live scan, via mtime checks; it never reads or exposes
+        file content/names itself, and doesn't take app_context (so it has
+        no is_readonly() to gate on without a signature change touching ~20
+        call sites). Left out of that fix's scope on that basis.
         """
         try:
             with closing(self._connect(timeout=2.0)) as conn:

@@ -4,6 +4,7 @@ Shared utility functions for JobDocs
 Common helper functions used across multiple modules.
 """
 
+import ctypes
 import json
 import logging
 import os
@@ -92,6 +93,24 @@ def atomic_write_json(path: Path, data: Any) -> None:
         # the leftover temp file if the write or replace failed partway.
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+def is_reparse_point(full_path: str) -> bool:
+    """True for a symlink or (Windows) NTFS junction/mount point.
+
+    Shared by modules/search/module.py (folder-tree traversal) and
+    AppContext.find_job_folders()/find_quote_folders() (live search and
+    indexing) so a link planted under a permitted customer/blueprint
+    directory can't be used to reach an excluded ITAR directory through any
+    of those paths (CodeRabbit, PR #315).
+    """
+    try:
+        attrs = ctypes.windll.kernel32.GetFileAttributesW(full_path)
+        if attrs != -1 and (attrs & 0x400):  # FILE_ATTRIBUTE_REPARSE_POINT
+            return True
+    except (AttributeError, OSError):
+        pass
+    return os.path.islink(full_path)
 
 
 def is_kiosk_install() -> bool:
