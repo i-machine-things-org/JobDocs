@@ -61,14 +61,22 @@ Source: "..\windows\icon.ico";     DestDir: "{app}"; Flags: ignoreversion
 #ifdef KIOSK
 ; JobDocs Kiosk: only the files the Search module and its shared/core
 ; dependencies need. Bulk, Job, Quote, Settings, etc. are never copied, so
-; there is no write-capable module code to unlock even if readonly.marker
-; is later deleted -- see main.py's _is_readonly_install().
+; there is no write-capable module code to unlock -- see main.py's
+; _is_readonly_install().
 Source: "..\app\main.py";              DestDir: "{app}\app";                 Flags: ignoreversion
 Source: "..\app\core\*";               DestDir: "{app}\app\core";            Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\app\shared\*";             DestDir: "{app}\app\shared";          Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\app\JobDocs.iconset\*";    DestDir: "{app}\app\JobDocs.iconset"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\app\modules\__init__.py";  DestDir: "{app}\app\modules";         Flags: ignoreversion
 Source: "..\app\modules\search\*";     DestDir: "{app}\app\modules\search";  Flags: ignoreversion recursesubdirs createallsubdirs
+; Build-time Kiosk identity: baked into the installer payload here, not
+; written by a post-install script, so it can't be deleted the way
+; readonly.marker used to be (CodeRabbit, PR #315). shared.utils.
+; is_kiosk_install() checks for its presence -- the single source of truth
+; for get_config_dir()'s Kiosk-suffixed directory and main.py's read-only
+; persistence guard, so both stay correct even if a user goes looking for
+; something to delete to "unlock" the app.
+Source: "kiosk_build.marker";          DestDir: "{app}\app\shared";          Flags: ignoreversion
 #else
 ; Full Python source tree, every module (runs via runtime\pythonw.exe).
 Source: "..\app\*";                    DestDir: "{app}\app";                 Flags: ignoreversion recursesubdirs createallsubdirs
@@ -223,14 +231,6 @@ begin
     AddToPath(ExpandConstant('{app}'));
 
 #ifdef KIOSK
-    { Drop a marker file the app itself reads at startup to switch into
-      read-only (search-only) mode (window title, hidden menu bar, and the
-      AppContext persistence guard -- see main.py). The real containment is
-      the [Files] selection above: JobDocs Kiosk never has the
-      write-capable modules on disk, so deleting this marker unlocks
-      nothing that isn't already there. }
-    SaveStringToFile(ExpandConstant('{app}\readonly.marker'), 'search-only' + #13#10, False);
-
     { main.py's AppContext.load_settings() reads this and overrides the
       four directory settings on every launch -- the actual source of
       truth for a Kiosk install, since it has no UI to edit settings.json

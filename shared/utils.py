@@ -98,11 +98,21 @@ def is_kiosk_install() -> bool:
     """True when running as JobDocs Kiosk — see build_scripts/JobDocs.iss.
 
     Single source of truth for this check: main.py's _is_readonly_install()
-    delegates here rather than duplicating the marker-file detection, and
+    delegates here rather than duplicating the detection, and
     get_config_dir() below uses it to keep Kiosk's settings/history/search
     index isolated from a regular JobDocs install on the same machine.
     Windows-only; always False in dev checkouts, Flatpak, and a regular
     JobDocs install.
+
+    Checks for kiosk_build.marker, which the Kiosk installer's [Files]
+    section bakes into the install payload at build time (`iscc /DKIOSK`).
+    An earlier version checked a marker file the installer wrote via a
+    post-install script instead, which meant deleting it after install
+    silently switched get_config_dir() to the full app's directory and
+    disabled the AppContext persistence guard — not just the cosmetic
+    window title/menu bar it was assumed to control (CodeRabbit, PR #315).
+    Baking the check into the install payload itself closes that: nothing
+    a user can delete post-install changes the answer.
     """
     if os.getenv('FLATPAK_ID'):
         return False
@@ -111,7 +121,7 @@ def is_kiosk_install() -> bool:
     app_dir = Path(__file__).resolve().parent.parent
     if not (app_dir.parent / 'runtime').is_dir():
         return False  # dev checkout, not an embedded install
-    return (app_dir.parent / 'readonly.marker').exists()
+    return (app_dir / 'shared' / 'kiosk_build.marker').exists()
 
 
 def get_config_dir() -> Path:

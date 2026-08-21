@@ -57,11 +57,12 @@ Each installer offers:
 Both options add the app's exe to `PATH` so it is callable from any terminal.
 
 JobDocs Kiosk's file-level restriction is a UI/footprint measure, not account-level access
-control — the same Windows account running it can still delete its `readonly.marker`
-file, which only re-enables the menu bar and window title (there are no write-capable
-modules present to load either way). To actually restrict what a shared machine's user
-can do (e.g. prevent them from installing the full app themselves), run it under a
-separately managed Windows account with the installation directory locked down.
+control — the same Windows account running it could still install the full app itself
+alongside it (there are no write-capable modules present in the Kiosk install to load
+either way, and Kiosk detection is a marker baked into the installer payload at build
+time, not a file it writes and a user could delete afterward). To actually restrict what
+a shared machine's user can do, run it under a separately managed Windows account with
+the installation directory locked down.
 
 JobDocs Kiosk has no Settings dialog and no first-run setup wizard (both are write-capable
 admin tools, so neither is installed) — the JobDocs Kiosk installer itself prompts for the
