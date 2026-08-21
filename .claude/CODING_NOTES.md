@@ -24,6 +24,7 @@
 - **`tempfile.mkstemp()` hardcodes `0o600` on POSIX, ignoring umask.** After `os.replace()` swaps it into place, this silently narrows a shared file's permissions. `os.chmod()` the temp file first — to the original file's mode if it exists, else `0o666 & ~umask` — before replacing. Also `os.fsync(fd)` before `os.replace()`: the rename alone is torn-write-safe but not crash-durable.
 - **Probe umask with a throwaway file, not `os.umask()`.** `os.umask()` briefly mutates the process-wide mask to read it, racing any other thread creating a file in that window. Create a uniquely-named file with `O_CREAT|O_EXCL` and inspect its resulting mode instead.
 - **Check `create_file_link`'s boolean return at every call site.** It returns `False` on failure instead of raising; ignoring it (or incrementing a success counter unconditionally) reports failed links as successful adds in a windowed GUI app with no visible console.
+- **Don't check path containment with `str.startswith()`.** (CodeRabbit, PR #315) Windows paths are case-insensitive and `realpath()` doesn't normalize case. Use `os.path.normcase()` on both sides, then `os.path.commonpath([a, b]) == b`; catch `ValueError` (raised for paths on different drives) and treat it as "not contained," not an error.
 
 ## ITAR / Filter Consistency (JobDocs)
 

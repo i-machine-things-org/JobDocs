@@ -200,6 +200,49 @@ def _make_bare_module(app_context: AppContext) -> SearchModule:
     return module
 
 
+class TestIsWithinPermittedRootsEdgeCases:
+    """Direct coverage for _is_within_permitted_roots()'s os.path.commonpath()
+    -based containment check, which replaced an earlier string-prefix
+    comparison CodeRabbit flagged as Windows-unsafe: case-insensitivity,
+    drive-letter mismatches, and trailing separators (PR #315).
+
+    Uses literal Windows-style paths rather than real files — realpath()
+    normalizes a nonexistent path without requiring it to exist, so this
+    doesn't need actual multi-drive filesystem access to test.
+    """
+
+    def _module(self, customer_dirs=(), blueprint_dirs=()):
+        module = _make_bare_module(MagicMock())
+        module._get_customer_files_dirs = MagicMock(return_value=list(customer_dirs))
+        module._get_blueprint_dirs = MagicMock(return_value=list(blueprint_dirs))
+        return module
+
+    def test_matches_regardless_of_case(self):
+        module = self._module(customer_dirs=[('', r'C:\Customers')])
+        assert module._is_within_permitted_roots(r'c:\CUSTOMERS\Acme\job.pdf') is True
+
+    def test_different_drive_is_not_a_match(self):
+        """A configured root on C: must not "contain" a path on D: — must
+        not raise, either (os.path.commonpath() raises ValueError for
+        cross-drive inputs; that means no match, not a crash)."""
+        module = self._module(customer_dirs=[('', r'C:\Customers')])
+        assert module._is_within_permitted_roots(r'D:\Customers\Acme\job.pdf') is False
+
+    def test_trailing_separator_on_configured_root_still_matches(self):
+        module = self._module(customer_dirs=[('', r'C:\Customers' + '\\')])
+        assert module._is_within_permitted_roots(r'C:\Customers\Acme\job.pdf') is True
+
+    def test_sibling_directory_with_shared_prefix_is_not_a_match(self):
+        """C:\\Customers2 must not read as "inside" C:\\Customers just
+        because the strings share a prefix."""
+        module = self._module(customer_dirs=[('', r'C:\Customers')])
+        assert module._is_within_permitted_roots(r'C:\Customers2\Acme\job.pdf') is False
+
+    def test_no_configured_roots_matches_nothing(self):
+        module = self._module()
+        assert module._is_within_permitted_roots(r'C:\Customers\Acme\job.pdf') is False
+
+
 class TestPopulateTreeLevelReparsePointFilter:
     """_populate_tree_level() must exclude reparse points (symlinks,
     junctions) outright on a read-only install, not follow them — a link
