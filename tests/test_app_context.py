@@ -3,6 +3,7 @@
 import logging
 import os
 
+import core.app_context as app_context_module
 from core.app_context import AppContext
 
 
@@ -70,6 +71,72 @@ class TestPersistenceReadonlyGuard:
         ctx, calls = _make_readonly_context(readonly_mode=False)
         ctx.save_history()
         assert calls['history'] == 1
+
+
+def _make_readonly_search_context(structure='{customer}/{job_folder}'):
+    return AppContext(
+        settings={'job_folder_structure': structure},
+        history={},
+        config_dir=None,
+        save_settings_callback=lambda: None,
+        save_history_callback=lambda: None,
+        log_message_callback=lambda *a: None,
+        show_error_callback=lambda *a: None,
+        show_info_callback=lambda *a: None,
+        get_customer_list_callback=lambda: [],
+        add_to_history_callback=lambda *a: None,
+        readonly_mode=True,
+    )
+
+
+class TestFindFoldersRejectsReparsePointCustomer:
+    """A junction/symlink standing in for customer_path could target an
+    excluded ITAR directory. find_job_folders()/find_quote_folders() refuse
+    it outright on a read-only install — defense-in-depth alongside the
+    caller-side customer-listing filters in SearchWorker._strict_search()
+    and SearchIndex.update() (CodeRabbit, PR #315)."""
+
+    def test_find_job_folders_returns_empty_for_reparse_point_when_readonly(
+        self, tmp_path, monkeypatch
+    ):
+        customer_path = tmp_path / 'LinkedCustomer'
+        (customer_path / '10001').mkdir(parents=True)
+        monkeypatch.setattr(app_context_module, 'is_reparse_point', lambda p: True)
+
+        ctx = _make_readonly_search_context()
+
+        assert ctx.find_job_folders(str(customer_path)) == []
+
+    def test_find_job_folders_still_works_for_real_dir_when_readonly(self, tmp_path, monkeypatch):
+        customer_path = tmp_path / 'RealCustomer'
+        (customer_path / '10001').mkdir(parents=True)
+        monkeypatch.setattr(app_context_module, 'is_reparse_point', lambda p: False)
+
+        ctx = _make_readonly_search_context()
+
+        assert ctx.find_job_folders(str(customer_path)) == [('10001', str(customer_path / '10001'))]
+
+    def test_find_job_folders_ignores_reparse_points_when_not_readonly(self, tmp_path, monkeypatch):
+        """The guard is a read-only (kiosk) restriction, not a general one —
+        the full app has no ITAR-exclusion concern to defend here."""
+        customer_path = tmp_path / 'LinkedCustomer'
+        (customer_path / '10001').mkdir(parents=True)
+        monkeypatch.setattr(app_context_module, 'is_reparse_point', lambda p: True)
+
+        ctx = _make_context()
+
+        assert ctx.find_job_folders(str(customer_path)) == [('10001', str(customer_path / '10001'))]
+
+    def test_find_quote_folders_returns_empty_for_reparse_point_when_readonly(
+        self, tmp_path, monkeypatch
+    ):
+        customer_path = tmp_path / 'LinkedCustomer'
+        (customer_path / 'Quotes' / 'Q1001').mkdir(parents=True)
+        monkeypatch.setattr(app_context_module, 'is_reparse_point', lambda p: True)
+
+        ctx = _make_readonly_search_context()
+
+        assert ctx.find_quote_folders(str(customer_path)) == []
 
 
 class TestFindQuoteFoldersLogsOnError:

@@ -30,7 +30,7 @@ from PyQt6 import uic
 
 from core.base_module import BaseModule
 from core.search_index import SearchIndex, _parse_job_folder
-from shared.utils import open_folder, get_config_dir
+from shared.utils import open_folder, get_config_dir, is_reparse_point
 from shared.widgets import print_files_with_dialog
 
 logger = logging.getLogger(__name__)
@@ -66,23 +66,6 @@ def _is_hidden_file(full_path: str, name: str) -> bool:
     except (AttributeError, OSError):
         pass
     return False
-
-
-def _is_reparse_point(full_path: str) -> bool:
-    """True for a symlink or (Windows) NTFS junction/mount point.
-
-    A directory link planted under a permitted customer/blueprint folder
-    can target an arbitrary path, including an excluded ITAR directory —
-    read-only tree traversal must not follow it, and _open_item_externally()
-    must not copy/open through it either (CodeRabbit, PR #315).
-    """
-    try:
-        attrs = ctypes.windll.kernel32.GetFileAttributesW(full_path)
-        if attrs != -1 and (attrs & 0x400):  # FILE_ATTRIBUTE_REPARSE_POINT
-            return True
-    except (AttributeError, OSError):
-        pass
-    return os.path.islink(full_path)
 
 
 class SearchWorker(QThread):
@@ -136,10 +119,12 @@ class SearchWorker(QThread):
                 self._file_search(base_dir, prefix)
                 continue
 
+            readonly = self.app_context.is_readonly()
             try:
                 customers = [
                     d for d in os.listdir(base_dir)
                     if os.path.isdir(os.path.join(base_dir, d))
+                    and not (readonly and is_reparse_point(os.path.join(base_dir, d)))
                 ]
             except OSError:
                 continue
@@ -1092,7 +1077,7 @@ class SearchModule(BaseModule):
         (CodeRabbit, PR #315).
         """
         readonly = self.app_context.is_readonly()
-        if readonly and (_is_reparse_point(dir_path) or not self._is_within_permitted_roots(dir_path)):
+        if readonly and (is_reparse_point(dir_path) or not self._is_within_permitted_roots(dir_path)):
             return
         try:
             raw = os.listdir(dir_path)
@@ -1103,7 +1088,7 @@ class SearchModule(BaseModule):
             [
                 n for n in raw
                 if not _is_hidden_file(os.path.join(dir_path, n), n)
-                and not (readonly and _is_reparse_point(os.path.join(dir_path, n)))
+                and not (readonly and is_reparse_point(os.path.join(dir_path, n)))
             ],
             key=lambda n: (not os.path.isdir(os.path.join(dir_path, n)), n.lower()),
         )

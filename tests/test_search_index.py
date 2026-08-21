@@ -335,6 +335,74 @@ class TestAddJobAndAddQuote:
         index.add_quote('', 'Acme', '55555_NewQuote', 'C:/Acme/Quotes/55555_NewQuote')  # must not raise
 
 
+class TestUpdateExcludesReparsePointCustomers:
+    """A junction/symlink standing in for a "customer" folder under cf_dirs/
+    bp_dirs could target an excluded ITAR directory — os.walk()'s own
+    followlinks=False default doesn't help here since the link is the walk's
+    own starting point, not something encountered mid-walk. update() must
+    exclude it from the customer listing itself before any indexing happens
+    on a read-only install (CodeRabbit, PR #315)."""
+
+    def _readonly_app_context(self, structure='{customer}/{job_folder}'):
+        return AppContext(
+            settings={'job_folder_structure': structure},
+            history={},
+            config_dir=None,
+            save_settings_callback=lambda: None,
+            save_history_callback=lambda: None,
+            log_message_callback=lambda *a: None,
+            show_error_callback=lambda *a: None,
+            show_info_callback=lambda *a: None,
+            get_customer_list_callback=lambda: [],
+            add_to_history_callback=lambda *a: None,
+            readonly_mode=True,
+        )
+
+    def test_reparse_point_customer_not_indexed_under_cf_dirs(self, tmp_path, monkeypatch):
+        cf_root = tmp_path / 'customer_files'
+        (cf_root / 'LinkedCustomer' / '12345_Bracket').mkdir(parents=True)
+        monkeypatch.setattr(
+            'core.search_index.is_reparse_point',
+            lambda p: os.path.basename(p) == 'LinkedCustomer',
+        )
+        ctx = self._readonly_app_context()
+        index = _make_index(tmp_path)
+
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+
+        assert index.search_jobs('12345') == []
+
+    def test_reparse_point_customer_not_indexed_under_bp_dirs(self, tmp_path, monkeypatch):
+        bp_root = tmp_path / 'blueprints'
+        linked = bp_root / 'LinkedCustomer'
+        linked.mkdir(parents=True)
+        (linked / 'drawing.pdf').write_text('secret')
+        monkeypatch.setattr(
+            'core.search_index.is_reparse_point',
+            lambda p: os.path.basename(p) == 'LinkedCustomer',
+        )
+        ctx = self._readonly_app_context()
+        index = _make_index(tmp_path)
+
+        index.update(cf_dirs=[], bp_dirs=[('BP', str(bp_root))], app_context=ctx)
+
+        assert index.search_bp('drawing') == []
+
+    def test_reparse_point_customer_still_indexed_when_not_readonly(self, tmp_path, monkeypatch):
+        cf_root = tmp_path / 'customer_files'
+        (cf_root / 'LinkedCustomer' / '12345_Bracket').mkdir(parents=True)
+        monkeypatch.setattr(
+            'core.search_index.is_reparse_point',
+            lambda p: os.path.basename(p) == 'LinkedCustomer',
+        )
+        ctx = _make_app_context()
+        index = _make_index(tmp_path)
+
+        index.update(cf_dirs=[('', str(cf_root))], bp_dirs=[], app_context=ctx)
+
+        assert len(index.search_jobs('12345')) == 1
+
+
 class TestSearchJobsFindsPoAndNonPoFolders:
     """End-to-end: real AppContext.find_job_folders() feeding a real SearchIndex.update(),
     over an on-disk tree that mixes PO-nested and non-PO job folders. Regression coverage
