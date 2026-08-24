@@ -1,0 +1,9 @@
+This file exists so JobDocs Kiosk's installer has something to copy into
+app\shared\ under `#ifdef KIOSK` (see build_scripts/JobDocs.iss's [Files]
+section). shared.utils.is_kiosk_install() checks for it on disk to tell a
+Kiosk install apart from a regular one — a build-time signal baked into the
+installer payload itself, not something written by a post-install script
+(compare build_scripts/JobDocs.iss's CurStepChanged, which is why the old
+readonly.marker approach could be deleted post-install and silently break
+config-dir isolation; see CodeRabbit, PR #315). Do not delete this file from
+the repo, and a running Kiosk install should never need to touch its copy.

@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
 from core.module_loader import ModuleLoader
 from core.app_context import AppContext
 from core.base_module import BaseModule
-from shared.utils import atomic_write_json, get_config_dir, get_os_text
+from shared.utils import atomic_write_json, get_config_dir, get_os_text, is_kiosk_install
 from shared.remote_sync import RemoteSyncManager
 
 logger = logging.getLogger(__name__)
@@ -59,18 +59,32 @@ def _get_app_version() -> str:
 
 
 def _is_readonly_install() -> bool:
-    """True for a read-only (search-only) install — see build_scripts/JobDocs.iss.
+    """True when running as "JobDocs Kiosk" — see build_scripts/JobDocs.iss.
 
-    Detected via a marker file the installer drops next to app/runtime/plugins
-    when the "Read-Only (Search Only)" setup type is chosen. Windows-only;
-    always False in dev checkouts, Flatpak, and full installs.
+    JobDocs Kiosk is a separate installer/product (own AppId, own release
+    asset — not a Task checkbox on the main installer): a search-only kiosk
+    build for shared/shop-floor machines. Detected via a marker file baked
+    into the Kiosk installer's payload at build time (kiosk_build.marker —
+    see shared.utils.is_kiosk_install()), not one written post-install, so
+    nothing on a running install can be deleted to flip the answer.
+    Windows-only; always False in dev checkouts, Flatpak, and the regular
+    JobDocs install.
+
+    This flag controls UI chrome (window title, hidden menu bar, forced
+    "search only" module list — see load_modules() below), the AppContext
+    persistence guard, and get_config_dir()'s directory isolation. It is
+    not the sole containment for module code: the Kiosk build's [Files]
+    selection (build_scripts/JobDocs.iss) never copies write-capable
+    modules to disk in the first place. Real access control for a shared
+    machine still requires a separately managed Windows account with the
+    install directory locked down.
+
+    Delegates to shared.utils.is_kiosk_install() — the single source of
+    truth, also used by get_config_dir() to isolate Kiosk's settings/
+    history/search index from a regular JobDocs install on the same
+    machine.
     """
-    if os.getenv('FLATPAK_ID'):
-        return False
-    app_dir = Path(__file__).resolve().parent
-    if not (app_dir.parent / 'runtime').is_dir():
-        return False  # dev checkout, not an embedded install
-    return (app_dir.parent / 'readonly.marker').exists()
+    return is_kiosk_install()
 
 
 APP_VERSION = _get_app_version()
@@ -102,9 +116,16 @@ class _UpdateChecker(QThread):
             tag = data.get("tag_name", "")
             html_url = data.get("html_url", "")
             if tag and _version_tuple(tag) > _version_tuple(APP_VERSION):
+                # A release carries two Windows installers (JobDocs and
+                # JobDocs Kiosk) — match this install's own variant by
+                # filename, not just "the first .exe", or a Kiosk machine
+                # could silently be offered the full installer and vice
+                # versa. See _is_readonly_install() for what "kiosk" means.
+                is_kiosk = _is_readonly_install()
                 asset_url = ""
                 for asset in data.get("assets", []):
-                    if asset.get("name", "").lower().endswith(".exe"):
+                    name = asset.get("name", "").lower()
+                    if name.endswith(".exe") and ("kiosk" in name) == is_kiosk:
                         asset_url = asset.get("browser_download_url", "")
                         break
                 self.update_available.emit(tag, html_url, asset_url)
@@ -743,6 +764,41 @@ class JobDocsMainWindow(QMainWindow):
 
     # ==================== Settings & History ====================
 
+    _KIOSK_DIR_SETTING_KEYS = (
+        'customer_files_dir', 'itar_customer_files_dir',
+        'blueprints_dir', 'itar_blueprints_dir',
+    )
+
+    def _apply_kiosk_dirs_override(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        """Override the four directory settings from {app}/kiosk_dirs.json
+        on a Kiosk install.
+
+        JobDocs Kiosk has no Settings UI and doesn't ship the OOBE wizard
+        (both write-capable admin tools, excluded from its installer's
+        [Files] selection) — its search directories are configured once at
+        install time instead (build_scripts/JobDocs.iss's custom wizard
+        pages write this file). Always wins over settings.json for these
+        four keys on a Kiosk install: kiosk_dirs.json is the actual source
+        of truth here, and a Kiosk install never writes settings.json
+        itself (see save_settings()'s readonly_mode guard) so there would
+        be no other way to reconfigure them short of reinstalling anyway.
+        """
+        if not self.readonly_mode:
+            return settings
+        kiosk_dirs_file = Path(__file__).resolve().parent.parent / 'kiosk_dirs.json'
+        if not kiosk_dirs_file.exists():
+            return settings
+        try:
+            with open(kiosk_dirs_file, 'r', encoding='utf-8') as f:
+                kiosk_dirs = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"Warning: Could not load kiosk_dirs.json: {e}")
+            return settings
+        for key in self._KIOSK_DIR_SETTING_KEYS:
+            if key in kiosk_dirs:
+                settings[key] = kiosk_dirs[key]
+        return settings
+
     def load_settings(self) -> Dict[str, Any]:
         """Load settings from file, trying remote server first if configured"""
         # First try to load from local to get remote_server_path
@@ -769,15 +825,15 @@ class JobDocsMainWindow(QMainWindow):
                         atomic_write_json(self.settings_file, merged)
                     except OSError:
                         pass
-                return merged
+                return self._apply_kiosk_dirs_override(merged)
 
         # Fall back to local settings
         if local_settings:
             merged = self.DEFAULT_SETTINGS.copy()
             merged.update(local_settings)
-            return merged
+            return self._apply_kiosk_dirs_override(merged)
 
-        return self.DEFAULT_SETTINGS.copy()
+        return self._apply_kiosk_dirs_override(self.DEFAULT_SETTINGS.copy())
 
     def save_settings(self):
         """Save settings to file and sync to remote server if configured"""

@@ -18,6 +18,7 @@ def _make_module() -> SearchModule:
     module._widget = None
     module.search_table = MagicMock()
     module.search_status_label = MagicMock()
+    module._app_context = MagicMock(is_readonly=MagicMock(return_value=False))
     return module
 
 
