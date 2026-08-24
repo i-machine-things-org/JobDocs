@@ -589,6 +589,20 @@ class JobModule(BaseModule):
                 return True
             except Exception:
                 shutil.rmtree(job_path, ignore_errors=True)
+                # add_to_history() above mutates the shared in-memory
+                # history dict directly -- if save_history() or the index
+                # write that follows it is what raised, that mutation isn't
+                # undone by removing job_path alone. _check_duplicate_job()
+                # checks recent_jobs first, so a retry would be told the
+                # job it just watched get rolled back is still a duplicate
+                # (CodeRabbit, PR #320 follow-up). Drop the entry this
+                # attempt added -- identified by its path, unique to this
+                # reservation -- so an in-process retry isn't blocked by
+                # metadata for a folder that no longer exists.
+                recent_jobs = self.app_context.history.get('recent_jobs', [])
+                self.app_context.history['recent_jobs'] = [
+                    entry for entry in recent_jobs if entry.get('path') != str(job_path)
+                ]
                 raise
 
         except JobAlreadyExistsError:

@@ -165,6 +165,57 @@ def test_create_single_job_rolls_back_reservation_on_later_failure(tmp_path):
     assert list(acme_dir.iterdir()) == []
 
 
+def test_create_single_job_rollback_clears_history_entry_too(tmp_path):
+    """Regression test (CodeRabbit, PR #320 follow-up on the rollback fix
+    above): add_to_history() mutates the shared in-memory history dict
+    before save_history() runs. If save_history() then fails, removing
+    job_path alone isn't enough -- the stale history entry would make
+    _check_duplicate_job() report the job as a duplicate on retry, even
+    though its folder no longer exists.
+    """
+    cf_root = tmp_path / 'customer_files'
+    bp_root = tmp_path / 'blueprints'
+    history = {}
+
+    def real_add_to_history(entry_type, data):
+        history.setdefault(f'recent_{entry_type}s', []).insert(0, data)
+
+    def failing_save_history():
+        raise OSError('disk full')
+
+    ctx = AppContext(
+        settings={
+            'job_folder_structure': '{customer}/{job_folder}',
+            'customer_files_dir': str(cf_root),
+            'blueprints_dir': str(bp_root),
+            'allow_duplicate_jobs': False,
+        },
+        history=history,
+        config_dir=tmp_path,
+        save_settings_callback=lambda: None,
+        save_history_callback=failing_save_history,
+        log_message_callback=lambda *a: None,
+        show_error_callback=lambda *a: None,
+        show_info_callback=lambda *a: None,
+        get_customer_list_callback=lambda: [],
+        add_to_history_callback=real_add_to_history,
+    )
+
+    job_module = JobModule()
+    job_module.initialize(ctx)
+
+    assert job_module.create_single_job(
+        'Acme', '99999', 'PO1', '', 'New Widget', [], '', False, [],
+    ) is False
+
+    # The rollback must undo the add_to_history() mutation, not just the
+    # folder -- otherwise the duplicate check (keyed on recent_jobs) would
+    # still find this job_number and permanently block a retry.
+    is_dup, _ = job_module._check_duplicate_job('Acme', '99999')
+    assert is_dup is False
+    assert history.get('recent_jobs', []) == []
+
+
 def test_create_single_job_still_creates_brand_new_customer(tmp_path):
     """Splitting mkdir(parents=True, exist_ok=True) into a parent.mkdir()
     plus a bare job_path.mkdir() must not regress the first-job-ever case,
