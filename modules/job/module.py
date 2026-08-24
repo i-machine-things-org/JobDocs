@@ -35,6 +35,15 @@ from shared.utils import (
 logger = logging.getLogger(__name__)
 
 
+class JobAlreadyExistsError(Exception):
+    """Raised by create_single_job() when the target job folder was created
+    by someone else (e.g. another workstation on the shared drive) between
+    this call's duplicate check and its own mkdir() -- callers should treat
+    this as a duplicate, not a generic failure (CodeRabbit, PR #317
+    promotion review).
+    """
+
+
 class JobTreeWorker(QThread):
     """Background worker for loading job tree data"""
 
@@ -413,14 +422,27 @@ class JobModule(BaseModule):
         is_new_customer = customer not in existing_customers
 
         created = 0
+        lost_race = []
         for job_num in job_numbers:
-            if self.create_single_job(
-                    customer, job_num, po_number, po_line,
-                    description, drawings, revision, is_itar, all_files):
-                created += 1
+            # The pre-check above narrows the window but doesn't close it —
+            # another workstation can still win the create race between that
+            # check and this call. create_single_job() raises
+            # JobAlreadyExistsError for that case specifically so it's
+            # surfaced as a duplicate here, not folded into a silent
+            # "not created" or a generic error dialog.
+            try:
+                if self.create_single_job(
+                        customer, job_num, po_number, po_line,
+                        description, drawings, revision, is_itar, all_files):
+                    created += 1
+            except JobAlreadyExistsError:
+                lost_race.append(job_num)
 
         if created > 0:
-            self.show_info("Success", f"Created {created}/{len(job_numbers)} job(s)")
+            msg = f"Created {created}/{len(job_numbers)} job(s)"
+            if lost_race:
+                msg += f"\n\nAlready existed and were skipped: {', '.join(lost_race)}"
+            self.show_info("Success", msg)
             self.job_files.clear()
             self.job_files_list.clear()
 
@@ -429,6 +451,11 @@ class JobModule(BaseModule):
                 self.app_context.main_window.refresh_history()
                 if is_new_customer:
                     self.app_context.main_window.populate_customer_lists()
+        elif lost_race:
+            self.show_error(
+                "Duplicate Job Numbers",
+                f"The following job number(s) were just created by someone else:\n\n{', '.join(lost_race)}"
+            )
         else:
             self.show_error("Error", "Failed to create jobs")
 
@@ -450,91 +477,140 @@ class JobModule(BaseModule):
 
             # Build job path using configured structure
             job_path = self.app_context.build_job_path(cf_dir, customer, job_dir_name, po_number)
-            job_path.mkdir(parents=True, exist_ok=True)
 
-            customer_bp = Path(bp_dir) / customer
-            customer_bp.mkdir(parents=True, exist_ok=True)
+            # mkdir(exist_ok=True) can't tell "I created this" from "it
+            # already existed" -- two racing callers (e.g. two workstations
+            # on the shared drive) would both get a truthy result and both
+            # add history/index entries for one folder. Ensure ancestors
+            # exist (not the uniqueness key, safe to share), then reserve
+            # job_path itself atomically: a bare mkdir() raises
+            # FileExistsError if we lost the race, which is treated as a
+            # duplicate rather than a generic failure (CodeRabbit, PR #317
+            # promotion review). Not proof against every network-filesystem
+            # edge case (e.g. a DFS namespace with multiple replica
+            # targets), but closes the ordinary check-then-create race.
+            job_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                job_path.mkdir()
+            except FileExistsError:
+                raise JobAlreadyExistsError(str(job_path)) from None
 
-            # Get settings
-            blueprint_extensions = self.app_context.get_setting('blueprint_extensions', ['.pdf', '.dwg', '.dxf'])
-            link_type = self.app_context.get_setting('link_type', 'hard')
+            # job_path is now reserved and exists on disk. If anything below
+            # fails, roll it back rather than leaving a half-initialized
+            # folder behind -- otherwise a retry would hit the
+            # FileExistsError guard above and be told "duplicate" for a job
+            # that was never actually completed, with no way to finish it or
+            # recover its history/index records (CodeRabbit, PR #320
+            # follow-up).
+            try:
+                customer_bp = Path(bp_dir) / customer
+                customer_bp.mkdir(parents=True, exist_ok=True)
 
-            # Process files
-            for file_path in files:
-                file_name = os.path.basename(file_path)
-
-                if is_blueprint_file(file_name, blueprint_extensions):
-                    bp_dest = customer_bp / file_name
-                    if not bp_dest.exists():
-                        try:
-                            shutil.copy2(file_path, bp_dest)
-                        except PermissionError:
-                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
-
-                    job_dest = job_path / file_name
-                    if bp_dest.exists() and not job_dest.exists():
-                        if not create_file_link(bp_dest, job_dest, link_type):
-                            self.log_message(f"Warning: Could not link {file_name} to job")
-                else:
-                    job_dest = job_path / file_name
-                    if not job_dest.exists():
-                        try:
-                            shutil.copy2(file_path, job_dest)
-                        except PermissionError:
-                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
-
-            # Link existing drawings
-            if drawings:
-                exts = blueprint_extensions
-                available_bps = {}
-                try:
-                    for bp_file in customer_bp.iterdir():
-                        if bp_file.is_file() and bp_file.suffix.lower() in [e.lower() for e in exts]:
-                            available_bps[bp_file.name.lower()] = bp_file
-                except OSError:
-                    pass
-
-                for drawing in drawings:
-                    drawing_lower = drawing.lower()
-                    for ext in exts:
-                        for bp_name, bp_file in available_bps.items():
-                            if drawing_lower in bp_name and bp_name.endswith(ext.lower()):
-                                dest = job_path / bp_file.name
-                                if not dest.exists():
-                                    if not create_file_link(bp_file, dest, link_type):
-                                        self.log_message(f"Warning: Could not link {bp_file.name} to job")
-
-            # Add to history
-            self.app_context.add_to_history('job', {
-                'date': datetime.now().isoformat(),
-                'customer': customer,
-                'job_number': job_number,
-                'po_number': po_number,
-                'po_line': po_line,
-                'description': description,
-                'drawings': drawings,
-                'revision': revision,
-                'path': str(job_path)
-            })
-            self.app_context.save_history()
-
-            # Make the new job searchable this session immediately — the
-            # background indexer only runs once per app launch, so without
-            # this a job created mid-session would be invisible to search
-            # until the app restarts (see is_fully_covered() in
-            # core/search_index.py for why a zero-result search can't be
-            # trusted to fall back to a filesystem walk otherwise).
-            search_index = self.app_context.get_search_index()
-            if search_index is not None:
-                search_index.add_job(
-                    'ITAR' if is_itar else '', customer, job_number,
-                    description, drawings, str(job_path),
-                    po_number=po_number,
+                # Get settings
+                blueprint_extensions = self.app_context.get_setting(
+                    'blueprint_extensions', ['.pdf', '.dwg', '.dxf']
                 )
+                link_type = self.app_context.get_setting('link_type', 'hard')
 
-            self.log_message(f"Created: {job_path}")
-            return True
+                # Process files
+                for file_path in files:
+                    file_name = os.path.basename(file_path)
 
+                    if is_blueprint_file(file_name, blueprint_extensions):
+                        bp_dest = customer_bp / file_name
+                        if not bp_dest.exists():
+                            try:
+                                shutil.copy2(file_path, bp_dest)
+                            except PermissionError:
+                                self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+
+                        job_dest = job_path / file_name
+                        if bp_dest.exists() and not job_dest.exists():
+                            if not create_file_link(bp_dest, job_dest, link_type):
+                                self.log_message(f"Warning: Could not link {file_name} to job")
+                    else:
+                        job_dest = job_path / file_name
+                        if not job_dest.exists():
+                            try:
+                                shutil.copy2(file_path, job_dest)
+                            except PermissionError:
+                                self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+
+                # Link existing drawings
+                if drawings:
+                    exts = blueprint_extensions
+                    available_bps = {}
+                    try:
+                        for bp_file in customer_bp.iterdir():
+                            if bp_file.is_file() and bp_file.suffix.lower() in [e.lower() for e in exts]:
+                                available_bps[bp_file.name.lower()] = bp_file
+                    except OSError:
+                        pass
+
+                    for drawing in drawings:
+                        drawing_lower = drawing.lower()
+                        for ext in exts:
+                            for bp_name, bp_file in available_bps.items():
+                                if drawing_lower in bp_name and bp_name.endswith(ext.lower()):
+                                    dest = job_path / bp_file.name
+                                    if not dest.exists():
+                                        if not create_file_link(bp_file, dest, link_type):
+                                            self.log_message(f"Warning: Could not link {bp_file.name} to job")
+
+                # Add to history
+                self.app_context.add_to_history('job', {
+                    'date': datetime.now().isoformat(),
+                    'customer': customer,
+                    'job_number': job_number,
+                    'po_number': po_number,
+                    'po_line': po_line,
+                    'description': description,
+                    'drawings': drawings,
+                    'revision': revision,
+                    'path': str(job_path)
+                })
+                self.app_context.save_history()
+
+                # Make the new job searchable this session immediately — the
+                # background indexer only runs once per app launch, so without
+                # this a job created mid-session would be invisible to search
+                # until the app restarts (see is_fully_covered() in
+                # core/search_index.py for why a zero-result search can't be
+                # trusted to fall back to a filesystem walk otherwise).
+                search_index = self.app_context.get_search_index()
+                if search_index is not None:
+                    search_index.add_job(
+                        'ITAR' if is_itar else '', customer, job_number,
+                        description, drawings, str(job_path),
+                        po_number=po_number,
+                    )
+
+                self.log_message(f"Created: {job_path}")
+                return True
+            except Exception:
+                shutil.rmtree(job_path, ignore_errors=True)
+                # add_to_history() above mutates the shared in-memory
+                # history dict directly -- if save_history() or the index
+                # write that follows it is what raised, that mutation isn't
+                # undone by removing job_path alone. _check_duplicate_job()
+                # checks recent_jobs first, so a retry would be told the
+                # job it just watched get rolled back is still a duplicate
+                # (CodeRabbit, PR #320 follow-up). Drop the entry this
+                # attempt added -- identified by its path, unique to this
+                # reservation -- so an in-process retry isn't blocked by
+                # metadata for a folder that no longer exists.
+                recent_jobs = self.app_context.history.get('recent_jobs', [])
+                self.app_context.history['recent_jobs'] = [
+                    entry for entry in recent_jobs if entry.get('path') != str(job_path)
+                ]
+                raise
+
+        except JobAlreadyExistsError:
+            # Let this propagate to the caller (create_job()/create_bulk_jobs())
+            # instead of falling into the generic handler below -- a lost
+            # create race is a duplicate, not an error to show a modal
+            # dialog for.
+            raise
         except Exception as e:
             self.log_message(f"Error: {e}")
             self.show_error("Error", f"Error creating job {job_number}: {e}")

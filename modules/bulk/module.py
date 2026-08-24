@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 from PyQt6 import uic
 
 from core.base_module import BaseModule
+from modules.job.module import JobAlreadyExistsError
 
 logger = logging.getLogger(__name__)
 
@@ -402,14 +403,26 @@ class BulkCreateDialog(QDialog):
                 if key in pre_existing or key in created_this_run:
                     skipped += 1
                 else:
-                    if job_module.create_single_job(
-                        customer, job['job_number'],
-                        job.get('po_number', ''), job.get('po_line', ''),
-                        job['description'], job['drawings'],
-                        job.get('revision', ''), is_itar, []
-                    ):
-                        created += 1
-                        created_this_run.add(key)
+                    # The re-check above narrows the race window but doesn't
+                    # close it -- create_single_job() itself now reserves
+                    # the job folder atomically and raises
+                    # JobAlreadyExistsError if another workstation won the
+                    # create race in that remaining gap. Treat that the same
+                    # as an already-known duplicate rather than a silent
+                    # non-created, non-skipped job or a mid-batch modal
+                    # error dialog.
+                    try:
+                        if job_module.create_single_job(
+                            customer, job['job_number'],
+                            job.get('po_number', ''), job.get('po_line', ''),
+                            job['description'], job['drawings'],
+                            job.get('revision', ''), is_itar, []
+                        ):
+                            created += 1
+                            created_this_run.add(key)
+                    except JobAlreadyExistsError:
+                        skipped += 1
+                        pre_existing.add(key)
 
                 self.bulk_progress.setValue(i + 1)
                 QApplication.processEvents()
