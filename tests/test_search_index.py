@@ -30,13 +30,16 @@ def _make_app_context(structure='{customer}/{job_folder}'):
 
 def _insert_job(
     index, *, prefix='', customer='Acme', job_number='12345',
-    description='Bracket', drawings='DWG-A', path=None, mtime=1.0,
+    description='Bracket', drawings='DWG-A', path=None, mtime=1.0, po_number='',
 ):
     with sqlite3.connect(str(index._db_path)) as conn:
         conn.execute(
-            """INSERT INTO jobs (prefix, customer, job_number, description, drawings, path, mtime)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (prefix, customer, job_number, description, drawings, path or f'C:/{customer}/{job_number}', mtime),
+            """INSERT INTO jobs (prefix, customer, job_number, description, drawings, po_number, path, mtime)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                prefix, customer, job_number, description, drawings, po_number,
+                path or f'C:/{customer}/{job_number}', mtime,
+            ),
         )
 
 
@@ -309,6 +312,41 @@ class TestAddJobAndAddQuote:
         index.add_job('', 'Acme', '99999', 'New Widget', [], 'C:/Acme/99999_NewWidget', mtime=2.0)
         results = index.search_jobs('99999')
         assert len(results) == 1
+
+    def test_add_job_persists_po_number(self, tmp_path):
+        # Regression test (CodeRabbit, PR #317 promotion review): add_job()
+        # used to omit po_number from its INSERT entirely, so a job created
+        # mid-session was indexed with a blank PO number until the next full
+        # re-index.
+        index = _make_index(tmp_path)
+        index.add_job(
+            '', 'Acme', '99999', 'New Widget', [], 'C:/Acme/99999_NewWidget',
+            po_number='PO-123',
+        )
+        results = index.search_jobs('99999')
+        assert len(results) == 1
+        assert results[0]['po_number'] == 'PO-123'
+
+    def test_add_job_upsert_does_not_erase_po_number_the_caller_still_has(self, tmp_path):
+        # Same bug, the more damaging half: because the INSERT is
+        # INSERT OR REPLACE keyed on UNIQUE(prefix, path), calling add_job()
+        # again for an already-indexed path replaced the whole row and
+        # SQLite filled the omitted po_number column with its schema
+        # default '' -- silently wiping a real PO number a prior full
+        # update() scan had written. The real caller (create_single_job())
+        # always has po_number in scope, so a fixed add_job() must persist
+        # it on every call, not just the first.
+        index = _make_index(tmp_path)
+        _insert_job(index, job_number='99999', path='C:/Acme/99999_NewWidget', po_number='PO-123')
+        assert index.search_jobs('99999')[0]['po_number'] == 'PO-123'
+
+        index.add_job(
+            '', 'Acme', '99999', 'New Widget', [], 'C:/Acme/99999_NewWidget',
+            mtime=2.0, po_number='PO-123',
+        )
+        results = index.search_jobs('99999')
+        assert len(results) == 1
+        assert results[0]['po_number'] == 'PO-123'
 
     def test_add_job_query_failure_does_not_raise(self, tmp_path):
         # Creating a job must never fail because the index write failed —
