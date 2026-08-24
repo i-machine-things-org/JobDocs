@@ -371,3 +371,58 @@ def test_bulk_create_catches_duplicate_created_during_confirmation_wait(qapp, tm
     # the confirmation wait — the recheck must catch it and skip it, not
     # call create_single_job() on top of the folder that now already exists.
     assert job_module.calls == [('NewCo', '55555')]
+
+
+def test_bulk_create_treats_lost_creation_race_as_skipped(qapp, tmp_path, monkeypatch):
+    """Regression test for the atomic-creation fix (CodeRabbit, PR #317
+    promotion review): the recheck above narrows the create race but
+    doesn't close it -- another workstation can still win between that
+    recheck and this call's own folder creation. create_single_job() now
+    raises JobAlreadyExistsError for that gap specifically. Bulk create
+    must count it as skipped (like an already-known duplicate), not drop
+    it silently uncounted while also risking a mid-batch modal error
+    dialog for what is, from the user's perspective, a duplicate.
+    """
+    from modules.job.module import JobAlreadyExistsError
+
+    cf_root = tmp_path / 'customer_files'
+    cf_root.mkdir(parents=True)
+
+    class _RacyJobModule:
+        def __init__(self):
+            self.calls = []
+
+        def create_single_job(
+            self, customer, job_number, po_number, po_line,
+            description, drawings, revision, is_itar, files,
+        ):
+            self.calls.append((customer, job_number))
+            if (customer, job_number) == ('Acme', '77777'):
+                raise JobAlreadyExistsError('C:/Acme/77777')
+            return True
+
+    job_module = _RacyJobModule()
+    main_window = SimpleNamespace(
+        modules=[job_module],
+        refresh_history=lambda: None,
+        populate_customer_lists=lambda: None,
+    )
+    ctx = _make_app_context(tmp_path, cf_root, main_window=main_window)
+
+    dialog = BulkCreateDialog(ctx)
+    dialog.bulk_itar_check.setChecked(False)
+    dialog.bulk_text.setPlainText(
+        "Acme,77777,PO1,Raced By Another Workstation\n"
+        "NewCo,55555,PO2,Genuinely New Job\n"
+    )
+
+    monkeypatch.setattr(QMessageBox, 'question', lambda *a, **k: QMessageBox.StandardButton.Yes)
+    messages = []
+    monkeypatch.setattr(QMessageBox, 'information', lambda *a, **k: messages.append(a))
+
+    dialog.create_bulk_jobs()
+
+    assert job_module.calls == [('Acme', '77777'), ('NewCo', '55555')]
+    info_text = messages[0][2]
+    assert 'Created 1/2 jobs' in info_text
+    assert 'Skipped 1 duplicates' in info_text
