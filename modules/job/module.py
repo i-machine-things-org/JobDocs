@@ -529,6 +529,7 @@ class JobModule(BaseModule):
                 search_index.add_job(
                     'ITAR' if is_itar else '', customer, job_number,
                     description, drawings, str(job_path),
+                    po_number=po_number,
                 )
 
             self.log_message(f"Created: {job_path}")
