@@ -36,7 +36,10 @@ def _insert_job(
         conn.execute(
             """INSERT INTO jobs (prefix, customer, job_number, description, drawings, po_number, path, mtime)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (prefix, customer, job_number, description, drawings, po_number, path or f'C:/{customer}/{job_number}', mtime),
+            (
+                prefix, customer, job_number, description, drawings, po_number,
+                path or f'C:/{customer}/{job_number}', mtime,
+            ),
         )
 
 
