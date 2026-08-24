@@ -495,88 +495,101 @@ class JobModule(BaseModule):
             except FileExistsError:
                 raise JobAlreadyExistsError(str(job_path)) from None
 
-            customer_bp = Path(bp_dir) / customer
-            customer_bp.mkdir(parents=True, exist_ok=True)
+            # job_path is now reserved and exists on disk. If anything below
+            # fails, roll it back rather than leaving a half-initialized
+            # folder behind -- otherwise a retry would hit the
+            # FileExistsError guard above and be told "duplicate" for a job
+            # that was never actually completed, with no way to finish it or
+            # recover its history/index records (CodeRabbit, PR #320
+            # follow-up).
+            try:
+                customer_bp = Path(bp_dir) / customer
+                customer_bp.mkdir(parents=True, exist_ok=True)
 
-            # Get settings
-            blueprint_extensions = self.app_context.get_setting('blueprint_extensions', ['.pdf', '.dwg', '.dxf'])
-            link_type = self.app_context.get_setting('link_type', 'hard')
-
-            # Process files
-            for file_path in files:
-                file_name = os.path.basename(file_path)
-
-                if is_blueprint_file(file_name, blueprint_extensions):
-                    bp_dest = customer_bp / file_name
-                    if not bp_dest.exists():
-                        try:
-                            shutil.copy2(file_path, bp_dest)
-                        except PermissionError:
-                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
-
-                    job_dest = job_path / file_name
-                    if bp_dest.exists() and not job_dest.exists():
-                        if not create_file_link(bp_dest, job_dest, link_type):
-                            self.log_message(f"Warning: Could not link {file_name} to job")
-                else:
-                    job_dest = job_path / file_name
-                    if not job_dest.exists():
-                        try:
-                            shutil.copy2(file_path, job_dest)
-                        except PermissionError:
-                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
-
-            # Link existing drawings
-            if drawings:
-                exts = blueprint_extensions
-                available_bps = {}
-                try:
-                    for bp_file in customer_bp.iterdir():
-                        if bp_file.is_file() and bp_file.suffix.lower() in [e.lower() for e in exts]:
-                            available_bps[bp_file.name.lower()] = bp_file
-                except OSError:
-                    pass
-
-                for drawing in drawings:
-                    drawing_lower = drawing.lower()
-                    for ext in exts:
-                        for bp_name, bp_file in available_bps.items():
-                            if drawing_lower in bp_name and bp_name.endswith(ext.lower()):
-                                dest = job_path / bp_file.name
-                                if not dest.exists():
-                                    if not create_file_link(bp_file, dest, link_type):
-                                        self.log_message(f"Warning: Could not link {bp_file.name} to job")
-
-            # Add to history
-            self.app_context.add_to_history('job', {
-                'date': datetime.now().isoformat(),
-                'customer': customer,
-                'job_number': job_number,
-                'po_number': po_number,
-                'po_line': po_line,
-                'description': description,
-                'drawings': drawings,
-                'revision': revision,
-                'path': str(job_path)
-            })
-            self.app_context.save_history()
-
-            # Make the new job searchable this session immediately — the
-            # background indexer only runs once per app launch, so without
-            # this a job created mid-session would be invisible to search
-            # until the app restarts (see is_fully_covered() in
-            # core/search_index.py for why a zero-result search can't be
-            # trusted to fall back to a filesystem walk otherwise).
-            search_index = self.app_context.get_search_index()
-            if search_index is not None:
-                search_index.add_job(
-                    'ITAR' if is_itar else '', customer, job_number,
-                    description, drawings, str(job_path),
-                    po_number=po_number,
+                # Get settings
+                blueprint_extensions = self.app_context.get_setting(
+                    'blueprint_extensions', ['.pdf', '.dwg', '.dxf']
                 )
+                link_type = self.app_context.get_setting('link_type', 'hard')
 
-            self.log_message(f"Created: {job_path}")
-            return True
+                # Process files
+                for file_path in files:
+                    file_name = os.path.basename(file_path)
+
+                    if is_blueprint_file(file_name, blueprint_extensions):
+                        bp_dest = customer_bp / file_name
+                        if not bp_dest.exists():
+                            try:
+                                shutil.copy2(file_path, bp_dest)
+                            except PermissionError:
+                                self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+
+                        job_dest = job_path / file_name
+                        if bp_dest.exists() and not job_dest.exists():
+                            if not create_file_link(bp_dest, job_dest, link_type):
+                                self.log_message(f"Warning: Could not link {file_name} to job")
+                    else:
+                        job_dest = job_path / file_name
+                        if not job_dest.exists():
+                            try:
+                                shutil.copy2(file_path, job_dest)
+                            except PermissionError:
+                                self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+
+                # Link existing drawings
+                if drawings:
+                    exts = blueprint_extensions
+                    available_bps = {}
+                    try:
+                        for bp_file in customer_bp.iterdir():
+                            if bp_file.is_file() and bp_file.suffix.lower() in [e.lower() for e in exts]:
+                                available_bps[bp_file.name.lower()] = bp_file
+                    except OSError:
+                        pass
+
+                    for drawing in drawings:
+                        drawing_lower = drawing.lower()
+                        for ext in exts:
+                            for bp_name, bp_file in available_bps.items():
+                                if drawing_lower in bp_name and bp_name.endswith(ext.lower()):
+                                    dest = job_path / bp_file.name
+                                    if not dest.exists():
+                                        if not create_file_link(bp_file, dest, link_type):
+                                            self.log_message(f"Warning: Could not link {bp_file.name} to job")
+
+                # Add to history
+                self.app_context.add_to_history('job', {
+                    'date': datetime.now().isoformat(),
+                    'customer': customer,
+                    'job_number': job_number,
+                    'po_number': po_number,
+                    'po_line': po_line,
+                    'description': description,
+                    'drawings': drawings,
+                    'revision': revision,
+                    'path': str(job_path)
+                })
+                self.app_context.save_history()
+
+                # Make the new job searchable this session immediately — the
+                # background indexer only runs once per app launch, so without
+                # this a job created mid-session would be invisible to search
+                # until the app restarts (see is_fully_covered() in
+                # core/search_index.py for why a zero-result search can't be
+                # trusted to fall back to a filesystem walk otherwise).
+                search_index = self.app_context.get_search_index()
+                if search_index is not None:
+                    search_index.add_job(
+                        'ITAR' if is_itar else '', customer, job_number,
+                        description, drawings, str(job_path),
+                        po_number=po_number,
+                    )
+
+                self.log_message(f"Created: {job_path}")
+                return True
+            except Exception:
+                shutil.rmtree(job_path, ignore_errors=True)
+                raise
 
         except JobAlreadyExistsError:
             # Let this propagate to the caller (create_job()/create_bulk_jobs())

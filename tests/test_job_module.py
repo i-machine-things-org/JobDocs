@@ -110,6 +110,61 @@ def test_create_single_job_raises_when_folder_already_exists(tmp_path):
     assert len(index.search_jobs('99999')) == 1
 
 
+def test_create_single_job_rolls_back_reservation_on_later_failure(tmp_path):
+    """Regression test (CodeRabbit, PR #320 follow-up): job_path is
+    reserved (created on disk) before file processing, history, and index
+    updates run. If any of those fail, the reservation must be rolled back
+    -- otherwise a retry hits the FileExistsError guard and is told
+    "duplicate" for a job that was never actually completed, with no way
+    to finish it or recover its history/index records.
+    """
+    cf_root = tmp_path / 'customer_files'
+    bp_root = tmp_path / 'blueprints'
+
+    def failing_save_history():
+        raise OSError('disk full')
+
+    ctx = AppContext(
+        settings={
+            'job_folder_structure': '{customer}/{job_folder}',
+            'customer_files_dir': str(cf_root),
+            'blueprints_dir': str(bp_root),
+            'allow_duplicate_jobs': False,
+        },
+        history={},
+        config_dir=tmp_path,
+        save_settings_callback=lambda: None,
+        save_history_callback=failing_save_history,
+        log_message_callback=lambda *a: None,
+        show_error_callback=lambda *a: None,
+        show_info_callback=lambda *a: None,
+        get_customer_list_callback=lambda: [],
+        add_to_history_callback=lambda *a: None,
+    )
+
+    job_module = JobModule()
+    job_module.initialize(ctx)
+
+    assert job_module.create_single_job(
+        'Acme', '99999', 'PO1', '', 'New Widget', [], '', False, [],
+    ) is False
+
+    # The reservation must not be left behind -- the customer dir (shared,
+    # not the uniqueness key) still exists, but the job folder itself must
+    # be gone so a retry isn't told the job is a duplicate.
+    acme_dir = cf_root / 'Acme'
+    assert acme_dir.exists()
+    assert list(acme_dir.iterdir()) == []
+
+    # A retry goes through the same generic-failure path again -- if the
+    # rollback hadn't happened, this would raise JobAlreadyExistsError
+    # instead of returning False.
+    assert job_module.create_single_job(
+        'Acme', '99999', 'PO1', '', 'New Widget', [], '', False, [],
+    ) is False
+    assert list(acme_dir.iterdir()) == []
+
+
 def test_create_single_job_still_creates_brand_new_customer(tmp_path):
     """Splitting mkdir(parents=True, exist_ok=True) into a parent.mkdir()
     plus a bare job_path.mkdir() must not regress the first-job-ever case,
