@@ -108,10 +108,12 @@ class JobTreeWorker(QThread):
             except OSError as e:
                 print(f"[JobTreeWorker] OSError: {e}", flush=True)
 
-        # Likewise, don't signal completion for a cancelled run -- the worker
-        # that superseded this one will emit its own finished() when it's done.
-        if not self._is_cancelled:
-            self.finished.emit()
+        # Emit finished whether cancelled or not -- refresh_job_tree()/
+        # search_jobs() rely on this to know a stale worker has actually
+        # stopped before starting replacement work, since cancel() no
+        # longer blocks the GUI thread waiting for it (CodeRabbit, PR #317
+        # promotion review).
+        self.finished.emit()
 
 
 class JobModule(BaseModule):
@@ -124,6 +126,12 @@ class JobModule(BaseModule):
         self.add_files: List[str] = []  # For "Add to Existing" tab
         self._widget = None
         self._worker = None  # Background thread worker
+        # A refresh/search requested while a stale worker was still finishing
+        # up (after cancel()) is deferred here instead of starting a new
+        # worker against one that might still be running; _on_loading_finished()
+        # runs it once that worker's finished signal confirms it's actually
+        # stopped (CodeRabbit, PR #317 promotion review).
+        self._pending_tree_action = None
         self._job_tab_widget = None
         self._add_to_job_tab = None
         # The Add to Existing tab's job tree isn't built until that sub-tab is
@@ -792,16 +800,23 @@ class JobModule(BaseModule):
             self._add_tree_stale = True
             # Don't let a walk started while the tab was active keep running
             # in the background after the user has switched away from it.
+            # Non-blocking: see the cancel below for why.
             if self._worker and self._worker.isRunning():
                 self._worker.cancel()
-                self._worker.wait()
             return
         self._add_tree_stale = False
 
-        # Cancel any existing worker
         if self._worker and self._worker.isRunning():
+            # cancel() is cooperative -- the worker may be blocked deep
+            # inside a hung os.listdir() on a dead network share and won't
+            # notice for as long as that call hangs. Don't block the GUI
+            # thread waiting for it (JobTreeWorker.wait()) like this used
+            # to; defer starting the real refresh until finished() confirms
+            # the stale worker has actually stopped (CodeRabbit, PR #317
+            # promotion review).
             self._worker.cancel()
-            self._worker.wait()
+            self._pending_tree_action = self.refresh_job_tree
+            return
 
         self.job_tree.clear()
         self.add_status_label.setText("Loading jobs...")
@@ -846,6 +861,15 @@ class JobModule(BaseModule):
         total_items = self.job_tree.topLevelItemCount()
         self.add_status_label.setText(f"Loaded {total_items} customer(s) with jobs")
 
+        # A refresh/search requested while this worker was still finishing
+        # up was deferred rather than started against it -- run it now that
+        # it's confirmed stopped (self._worker isn't reassigned until the
+        # action below actually starts a new one, so there's no race with a
+        # newer worker's own finished signal).
+        if self._pending_tree_action is not None:
+            action, self._pending_tree_action = self._pending_tree_action, None
+            action()
+
     def search_jobs(self):
         """Search for jobs matching the search term"""
         search_term = self.add_search_edit.text().strip().lower()
@@ -855,8 +879,12 @@ class JobModule(BaseModule):
             return
 
         if self._worker and self._worker.isRunning():
+            # See refresh_job_tree() -- same non-blocking cancel + deferred
+            # restart, so a stale tree-refresh worker can't freeze the GUI
+            # here either.
             self._worker.cancel()
-            self._worker.wait()
+            self._pending_tree_action = self.search_jobs
+            return
 
         self.job_tree.clear()
 
@@ -878,6 +906,14 @@ class JobModule(BaseModule):
 
         results = 0
 
+        # Known residual limitation (CodeRabbit, PR #317 promotion review):
+        # this loop itself is still synchronous on the GUI thread, with no
+        # worker and no is_cancelled passed to find_job_folders() -- a hung
+        # network share can still freeze the GUI during a live search, same
+        # as before this fix. Only the *previous* fix's blocking wait() (the
+        # cancel above) is what's addressed here; making this loop itself
+        # non-blocking would mean a dedicated background worker for search,
+        # a larger architectural change tracked separately.
         for prefix, cf_dir in dirs_to_search:
             try:
                 if show_all:
@@ -1198,7 +1234,12 @@ class JobModule(BaseModule):
 
     def cleanup(self):
         """Cleanup resources"""
-        # Stop any running worker thread
+        # Stop any running worker thread. Unlike refresh_job_tree()/
+        # search_jobs() above, this intentionally stays blocking: module
+        # teardown can't proceed with a background thread still touching
+        # self.app_context or widgets that are about to be torn down
+        # (mirrors modules/search/module.py's SearchWorker cleanup(), which
+        # is exempt from the non-blocking treatment for the same reason).
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait()

@@ -10,6 +10,8 @@ still-running QThread crashes the interpreter on teardown.
 """
 
 import os
+import threading
+import time
 
 import pytest
 
@@ -21,6 +23,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
+import modules.job.module as job_module_ns  # noqa: E402
+import modules.quote.module as quote_module_ns  # noqa: E402
 from modules.job.module import JobModule  # noqa: E402
 from modules.quote.module import QuoteModule  # noqa: E402
 
@@ -120,4 +124,134 @@ class TestQuoteModuleLazyTreeLoad:
             assert m._worker is not None
             assert m._add_tree_stale is False
         finally:
+            _cleanup_worker(m)
+
+
+def _make_hung_listdir(cf_root, release):
+    """A stand-in for os.listdir() that blocks on `release` when called
+    against cf_root, simulating a single hung syscall (dead/unresponsive
+    network share) that no amount of is_cancelled() polling *around* it can
+    interrupt -- only not blocking the GUI thread waiting for it can."""
+    real_listdir = os.listdir
+    target = os.path.normcase(str(cf_root))
+
+    def hung_listdir(path, *a, **kw):
+        if os.path.normcase(str(path)) == target:
+            release.wait(2.0)
+        return real_listdir(path, *a, **kw)
+
+    return hung_listdir
+
+
+class TestJobModuleRefreshDoesNotBlockOnHungWorker:
+    """Regression tests for CodeRabbit's PR #317 promotion-review finding:
+    refresh_job_tree()/search_jobs() used to call worker.cancel() followed
+    by a *blocking* worker.wait(), which froze the whole GUI for as long as
+    a stuck worker took to notice cancellation -- unbounded if it was stuck
+    inside a single hung os.listdir() call, since is_cancelled() is only
+    polled *between* items, never inside one blocking syscall. Follows up
+    on issue #287/PR #304 (tests/test_tree_walk_cancellation.py), which
+    fixed the "slow across many items" case but not this one.
+    """
+
+    def test_refresh_job_tree_does_not_block_on_a_hung_worker(self, qapp, tmp_path, monkeypatch):
+        cf_root = tmp_path / 'customer_files'
+        (cf_root / 'Acme').mkdir(parents=True)
+        ctx = _make_app_context(tmp_path, cf_root)
+
+        release = threading.Event()
+        monkeypatch.setattr(job_module_ns.os, 'listdir', _make_hung_listdir(cf_root, release))
+
+        m = JobModule()
+        try:
+            m.initialize(ctx)
+            m.get_widget()
+
+            # Starts a worker that immediately gets stuck in the hung
+            # os.listdir() call above.
+            m._job_tab_widget.setCurrentWidget(m._add_to_job_tab)
+            first_worker = m._worker
+            assert first_worker is not None
+            assert first_worker.isRunning()
+
+            start = time.monotonic()
+            m.refresh_job_tree()
+            elapsed = time.monotonic() - start
+
+            assert elapsed < 0.5, f"refresh_job_tree() blocked for {elapsed:.2f}s on a hung worker"
+            # The real restart is deferred, not started against the worker
+            # that's still stuck.
+            assert m._worker is first_worker
+            assert m._pending_tree_action is not None
+        finally:
+            release.set()
+            _cleanup_worker(m)
+
+    def test_deferred_refresh_starts_once_stale_worker_actually_finishes(self, qapp, tmp_path, monkeypatch):
+        cf_root = tmp_path / 'customer_files'
+        (cf_root / 'Acme').mkdir(parents=True)
+        ctx = _make_app_context(tmp_path, cf_root)
+
+        release = threading.Event()
+        monkeypatch.setattr(job_module_ns.os, 'listdir', _make_hung_listdir(cf_root, release))
+
+        m = JobModule()
+        try:
+            m.initialize(ctx)
+            m.get_widget()
+
+            m._job_tab_widget.setCurrentWidget(m._add_to_job_tab)
+            first_worker = m._worker
+            assert first_worker is not None
+
+            m.refresh_job_tree()  # deferred -- first_worker is still stuck
+            assert m._pending_tree_action is not None
+            assert m._worker is first_worker
+
+            release.set()  # let the stuck worker actually finish
+
+            # The deferred restart runs inside _on_loading_finished(), a
+            # slot invoked via a queued cross-thread signal -- it only
+            # fires once the Qt event loop processes it.
+            deadline = time.monotonic() + 2.0
+            while m._worker is first_worker and time.monotonic() < deadline:
+                qapp.processEvents()
+                time.sleep(0.01)
+
+            assert m._worker is not None
+            assert m._worker is not first_worker, "deferred refresh never started a replacement worker"
+            assert m._pending_tree_action is None
+        finally:
+            release.set()
+            _cleanup_worker(m)
+
+
+class TestQuoteModuleRefreshDoesNotBlockOnHungWorker:
+    def test_refresh_quote_tree_does_not_block_on_a_hung_worker(self, qapp, tmp_path, monkeypatch):
+        cf_root = tmp_path / 'customer_files'
+        (cf_root / 'Acme').mkdir(parents=True)
+        ctx = _make_app_context(tmp_path, cf_root)
+
+        release = threading.Event()
+        monkeypatch.setattr(quote_module_ns.os, 'listdir', _make_hung_listdir(cf_root, release))
+
+        m = QuoteModule()
+        try:
+            m.initialize(ctx)
+            m.get_widget()
+
+            m._quote_tab_widget.setCurrentWidget(m._add_to_quote_tab)
+            first_worker = m._worker
+            assert first_worker is not None
+            assert first_worker.isRunning()
+
+            start = time.monotonic()
+            m.refresh_quote_tree()
+            elapsed = time.monotonic() - start
+
+            assert elapsed < 0.5, f"refresh_quote_tree() blocked for {elapsed:.2f}s on a hung worker"
+            assert m._worker is first_worker
+            assert m._pending_tree_action is not None
+        finally:
+            release.set()
             _cleanup_worker(m)
