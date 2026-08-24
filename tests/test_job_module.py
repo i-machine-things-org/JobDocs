@@ -16,7 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from core.app_context import AppContext  # noqa: E402
 from core.search_index import SearchIndex  # noqa: E402
-from modules.job.module import JobModule  # noqa: E402
+from modules.job.module import JobAlreadyExistsError, JobModule  # noqa: E402
 
 
 def _make_app_context(tmp_path, cf_root, bp_root):
@@ -75,6 +75,59 @@ def test_create_single_job_makes_job_immediately_searchable(tmp_path):
     assert len(results) == 1
     assert results[0]['customer'] == 'Acme'
     assert results[0]['job_number'] == '99999'
+
+
+def test_create_single_job_raises_when_folder_already_exists(tmp_path):
+    """Regression test for the atomic-creation fix (CodeRabbit, PR #317
+    promotion review): mkdir(parents=True, exist_ok=True) couldn't tell "I
+    created this" from "it already existed", so two racing callers (e.g.
+    two workstations on the shared drive) both got a truthy result and
+    both added history/index entries for one folder. create_single_job()
+    now reserves the job folder atomically and raises
+    JobAlreadyExistsError if it loses that race, rather than silently
+    succeeding a second time.
+    """
+    cf_root = tmp_path / 'customer_files'
+    bp_root = tmp_path / 'blueprints'
+    ctx = _make_app_context(tmp_path, cf_root, bp_root)
+
+    job_module = JobModule()
+    job_module.initialize(ctx)
+
+    assert job_module.create_single_job(
+        'Acme', '99999', 'PO1', '', 'New Widget', [], '', False, [],
+    ) is True
+
+    # A second caller for the identical job -- e.g. another workstation
+    # racing this one -- must lose, not silently succeed and double-add
+    # history/index entries for the same folder.
+    with pytest.raises(JobAlreadyExistsError):
+        job_module.create_single_job(
+            'Acme', '99999', 'PO1', '', 'New Widget', [], '', False, [],
+        )
+
+    index = ctx.get_search_index()
+    assert len(index.search_jobs('99999')) == 1
+
+
+def test_create_single_job_still_creates_brand_new_customer(tmp_path):
+    """Splitting mkdir(parents=True, exist_ok=True) into a parent.mkdir()
+    plus a bare job_path.mkdir() must not regress the first-job-ever case,
+    where multiple ancestor levels (the customer dir itself, plus any
+    configured intermediate levels) don't exist yet.
+    """
+    cf_root = tmp_path / 'customer_files'
+    bp_root = tmp_path / 'blueprints'
+    assert not (cf_root / 'BrandNewCo').exists()
+    ctx = _make_app_context(tmp_path, cf_root, bp_root)
+
+    job_module = JobModule()
+    job_module.initialize(ctx)
+
+    assert job_module.create_single_job(
+        'BrandNewCo', '10001', 'PO1', '', 'First Job', [], '', False, [],
+    ) is True
+    assert (cf_root / 'BrandNewCo').is_dir()
 
 
 def test_create_single_job_itar_uses_itar_prefix_in_index(tmp_path):

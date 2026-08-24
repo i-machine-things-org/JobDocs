@@ -35,6 +35,15 @@ from shared.utils import (
 logger = logging.getLogger(__name__)
 
 
+class JobAlreadyExistsError(Exception):
+    """Raised by create_single_job() when the target job folder was created
+    by someone else (e.g. another workstation on the shared drive) between
+    this call's duplicate check and its own mkdir() -- callers should treat
+    this as a duplicate, not a generic failure (CodeRabbit, PR #317
+    promotion review).
+    """
+
+
 class JobTreeWorker(QThread):
     """Background worker for loading job tree data"""
 
@@ -413,14 +422,27 @@ class JobModule(BaseModule):
         is_new_customer = customer not in existing_customers
 
         created = 0
+        lost_race = []
         for job_num in job_numbers:
-            if self.create_single_job(
-                    customer, job_num, po_number, po_line,
-                    description, drawings, revision, is_itar, all_files):
-                created += 1
+            # The pre-check above narrows the window but doesn't close it —
+            # another workstation can still win the create race between that
+            # check and this call. create_single_job() raises
+            # JobAlreadyExistsError for that case specifically so it's
+            # surfaced as a duplicate here, not folded into a silent
+            # "not created" or a generic error dialog.
+            try:
+                if self.create_single_job(
+                        customer, job_num, po_number, po_line,
+                        description, drawings, revision, is_itar, all_files):
+                    created += 1
+            except JobAlreadyExistsError:
+                lost_race.append(job_num)
 
         if created > 0:
-            self.show_info("Success", f"Created {created}/{len(job_numbers)} job(s)")
+            msg = f"Created {created}/{len(job_numbers)} job(s)"
+            if lost_race:
+                msg += f"\n\nAlready existed and were skipped: {', '.join(lost_race)}"
+            self.show_info("Success", msg)
             self.job_files.clear()
             self.job_files_list.clear()
 
@@ -429,6 +451,11 @@ class JobModule(BaseModule):
                 self.app_context.main_window.refresh_history()
                 if is_new_customer:
                     self.app_context.main_window.populate_customer_lists()
+        elif lost_race:
+            self.show_error(
+                "Duplicate Job Numbers",
+                f"The following job number(s) were just created by someone else:\n\n{', '.join(lost_race)}"
+            )
         else:
             self.show_error("Error", "Failed to create jobs")
 
@@ -450,7 +477,23 @@ class JobModule(BaseModule):
 
             # Build job path using configured structure
             job_path = self.app_context.build_job_path(cf_dir, customer, job_dir_name, po_number)
-            job_path.mkdir(parents=True, exist_ok=True)
+
+            # mkdir(exist_ok=True) can't tell "I created this" from "it
+            # already existed" -- two racing callers (e.g. two workstations
+            # on the shared drive) would both get a truthy result and both
+            # add history/index entries for one folder. Ensure ancestors
+            # exist (not the uniqueness key, safe to share), then reserve
+            # job_path itself atomically: a bare mkdir() raises
+            # FileExistsError if we lost the race, which is treated as a
+            # duplicate rather than a generic failure (CodeRabbit, PR #317
+            # promotion review). Not proof against every network-filesystem
+            # edge case (e.g. a DFS namespace with multiple replica
+            # targets), but closes the ordinary check-then-create race.
+            job_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                job_path.mkdir()
+            except FileExistsError:
+                raise JobAlreadyExistsError(str(job_path)) from None
 
             customer_bp = Path(bp_dir) / customer
             customer_bp.mkdir(parents=True, exist_ok=True)
@@ -535,6 +578,12 @@ class JobModule(BaseModule):
             self.log_message(f"Created: {job_path}")
             return True
 
+        except JobAlreadyExistsError:
+            # Let this propagate to the caller (create_job()/create_bulk_jobs())
+            # instead of falling into the generic handler below -- a lost
+            # create race is a duplicate, not an error to show a modal
+            # dialog for.
+            raise
         except Exception as e:
             self.log_message(f"Error: {e}")
             self.show_error("Error", f"Error creating job {job_number}: {e}")
