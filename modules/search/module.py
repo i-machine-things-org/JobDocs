@@ -6,11 +6,14 @@ Supports both strict format (fast) and legacy recursive search modes.
 Uses background threading to prevent UI lockup during searches.
 """
 
+import atexit
 import logging
 import os
+import shutil
 import sys
 import re
 import ctypes
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from types import MappingProxyType
@@ -27,10 +30,29 @@ from PyQt6 import uic
 
 from core.base_module import BaseModule
 from core.search_index import SearchIndex, _parse_job_folder
-from shared.utils import open_folder, get_config_dir
+from shared.utils import open_folder, get_config_dir, is_reparse_point
 from shared.widgets import print_files_with_dialog
 
 logger = logging.getLogger(__name__)
+
+# Customer-label prefixes that mark a result as ITAR-controlled. Kept as one
+# constant so every readonly/ITAR-visibility check stays in sync (CODING_NOTES:
+# ITAR / Filter Consistency).
+_ITAR_LABEL_PREFIXES = ('[ITAR] ', '[ITAR-BP] ', '[ITAR Quote] ')
+
+# Temp dirs created to view a file on a read-only (search-only) install
+# without exposing its real path to the external viewer — see
+# SearchModule._open_item_externally(). Single atexit handler mirrors
+# shared/widgets.py's _dropzone_tmp_dirs pattern.
+_kiosk_view_tmp_dirs: list = []
+
+
+def _cleanup_kiosk_view_tmp_dirs() -> None:
+    for d in _kiosk_view_tmp_dirs:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+atexit.register(_cleanup_kiosk_view_tmp_dirs)
 
 
 def _is_hidden_file(full_path: str, name: str) -> bool:
@@ -97,10 +119,12 @@ class SearchWorker(QThread):
                 self._file_search(base_dir, prefix)
                 continue
 
+            readonly = self.app_context.is_readonly()
             try:
                 customers = [
                     d for d in os.listdir(base_dir)
                     if os.path.isdir(os.path.join(base_dir, d))
+                    and not (readonly and is_reparse_point(os.path.join(base_dir, d)))
                 ]
             except OSError:
                 continue
@@ -435,11 +459,7 @@ class SearchModule(BaseModule):
             return
 
         cf_dirs = self._get_customer_files_dirs()
-        bp_dirs = []
-        for key, prefix in [('blueprints_dir', 'BP'), ('itar_blueprints_dir', 'ITAR-BP')]:
-            d = self.app_context.get_setting(key, '')
-            if d and os.path.exists(d):
-                bp_dirs.append((prefix, d))
+        bp_dirs = self._get_blueprint_dirs()
 
         if not cf_dirs and not bp_dirs:
             return
@@ -627,12 +647,7 @@ class SearchModule(BaseModule):
 
         # Build blueprint dirs before the customer_dirs guard so a
         # blueprint-only install (no customer files dir) can still search.
-        bp_dirs = []
-        if include_blueprints:
-            for key, bp_prefix in [('blueprints_dir', 'BP'), ('itar_blueprints_dir', 'ITAR-BP')]:
-                d = self.app_context.get_setting(key, '')
-                if d and os.path.exists(d):
-                    bp_dirs.append((bp_prefix, d))
+        bp_dirs = self._get_blueprint_dirs() if include_blueprints else []
 
         if not customer_dirs and not bp_dirs:
             cf_dir = self.app_context.get_setting('customer_files_dir', '')
@@ -728,6 +743,14 @@ class SearchModule(BaseModule):
 
         self._index_failures = 0
         self._index_query_failed = False
+
+        if self.app_context.is_readonly():
+            # Defense in depth against a stale local index: a machine
+            # previously indexed as a Full install (before being reconfigured
+            # to Read-Only) could still have ITAR rows on disk until the next
+            # background re-index prunes them. Never display ITAR results on
+            # a read-only kiosk regardless of what the index currently holds.
+            results = [r for r in results if not r['customer'].startswith(_ITAR_LABEL_PREFIXES)]
 
         if not results:
             return False
@@ -856,22 +879,84 @@ class SearchModule(BaseModule):
     # ==================== Helper Methods ====================
 
     def _get_customer_files_dirs(self):
-        """Get list of (prefix, path) tuples for customer file directories"""
+        """Get list of (prefix, path) tuples for customer file directories.
+
+        A read-only (search-only) install never searches or indexes the ITAR
+        customer directory: it's meant for shared/shop-floor kiosk machines
+        (see README), which must not surface export-controlled job data.
+        """
         dirs = []
         cf_dir = self.app_context.get_setting('customer_files_dir', '')
         if cf_dir and os.path.exists(cf_dir):
             dirs.append(('', cf_dir))
-        itar_cf_dir = self.app_context.get_setting('itar_customer_files_dir', '')
-        if itar_cf_dir and os.path.exists(itar_cf_dir):
-            dirs.append(('ITAR', itar_cf_dir))
+        if not self.app_context.is_readonly():
+            itar_cf_dir = self.app_context.get_setting('itar_customer_files_dir', '')
+            if itar_cf_dir and os.path.exists(itar_cf_dir):
+                dirs.append(('ITAR', itar_cf_dir))
         return dirs
+
+    def _get_blueprint_dirs(self):
+        """Get list of (prefix, path) tuples for blueprint directories.
+
+        Same ITAR exclusion as _get_customer_files_dirs() on a read-only
+        install — see that docstring.
+        """
+        keys = [('blueprints_dir', 'BP')]
+        if not self.app_context.is_readonly():
+            keys.append(('itar_blueprints_dir', 'ITAR-BP'))
+        dirs = []
+        for key, prefix in keys:
+            d = self.app_context.get_setting(key, '')
+            if d and os.path.exists(d):
+                dirs.append((prefix, d))
+        return dirs
+
+    def _is_within_permitted_roots(self, path: str) -> bool:
+        """True if path's canonical location is under a currently non-ITAR
+        customer/blueprint root.
+
+        Defense-in-depth for _open_item_externally(): the reparse-point
+        filter in _populate_tree_level() is the primary guard against a
+        junction/symlink escaping a permitted folder, but this catches
+        anything that reaches here anyway by resolving the real path (which
+        follows symlinks/junctions, unlike the raw path) and checking
+        containment directly (CodeRabbit, PR #315).
+
+        Uses os.path.commonpath() rather than a string-prefix check, and
+        normcase()s both sides first -- Windows paths are case-insensitive
+        and realpath() doesn't normalize case, so "C:\\Foo" and "c:\\foo"
+        must still compare equal. commonpath() raises ValueError for paths
+        on different drives; that's not a match, not an error.
+        """
+        real = os.path.normcase(os.path.realpath(path))
+        roots = [os.path.realpath(d) for _, d in self._get_customer_files_dirs()]
+        roots += [os.path.realpath(d) for _, d in self._get_blueprint_dirs()]
+        for root in roots:
+            root = os.path.normcase(root)
+            try:
+                if os.path.commonpath([real, root]) == root:
+                    return True
+            except ValueError:
+                continue  # different drive/mount -- not a match
+        return False
 
     # ==================== Context Menu ====================
 
     def show_search_context_menu(self, pos):
-        """Show context menu on right-click"""
+        """Show context menu on right-click.
+
+        A read-only (search-only) install never offers a way to leave the
+        app and browse the filesystem directly (Explorer) or copy a path
+        that could be pasted into it — only printing/viewing individual
+        files from the folder contents panel (_show_file_context_menu)
+        is available. See open_selected_search_job()'s own guard for the
+        defense-in-depth check.
+        """
         row = self.search_table.currentRow()
         if row < 0:
+            return
+
+        if self.app_context.is_readonly():
             return
 
         menu = QMenu(self._widget)
@@ -891,6 +976,12 @@ class SearchModule(BaseModule):
 
     def open_selected_search_job(self):
         """Open the selected job folder"""
+        if self.app_context.is_readonly():
+            # Defense in depth: the context menu doesn't offer this action on
+            # read-only (search-only) installs, but double-click also routes
+            # here, and the menu is data (still built even if never shown) —
+            # never launch Explorer even if somehow reached.
+            return
         row = self.search_table.currentRow()
         if 0 <= row < len(self.search_results):
             path = self.search_results[row]['path']
@@ -901,6 +992,8 @@ class SearchModule(BaseModule):
 
     def open_selected_blueprints(self):
         """Open the blueprints folder for the selected job's customer"""
+        if self.app_context.is_readonly():
+            return
         row = self.search_table.currentRow()
         if 0 <= row < len(self.search_results):
             raw_customer = self.search_results[row]['customer']
@@ -914,7 +1007,7 @@ class SearchModule(BaseModule):
                 return
 
             customer_label = self.search_results[row]['customer']
-            is_itar = customer_label.startswith(('[ITAR] ', '[ITAR-BP] ', '[ITAR Quote] '))
+            is_itar = customer_label.startswith(_ITAR_LABEL_PREFIXES)
             bp_dir = self.app_context.get_setting('itar_blueprints_dir' if is_itar else 'blueprints_dir', '')
             if bp_dir:
                 customer_bp = os.path.join(bp_dir, customer)
@@ -925,6 +1018,8 @@ class SearchModule(BaseModule):
 
     def copy_search_path(self):
         """Copy the selected result's path to clipboard"""
+        if self.app_context.is_readonly():
+            return
         row = self.search_table.currentRow()
         if 0 <= row < len(self.search_results):
             path = self.search_results[row]['path']
@@ -965,14 +1060,36 @@ class SearchModule(BaseModule):
 
     def _populate_tree_level(self, parent_item, dir_path: str):
         """Read one level of dir_path and add children to parent_item.
-        Subdirectories get a placeholder child so Qt shows the expand arrow."""
+        Subdirectories get a placeholder child so Qt shows the expand arrow.
+
+        On a read-only (search-only) install, symlinks/junctions are
+        excluded entirely rather than followed — one planted under a
+        permitted customer/blueprint folder could otherwise point at the
+        excluded ITAR directory (or anywhere else) and bypass the
+        exclusion (CodeRabbit, PR #315).
+
+        Also validates dir_path itself before listing it, not just its
+        children: recursive calls via _on_tree_item_expanded() only ever
+        reach an already-filtered child, but the *root* call from
+        _on_result_selected() passes a search result's path directly —
+        live or index-derived, so a stale or reparse-point path there
+        would otherwise have its contents listed before any check ran
+        (CodeRabbit, PR #315).
+        """
+        readonly = self.app_context.is_readonly()
+        if readonly and (is_reparse_point(dir_path) or not self._is_within_permitted_roots(dir_path)):
+            return
         try:
             raw = os.listdir(dir_path)
         except OSError:
             return
 
         entries = sorted(
-            [n for n in raw if not _is_hidden_file(os.path.join(dir_path, n), n)],
+            [
+                n for n in raw
+                if not _is_hidden_file(os.path.join(dir_path, n), n)
+                and not (readonly and is_reparse_point(os.path.join(dir_path, n)))
+            ],
             key=lambda n: (not os.path.isdir(os.path.join(dir_path, n)), n.lower()),
         )
 
@@ -999,7 +1116,12 @@ class SearchModule(BaseModule):
             self._populate_tree_level(item, dir_path)
 
     def _on_tree_double_clicked(self, index):
-        """Expand/collapse directories in-tree; open files externally."""
+        """Expand/collapse directories in-tree; open files externally.
+
+        Delegates file-opening to _open_item_externally() rather than
+        calling QDesktopServices directly, so the read-only temp-copy
+        guard applies here too, not just from the context menu.
+        """
         item = self.folder_tree.itemFromIndex(index)
         if item is None:
             return
@@ -1008,19 +1130,61 @@ class SearchModule(BaseModule):
             return
         if os.path.isdir(path):
             item.setExpanded(not item.isExpanded())
-        elif os.path.isfile(path) and os.path.exists(path):
-            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        else:
+            self._open_item_externally(item)
 
     def _open_item_externally(self, item):
-        """Open the given tree item's path in the OS."""
+        """Open the given tree item's path in the OS.
+
+        Refuses directories on a read-only (search-only) install: opening a
+        directory via QDesktopServices launches Explorer on Windows, which
+        is exactly the filesystem access a kiosk install must not offer.
+
+        Files open from a temp copy on a read-only install, never the
+        original path: the external viewer's own "Save As" / "Recent
+        Files" would otherwise hand the user the real customer network
+        path, working around every other restriction in this module. See
+        _cleanup_kiosk_view_tmp_dirs for why cleanup happens at app exit
+        rather than "when the viewer closes" — QDesktopServices hands off
+        to the OS shell association, not a process JobDocs can track.
+
+        Also refuses a path whose canonical location resolves outside the
+        currently permitted (non-ITAR) roots — see
+        _is_within_permitted_roots() — as defense-in-depth against a
+        symlink/junction that reached this far anyway (CodeRabbit, PR #315).
+        """
         if item is None:
             return
         path = item.data(0, Qt.ItemDataRole.UserRole)
-        if path and os.path.exists(path):
-            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        if not path or not os.path.exists(path):
+            return
+        readonly = self.app_context.is_readonly()
+        if readonly and not self._is_within_permitted_roots(path):
+            return
+        if readonly and os.path.isdir(path):
+            return
+        if readonly and os.path.isfile(path):
+            try:
+                tmp_dir = tempfile.mkdtemp(prefix='jobdocs_kiosk_view_')
+                _kiosk_view_tmp_dirs.append(tmp_dir)
+                tmp_path = os.path.join(tmp_dir, os.path.basename(path))
+                shutil.copy2(path, tmp_path)
+            except OSError as exc:
+                logger.warning(
+                    "_open_item_externally: temp copy failed (%s): %s", type(exc).__name__, exc
+                )
+                self.show_error("Error", f"Could not open file: {exc}")
+                return
+            path = tmp_path
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _show_file_context_menu(self, pos):
-        """Context menu for the folder tree"""
+        """Context menu for the folder tree.
+
+        A read-only (search-only) install only offers printing and opening
+        individual files in their viewer — never "Open" on a directory
+        (Explorer) or "Copy Path" (pasteable into Explorer's address bar).
+        """
         item = self.folder_tree.itemAt(pos)
         if item is None:
             return
@@ -1029,13 +1193,21 @@ class SearchModule(BaseModule):
             return
 
         is_file = os.path.isfile(path)
+        readonly = self.app_context.is_readonly()
+
+        if readonly and not is_file:
+            return  # nothing this install may offer for a directory
 
         menu = QMenu(self._widget)
+
+        # Always valid here: the guard above already returned for the one
+        # case that wouldn't be (a directory on a read-only install).
         open_action = menu.addAction("Open")
         open_action.triggered.connect(lambda: self._open_item_externally(item))
 
-        copy_action = menu.addAction("Copy Path")
-        copy_action.triggered.connect(lambda: QApplication.clipboard().setText(path))
+        if not readonly:
+            copy_action = menu.addAction("Copy Path")
+            copy_action.triggered.connect(lambda: QApplication.clipboard().setText(path))
 
         if is_file:
             menu.addSeparator()
@@ -1045,19 +1217,26 @@ class SearchModule(BaseModule):
             # (and can persist a settings change) — not available on read-only
             # (search-only) installs. See _blueprints_path_action()'s own
             # readonly_mode guard for the defense-in-depth check.
-            if not self.app_context.readonly_mode:
+            if not readonly:
                 bp_action = menu.addAction("Blueprints Path")
                 bp_action.triggered.connect(lambda: self._blueprints_path_action(path))
 
         menu.exec(self.folder_tree.viewport().mapToGlobal(pos))
 
     def _print_selected_folder_files(self):
-        """Print all selected files from the folder tree."""
-        paths = [
-            item.data(0, Qt.ItemDataRole.UserRole)
-            for item in self.folder_tree.selectedItems()
-            if os.path.isfile(item.data(0, Qt.ItemDataRole.UserRole) or '')
-        ]
+        """Print all selected files from the folder tree.
+
+        Same permitted-roots check as _open_item_externally() on a
+        read-only (search-only) install — printing reads file content just
+        like opening does, so it needs the same defense-in-depth against a
+        symlink/junction that reached the tree anyway (CodeRabbit, PR #315).
+        """
+        readonly = self.app_context.is_readonly()
+        paths = []
+        for item in self.folder_tree.selectedItems():
+            p = item.data(0, Qt.ItemDataRole.UserRole)
+            if p and os.path.isfile(p) and (not readonly or self._is_within_permitted_roots(p)):
+                paths.append(p)
         if paths:
             print_files_with_dialog(paths, self._widget, self.app_context)
 
@@ -1075,7 +1254,7 @@ class SearchModule(BaseModule):
             return None, None
 
         customer_label = self.search_results[row]['customer']
-        is_itar = customer_label.startswith(('[ITAR] ', '[ITAR-BP] ', '[ITAR Quote] '))
+        is_itar = customer_label.startswith(_ITAR_LABEL_PREFIXES)
         bp_dir = self.app_context.get_setting(
             'itar_blueprints_dir' if is_itar else 'blueprints_dir', ''
         )
@@ -1165,3 +1344,6 @@ class SearchModule(BaseModule):
             self._index_worker.cancel()
             self._index_worker.wait()
         self.search_results.clear()
+        # Best-effort now, on normal shutdown; the atexit.register fallback
+        # in _cleanup_kiosk_view_tmp_dirs still covers a hard exit/crash.
+        _cleanup_kiosk_view_tmp_dirs()

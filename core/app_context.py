@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 from typing import Dict, Any, Callable, List, Optional, Tuple
 
+from shared.utils import is_reparse_point
+
 logger = logging.getLogger(__name__)
 
 
@@ -332,6 +334,14 @@ class AppContext:
             List of (job_name, job_docs_path) tuples, or (job_name,
             job_docs_path, po_number) tuples if include_po_number is True.
         """
+        if self.is_readonly() and is_reparse_point(customer_path):
+            # A junction/symlink standing in for "customer_path" could target
+            # an excluded ITAR directory; a caller (live search, indexing)
+            # should already filter these out of its own customer listing
+            # before reaching here, but this makes it unconditional rather
+            # than depending on every current and future caller doing so
+            # (CodeRabbit, PR #315).
+            return []
         structure = self._settings.get('job_folder_structure', '{customer}/{job_folder}/job documents')
         logger.debug("find_job_folders: customer=%s structure=%s", customer_path, structure)
 
@@ -512,6 +522,8 @@ class AppContext:
         Returns:
             List of (quote_name, quote_path) tuples
         """
+        if self.is_readonly() and is_reparse_point(customer_path):
+            return []  # see find_job_folders()'s equivalent guard
         quote_folder_path = self._settings.get('quote_folder_path', 'Quotes')
         quotes_dir = os.path.join(customer_path, quote_folder_path)
 

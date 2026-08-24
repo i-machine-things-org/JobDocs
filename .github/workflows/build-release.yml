@@ -173,17 +173,23 @@ jobs:
             choco install innosetup --confirm --no-progress
           }
 
-      - name: Build Windows installer
+      - name: Build Windows installers (full + Kiosk)
         shell: pwsh
         run: |
-          $env:RELEASE_VERSION = "${{ env.RELEASE_VERSION }}"
           iscc build_scripts\JobDocs.iss
+          iscc /DKIOSK build_scripts\JobDocs.iss
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: JobDocs-windows
           path: installer_out/JobDocs-${{ env.RELEASE_VERSION }}-windows-setup.exe
+
+      - name: Upload Windows Kiosk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JobDocs-windows-kiosk
+          path: installer_out/JobDocs-Kiosk-${{ env.RELEASE_VERSION }}-windows-setup.exe
 
   # ---------------------------------------------------------------------------
   # Linux — Python source packaged as a Flatpak bundle
@@ -432,6 +438,12 @@ jobs:
           name: JobDocs-windows
           path: release-assets
 
+      - name: Download Windows Kiosk artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: JobDocs-windows-kiosk
+          path: release-assets
+
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
@@ -447,6 +459,7 @@ jobs:
           name: JobDocs ${{ github.ref_name }}
           files: |
             release-assets/JobDocs-${{ github.ref_name }}-windows-setup.exe
+            release-assets/JobDocs-Kiosk-${{ github.ref_name }}-windows-setup.exe
             release-assets/JobDocs-linux.flatpak
             release-assets/io.github.i_machine_things.JobDocs.flatpakrepo
           generate_release_notes: true
