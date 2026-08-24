@@ -139,6 +139,65 @@ def test_clear_history_clears_both_jobs_and_quotes(qapp, monkeypatch):
     assert m.history_table.rowCount() == 0
 
 
+def test_refresh_history_shows_plugin_entry_types(qapp):
+    """Regression test (CodeRabbit finding on PR #317's promotion review):
+    add_to_history() stores plugin entries under recent_{entry_type}s
+    generically (see tests/test_history.py), and clear_history() already
+    clears every recent_* list generically (see
+    test_clear_history_clears_plugin_entry_types above) -- but
+    refresh_history() only ever displayed the two collections it knew by
+    name. Plugin entries persisted and cleared correctly but never appeared
+    in the table.
+    """
+    history = {
+        'recent_jobs': [
+            {'date': '2026-08-01T10:00:00', 'customer': 'Acme', 'job_number': '12345'},
+        ],
+        'recent_my_entry_types': [
+            {'date': '2026-08-02T10:00:00', 'customer': 'Acme', 'description': 'Custom thing'},
+        ],
+    }
+    m = HistoryModule()
+    m.initialize(_make_context(history))
+    m.get_widget()
+
+    m.refresh_history()
+
+    assert m.history_table.rowCount() == 2
+    # Newest first: the plugin entry (08-02) before the job (08-01).
+    assert m.history_table.item(0, 1).text() == 'My entry type'
+    assert m.history_table.item(0, 2).text() == 'Acme'
+    assert m.history_table.item(0, 5).text() == 'Custom thing'
+    assert m.history_table.item(1, 1).text() == 'Job'
+
+
+def test_refresh_history_tolerates_non_list_drawings_on_a_generic_entry(qapp):
+    """A generic plugin entry isn't guaranteed to store 'drawings' as a list
+    of strings the way job/quote entries do. One oddly-shaped entry must not
+    raise mid-loop and blank out every row after it.
+    """
+    history = {
+        'recent_my_entry_types': [
+            {'date': '2026-08-01T10:00:00', 'customer': 'Acme', 'drawings': 'not-a-list'},
+        ],
+        'recent_jobs': [
+            {'date': '2026-08-02T10:00:00', 'customer': 'Acme', 'job_number': '12345', 'drawings': ['DWG-A']},
+        ],
+    }
+    m = HistoryModule()
+    m.initialize(_make_context(history))
+    m.get_widget()
+
+    # Must not raise.
+    m.refresh_history()
+
+    assert m.history_table.rowCount() == 2
+    assert m.history_table.item(0, 1).text() == 'Job'
+    assert m.history_table.item(0, 6).text() == 'DWG-A'
+    assert m.history_table.item(1, 1).text() == 'My entry type'
+    assert m.history_table.item(1, 6).text() == ''
+
+
 def test_clear_history_clears_plugin_entry_types(qapp, monkeypatch):
     """Regression test (CodeRabbit finding on PR #305): add_to_history() stores
     plugin entries under recent_{entry_type}s generically (see tests/test_history.py),
