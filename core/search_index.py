@@ -814,12 +814,21 @@ class SearchIndex:
     def add_job(
         self, prefix: str, customer: str, job_number: str, description: str,
         drawings: List[str], path: str, mtime: Optional[float] = None,
+        *, po_number: str = '',
     ) -> None:
         """Incrementally add/update a single row in the jobs table.
 
         Safe to call even if the index has never been fully built — this
         just adds one row and does not touch indexed_dirs, so it never
         makes is_fully_covered() claim more coverage than actually exists.
+
+        po_number is keyword-only so a positional 6th argument still binds
+        to path, not po_number -- this method previously omitted po_number
+        from the INSERT entirely, and since the insert is INSERT OR REPLACE
+        keyed on UNIQUE(prefix, path), calling it for an already-indexed
+        path silently wiped a real PO number back to '' (CodeRabbit, PR #317
+        promotion review). update()'s full-index INSERT already writes
+        po_number correctly; this mirrors that column order.
         """
         if mtime is None:
             mtime = self._dir_mtime(path)
@@ -827,9 +836,9 @@ class SearchIndex:
             with closing(self._connect(timeout=2.0)) as conn, conn:
                 conn.execute(
                     """INSERT OR REPLACE INTO jobs
-                       (prefix, customer, job_number, description, drawings, path, mtime)
-                       VALUES(?,?,?,?,?,?,?)""",
-                    (prefix, customer, job_number, description, ','.join(drawings), path, mtime),
+                       (prefix, customer, job_number, description, drawings, po_number, path, mtime)
+                       VALUES(?,?,?,?,?,?,?,?)""",
+                    (prefix, customer, job_number, description, ','.join(drawings), po_number, path, mtime),
                 )
         except sqlite3.Error as exc:
             logger.warning("search_index: add_job failed for %s/%s: %s", customer, job_number, exc)
