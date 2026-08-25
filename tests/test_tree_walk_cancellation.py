@@ -30,6 +30,7 @@ pytest.importorskip("PyQt6")
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import QThread  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from modules.job.module import JobTreeWorker  # noqa: E402
@@ -130,6 +131,34 @@ def test_quote_worker_cancel_does_not_block_on_slow_in_flight_customer(qapp, tmp
         if worker.isRunning():
             worker.cancel()
             worker.wait()
+
+
+def test_job_worker_uses_inherited_finished_signal_not_a_shadowing_one(qapp):
+    """Regression test (CodeRabbit, PR #321 follow-up on the non-blocking-
+    cancel fix in PR #317's promotion review): JobTreeWorker used to declare
+    and manually emit its own `finished` signal as the last statement inside
+    run(). That's a queued cross-thread delivery -- Qt's event loop can
+    process it before the thread has actually finished returning from
+    run(), so a connected slot wasn't guaranteed to see isRunning() as
+    False yet. The deferred-restart logic in refresh_job_tree()/
+    search_jobs() depends on that guarantee: if it re-checks isRunning()
+    while still (technically) True, it re-defers against a worker that will
+    never signal completion again, and the pending action is stuck forever.
+
+    A timing-based reproduction is inherently racy (CodeRabbit's own repro
+    needed an artificial QThread.msleep() to reliably widen the window) --
+    assert the actual fix directly instead: JobTreeWorker must not shadow
+    QThread.finished with a class-level signal of its own, so
+    `.finished.connect(...)` always binds to the inherited one Qt guarantees
+    fires only after run() has truly returned.
+    """
+    assert 'finished' not in JobTreeWorker.__dict__
+    assert JobTreeWorker.finished is QThread.finished
+
+
+def test_quote_worker_uses_inherited_finished_signal_not_a_shadowing_one(qapp):
+    assert 'finished' not in QuoteTreeWorker.__dict__
+    assert QuoteTreeWorker.finished is QThread.finished
 
 
 def _make_app_context(tmp_path, cf_root):
