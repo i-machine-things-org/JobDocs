@@ -50,13 +50,22 @@ _kiosk_view_tmp_dirs: list = []
 
 
 def _cleanup_kiosk_view_tmp_dirs() -> None:
-    # pop() rather than iterate-then-leave-stale-entries: called both as
-    # the atexit fallback and before every new temp copy, so a second call
-    # must not re-walk (and no-op re-rmtree) paths a prior call already
-    # removed (CodeRabbit, PR #317 promotion review).
-    while _kiosk_view_tmp_dirs:
-        d = _kiosk_view_tmp_dirs.pop()
+    # Called both as the atexit fallback and before every new temp copy, so
+    # a successfully-removed path must not be re-walked (and no-op
+    # re-rmtree'd) by a later call. But shutil.rmtree(ignore_errors=True)
+    # can silently fail to remove a dir the external viewer still has a
+    # file open in (a real possibility on Windows, where an open handle
+    # blocks deletion) -- popping unconditionally would then forget that
+    # path forever, leaking it past both the next open's cleanup and the
+    # atexit fallback. Keep only the paths that actually still exist after
+    # the attempt, so a failed removal gets retried next time
+    # (CodeRabbit, PR #317 promotion review).
+    still_present = []
+    for d in _kiosk_view_tmp_dirs:
         shutil.rmtree(d, ignore_errors=True)
+        if os.path.exists(d):
+            still_present.append(d)
+    _kiosk_view_tmp_dirs[:] = still_present
 
 
 atexit.register(_cleanup_kiosk_view_tmp_dirs)

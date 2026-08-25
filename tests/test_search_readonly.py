@@ -615,6 +615,53 @@ class TestNoFilesystemEscapeOnReadonly:
         assert second_tmp_path.exists()
         assert second_tmp_path.read_text() == 'contents b'
 
+    def test_open_item_externally_retries_cleanup_of_a_still_locked_copy(self, tmp_path):
+        """Regression test (CodeRabbit, PR #317 promotion review follow-up):
+        shutil.rmtree(ignore_errors=True) can silently fail to remove a temp
+        copy the external viewer still has open -- a real possibility on
+        Windows, where an open file handle blocks deletion. A failed
+        removal must stay tracked and get retried on the next cleanup, not
+        be forgotten forever."""
+        source_dir = tmp_path / 'Z_Customer_Files' / 'Acme' / 'job documents'
+        source_dir.mkdir(parents=True)
+        file_a = source_dir / 'drawing_a.pdf'
+        file_a.write_text('contents a')
+        file_b = source_dir / 'drawing_b.pdf'
+        file_b.write_text('contents b')
+        file_c = source_dir / 'drawing_c.pdf'
+        file_c.write_text('contents c')
+        app_context = self._context(
+            tmp_path, readonly_mode=True,
+            settings={'customer_files_dir': str(tmp_path / 'Z_Customer_Files')},
+        )
+        module = _make_bare_module(app_context)
+
+        item_a = QTreeWidgetItem()
+        item_a.setData(0, Qt.ItemDataRole.UserRole, str(file_a))
+        item_b = QTreeWidgetItem()
+        item_b.setData(0, Qt.ItemDataRole.UserRole, str(file_b))
+        item_c = QTreeWidgetItem()
+        item_c.setData(0, Qt.ItemDataRole.UserRole, str(file_c))
+
+        with _patched_qdesktopservices() as qds:
+            module._open_item_externally(item_a)
+            first_tmp_path = Path(qds.openUrl.call_args[0][0].toLocalFile())
+
+            # Simulate the viewer still holding drawing_a open: rmtree is
+            # called (as part of opening file_b's cleanup pass) but can't
+            # actually remove it.
+            with _patched_search_module_global('shutil', rmtree=MagicMock()):
+                module._open_item_externally(item_b)
+
+            assert first_tmp_path.exists(), "a still-locked copy must not be dropped from tracking"
+
+            # The viewer has since closed drawing_a -- the next cleanup
+            # (opening a third file, with rmtree working normally again)
+            # must retry and succeed this time.
+            module._open_item_externally(item_c)
+
+        assert not first_tmp_path.exists(), "a previously-locked copy must be removed once retried"
+
     def test_open_item_externally_fails_closed_on_temp_copy_error(self, tmp_path):
         """If the temp copy can't be made, never fall back to opening the
         real path — that would silently defeat the whole guard."""
