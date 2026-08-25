@@ -126,6 +126,9 @@ class TestGetNextNumber:
         history = {'recent_jobs': [{'job_number': 'N/A'}, {'job_number': '10003'}]}
         assert get_next_number(history, 'job') == '10004'
 
+    def test_unknown_type_returns_start(self):
+        assert get_next_number({}, 'unknown') == '10000'
+
 
 # ---------------------------------------------------------------------------
 # is_reparse_point
@@ -182,6 +185,3 @@ class TestIsReparsePoint:
     def test_non_windows_real_directory_is_not_a_reparse_point(self, monkeypatch, tmp_path):
         monkeypatch.setattr(os, 'name', 'posix')
         assert is_reparse_point(str(tmp_path)) is False
-
-    def test_unknown_type_returns_start(self):
-        assert get_next_number({}, 'unknown') == '10000'
