@@ -35,8 +35,17 @@ class QuoteTreeWorker(QThread):
 
     # Signal emitted when a customer with quotes is found
     customer_loaded = pyqtSignal(str, str, list)  # (display_name, customer_path, quotes_list)
-    # Signal emitted when loading is complete
-    finished = pyqtSignal()
+    # Completion is reported via the inherited QThread.finished signal, not
+    # a locally-declared one -- Qt only emits that one after run() has
+    # actually returned, so isRunning() is reliably False by the time a
+    # connected slot runs. A custom signal emitted as the last statement in
+    # run() doesn't have that guarantee (it's a queued cross-thread
+    # delivery, and the GUI event loop can process it before the thread
+    # object finishes its own post-run() bookkeeping) -- refresh_quote_tree()/
+    # search_quotes()'s deferred-restart handler depends on isRunning()
+    # being accurate at that point, or a queued refresh/search could
+    # re-defer itself forever against a worker that will never signal
+    # completion again (CodeRabbit, PR #317 promotion review follow-up).
 
     def __init__(self, dirs_to_search, selected_customer, show_all_customers, app_context):
         super().__init__()
@@ -94,12 +103,9 @@ class QuoteTreeWorker(QThread):
             except OSError as e:
                 print(f"[QuoteTreeWorker] OSError: {e}", flush=True)
 
-        # Emit finished whether cancelled or not -- refresh_quote_tree()/
-        # search_quotes() rely on this to know a stale worker has actually
-        # stopped before starting replacement work, since cancel() no
-        # longer blocks the GUI thread waiting for it (CodeRabbit, PR #317
-        # promotion review).
-        self.finished.emit()
+        # No self.finished.emit() here -- see the class docstring/comment
+        # above. QThread's own finished signal fires automatically once
+        # run() returns, whether cancelled or not.
 
 
 class QuoteModule(BaseModule):
