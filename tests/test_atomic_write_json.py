@@ -61,6 +61,7 @@ class TestAtomicWriteJson:
         assert not target.exists()
         assert list(tmp_path.iterdir()) == []
 
+    @pytest.mark.skipif(os.name == 'nt', reason="POSIX permission bits only")
     def test_new_file_permissions_respect_umask_not_hardcoded_0600(self, tmp_path):
         # tempfile.mkstemp() hardcodes 0o600 on POSIX regardless of umask.
         # A new atomic_write_json() target must match what plain
@@ -82,6 +83,7 @@ class TestAtomicWriteJson:
         assert actual_mode == expected_mode
         assert actual_mode != 0o600
 
+    @pytest.mark.skipif(os.name == 'nt', reason="POSIX permission bits only")
     def test_preserves_existing_file_permissions(self, tmp_path):
         target = tmp_path / 'settings.json'
         target.write_text('{"old": true}')
