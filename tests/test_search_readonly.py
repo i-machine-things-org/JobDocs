@@ -581,6 +581,40 @@ class TestNoFilesystemEscapeOnReadonly:
         assert opened_path.name == 'drawing.pdf', "filename should still look sane in the viewer"
         assert opened_path.read_text() == 'contents'
 
+    def test_open_item_externally_cleans_up_previous_temp_copy_on_next_open(self, tmp_path):
+        """A kiosk left running for a long session must not accumulate one
+        plaintext temp copy of every document ever viewed -- only the most
+        recently viewed file's copy should exist on disk at a time
+        (CodeRabbit, PR #317 promotion review)."""
+        source_dir = tmp_path / 'Z_Customer_Files' / 'Acme' / 'job documents'
+        source_dir.mkdir(parents=True)
+        file_a = source_dir / 'drawing_a.pdf'
+        file_a.write_text('contents a')
+        file_b = source_dir / 'drawing_b.pdf'
+        file_b.write_text('contents b')
+        app_context = self._context(
+            tmp_path, readonly_mode=True,
+            settings={'customer_files_dir': str(tmp_path / 'Z_Customer_Files')},
+        )
+        module = _make_bare_module(app_context)
+
+        item_a = QTreeWidgetItem()
+        item_a.setData(0, Qt.ItemDataRole.UserRole, str(file_a))
+        item_b = QTreeWidgetItem()
+        item_b.setData(0, Qt.ItemDataRole.UserRole, str(file_b))
+
+        with _patched_qdesktopservices() as qds:
+            module._open_item_externally(item_a)
+            first_tmp_path = Path(qds.openUrl.call_args[0][0].toLocalFile())
+            assert first_tmp_path.exists()
+
+            module._open_item_externally(item_b)
+            second_tmp_path = Path(qds.openUrl.call_args[0][0].toLocalFile())
+
+        assert not first_tmp_path.exists(), "previous temp copy must be removed once a new file is opened"
+        assert second_tmp_path.exists()
+        assert second_tmp_path.read_text() == 'contents b'
+
     def test_open_item_externally_fails_closed_on_temp_copy_error(self, tmp_path):
         """If the temp copy can't be made, never fall back to opening the
         real path — that would silently defeat the whole guard."""
