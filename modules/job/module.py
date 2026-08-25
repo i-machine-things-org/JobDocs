@@ -878,6 +878,18 @@ class JobModule(BaseModule):
 
     def search_jobs(self):
         """Search for jobs matching the search term"""
+        if not self._is_add_tab_active():
+            # A search deferred while a stale tree-refresh worker was still
+            # finishing must not run its synchronous traversal against a
+            # tab the user has since navigated away from -- that's exactly
+            # the GUI-freeze risk this fix exists to close, just reached
+            # through the deferred path instead of a direct call
+            # (CodeRabbit, PR #321 follow-up).
+            self._add_tree_stale = True
+            if self._worker and self._worker.isRunning():
+                self._worker.cancel()
+            return
+
         search_term = self.add_search_edit.text().strip().lower()
 
         if not search_term:

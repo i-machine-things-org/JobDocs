@@ -226,6 +226,67 @@ class TestJobModuleRefreshDoesNotBlockOnHungWorker:
             _cleanup_worker(m)
 
 
+class TestJobModuleDeferredSearchSkipsWhenTabInactive:
+    def test_deferred_search_jobs_does_not_run_after_tab_deactivated(self, qapp, tmp_path, monkeypatch):
+        """Regression test (CodeRabbit, PR #321 follow-up): unlike
+        refresh_job_tree(), search_jobs() never checked whether the Add to
+        Existing tab was still active. A search deferred while a stale
+        tree-refresh worker was still finishing could therefore run its
+        synchronous, unbounded traversal once it finally fired even if the
+        user had already navigated away -- exactly the GUI-freeze risk this
+        whole fix exists to close, just reached through the deferred path.
+        """
+        cf_root = tmp_path / 'customer_files'
+        (cf_root / 'Acme').mkdir(parents=True)
+        ctx = _make_app_context(tmp_path, cf_root)
+
+        release = threading.Event()
+        monkeypatch.setattr(job_module_ns.os, 'listdir', _make_hung_listdir(cf_root, release))
+
+        m = JobModule()
+        try:
+            m.initialize(ctx)
+            m.get_widget()
+
+            m._job_tab_widget.setCurrentWidget(m._add_to_job_tab)  # starts a hung worker
+            first_worker = m._worker
+            assert first_worker is not None
+
+            clear_calls = {'n': 0}
+            real_clear = m.job_tree.clear
+
+            def counting_clear():
+                clear_calls['n'] += 1
+                real_clear()
+
+            monkeypatch.setattr(m.job_tree, 'clear', counting_clear)
+
+            m.add_search_edit.setText('acme')
+            m.search_jobs()  # deferred -- first_worker is still stuck
+            assert m._pending_tree_action == m.search_jobs
+
+            # The user switches to the "Create New" sub-tab (index 0)
+            # before the deferred search ever gets a chance to run.
+            m._job_tab_widget.setCurrentIndex(0)
+            assert not m._is_add_tab_active()
+
+            calls_before_release = clear_calls['n']
+            release.set()  # let the stuck worker actually finish
+
+            deadline = time.monotonic() + 2.0
+            while m._pending_tree_action is not None and time.monotonic() < deadline:
+                qapp.processEvents()
+                time.sleep(0.01)
+
+            assert m._pending_tree_action is None, "deferred search_jobs() never ran at all"
+            assert clear_calls['n'] == calls_before_release, (
+                "search_jobs() ran its synchronous traversal against an inactive tab"
+            )
+        finally:
+            release.set()
+            _cleanup_worker(m)
+
+
 class TestQuoteModuleRefreshDoesNotBlockOnHungWorker:
     def test_refresh_quote_tree_does_not_block_on_a_hung_worker(self, qapp, tmp_path, monkeypatch):
         cf_root = tmp_path / 'customer_files'
