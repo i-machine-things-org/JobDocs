@@ -60,9 +60,14 @@ Source: "..\windows\icon.ico";     DestDir: "{app}"; Flags: ignoreversion
 
 #ifdef KIOSK
 ; JobDocs Kiosk: only the files the Search module and its shared/core
-; dependencies need. Bulk, Job, Quote, Settings, etc. are never copied, so
-; there is no write-capable module code to unlock -- see main.py's
-; _is_readonly_install().
+; dependencies need. The Job, Quote, and Bulk *module tabs* are never
+; copied, so there is no write-capable module code to unlock -- see
+; main.py's _is_readonly_install(). core\* is copied in full, which does
+; include settings_dialog.py -- the Settings dialog and its File menu
+; entry remain present and reachable in a Kiosk install; any changes just
+; don't persist, blocked separately by readonly_mode's save_settings()/
+; save_history() guards (core/app_context.py), not by omitting this code
+; (CodeRabbit, PR #317 promotion review).
 Source: "..\app\main.py";              DestDir: "{app}\app";                 Flags: ignoreversion
 Source: "..\app\core\*";               DestDir: "{app}\app\core";            Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\app\shared\*";             DestDir: "{app}\app\shared";          Flags: ignoreversion recursesubdirs createallsubdirs
@@ -174,9 +179,11 @@ end;
 
 #ifdef KIOSK
 procedure InitializeWizard();
-{ JobDocs Kiosk has no Settings UI and doesn't ship the OOBE wizard (both
-  write-capable admin tools, excluded from [Files] above) -- its search
-  directories are configured here instead, once, at install time. }
+{ JobDocs Kiosk doesn't ship the first-run OOBE wizard (a write-capable
+  admin tool, excluded from [Files] above) -- its search directories are
+  configured here instead, once, at install time. The app's own Settings
+  dialog is still present (see the [Files] comment above); its writes are
+  blocked by readonly_mode, not by exclusion. }
 begin
   KioskDirsPage := CreateInputDirPage(wpSelectDir,
     'Job Data Locations', 'Where should JobDocs Kiosk search for jobs?',
