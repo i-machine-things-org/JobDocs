@@ -712,7 +712,7 @@ class TestReparsePointExclusionOnReadonly:
         return customer_dir, real_subdir, link_path
 
     def test_symlinked_subdirectory_excluded_from_readonly_tree(self, tmp_path):
-        customer_dir, real_subdir, link_path = self._make_symlinked_layout(tmp_path)
+        customer_dir, _real_subdir, _link_path = self._make_symlinked_layout(tmp_path)
         app_context = self._context(
             tmp_path, readonly_mode=True,
             settings={'customer_files_dir': str(customer_dir.parent)},
@@ -730,7 +730,7 @@ class TestReparsePointExclusionOnReadonly:
     def test_symlinked_subdirectory_included_when_not_readonly(self, tmp_path):
         """The exclusion is a read-only (kiosk) restriction, not a general
         one — the full app has no ITAR-exclusion concern to defend here."""
-        customer_dir, real_subdir, link_path = self._make_symlinked_layout(tmp_path)
+        customer_dir, _real_subdir, _link_path = self._make_symlinked_layout(tmp_path)
         app_context = self._context(
             tmp_path, readonly_mode=False,
             settings={'customer_files_dir': str(customer_dir.parent)},
