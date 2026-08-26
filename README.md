@@ -35,12 +35,43 @@ A modular tool for managing blueprint files and customer job directories with su
 
 ### Windows
 
-Download the installer from the [latest release](https://github.com/i-machine-things-org/JobDocs/releases/latest) and run it. The installer offers two options:
+The [latest release](https://github.com/i-machine-things-org/JobDocs/releases/latest) has
+two Windows installers — download whichever fits the machine:
 
-- **Install for me only** — installs to `%LOCALAPPDATA%\Programs\JobDocs` (no admin required)
-- **Install for all users** — installs to `C:\Program Files\JobDocs` (requires admin/UAC)
+- **`JobDocs-<version>-windows-setup.exe`** — the full app: Job, Quote, Bulk Create,
+  Search, Settings, plugins, everything.
+- **`JobDocs-Kiosk-<version>-windows-setup.exe`** — **JobDocs Kiosk**, a search-only
+  build for shared/shop-floor machines that should look up jobs but not create, edit, or
+  browse the filesystem. Only the Search tab's module code is on disk (the Job, Quote,
+  and Bulk tabs are never installed, not merely hidden). The Settings dialog's code is
+  also on disk but unreachable — Kiosk never builds a menu bar, so there's no File menu
+  to open it from. It never indexes or searches ITAR-controlled directories, and its
+  Search tab offers no "open folder" / "copy path" — only printing and viewing
+  individual files. It installs and updates independently of the full app
+  (separate Start Menu entry, separate uninstall) and can coexist with it on the same
+  machine.
 
-Both options add `JobDocs.exe` to `PATH` so it is callable from any terminal.
+Each installer offers:
+
+- **Install for me only** — installs to `%LOCALAPPDATA%\Programs\<app>` (no admin required)
+- **Install for all users** — installs to `C:\Program Files\<app>` (requires admin/UAC)
+
+Both options add the app's exe to `PATH` so it is callable from any terminal.
+
+JobDocs Kiosk's file-level restriction is a UI/footprint measure, not account-level access
+control — the same Windows account running it could still install the full app itself
+alongside it (there are no write-capable modules present in the Kiosk install to load
+either way, and Kiosk detection is a marker baked into the installer payload at build
+time, not a file it writes and a user could delete afterward). To actually restrict what
+a shared machine's user can do, run it under a separately managed Windows account with
+the installation directory locked down.
+
+JobDocs Kiosk has no menu bar and no first-run setup wizard (both write-capable admin
+surfaces) — the JobDocs Kiosk installer itself prompts for the customer files, ITAR
+customer files, blueprints, and ITAR blueprints directories instead. Leave the ITAR
+fields blank if the site doesn't use them. Re-run the installer to change these later;
+it pre-fills your previous answers. The Settings dialog's code ships with Kiosk too,
+but there's no File → Settings to open it from — the menu bar itself is never built.
 
 ### Linux (Flatpak)
 

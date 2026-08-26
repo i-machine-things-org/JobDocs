@@ -4,12 +4,17 @@ Shared utility functions for JobDocs
 Common helper functions used across multiple modules.
 """
 
+import ctypes
+import json
 import logging
 import os
 import platform
 import shutil
 import re
+import stat
 import subprocess
+import tempfile
+import uuid
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
@@ -17,19 +22,156 @@ from typing import Dict, Any, List, Tuple, Optional
 logger = logging.getLogger(__name__)
 
 
+def atomic_write_json(path: Path, data: Any) -> None:
+    """Write data as JSON to path atomically.
+
+    Writes to a temp file in the same directory, fsyncs it, then
+    os.replace()s it into place. This gives torn-write visibility
+    atomicity — no reader ever observes a half-written file — and a
+    process kill or crash between the write and the rename leaves the
+    original file untouched instead of truncated/empty, unlike plain
+    `open(path, 'w')` which truncates the file the instant it's opened,
+    before any new content is written.
+
+    Two caveats worth being explicit about:
+    - `os.replace()`'s atomicity is best-effort, not an absolute
+      guarantee, on the kind of target this is often used for (a network
+      share): older SMB/exFAT-backed NAS exports don't uniformly support
+      atomic replace-over-existing-file semantics, and on Windows a
+      sharing violation from AV/backup/indexing software holding the
+      destination open can make the replace itself fail (raised as
+      OSError — callers already handle that).
+    - This only makes a single write internally consistent. It adds no
+      locking or versioning across writers, so two app instances (or an
+      instance racing the remote sync path) can still last-writer-wins at
+      the load-mutate-save level. That's a pre-existing limitation, not
+      something atomic writes solve.
+    """
+    path = Path(path)
+    fd, tmp_path = tempfile.mkstemp(dir=path.parent, prefix=f'.{path.name}.', suffix='.tmp')
+    try:
+        # mkstemp() hardcodes mode 0o600 on POSIX regardless of the process
+        # umask, which would silently narrow permissions on every save once
+        # os.replace() swaps the temp file's inode in. Restore the original
+        # file's mode if it exists (preserving whatever was already set),
+        # otherwise derive what a plain open(path, 'w') would have produced
+        # under the current umask. Only a missing target falls back to the
+        # probe -- any other stat() failure (permission denied, I/O error)
+        # propagates instead of silently continuing with a guessed mode.
+        try:
+            desired_mode = stat.S_IMODE(os.stat(path).st_mode)
+        except FileNotFoundError:
+            # os.umask() would work but mutates the process-wide mask while
+            # reading it, racing any other thread creating a file in that
+            # window. Probe with a throwaway file instead -- the kernel
+            # applies the umask when it's created, so its resulting mode
+            # reveals the mask without ever touching the global umask value.
+            probe_path = path.parent / f'.{path.name}.{uuid.uuid4().hex}.umask_probe'
+            probe_fd = os.open(str(probe_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
+            try:
+                desired_mode = stat.S_IMODE(os.fstat(probe_fd).st_mode)
+            finally:
+                os.close(probe_fd)
+                os.unlink(probe_path)
+
+        try:
+            os.chmod(tmp_path, desired_mode)
+        except OSError:
+            # fd is still a raw descriptor from mkstemp() at this point --
+            # os.fdopen() below hasn't taken ownership of it yet, so it must
+            # be closed explicitly here or it leaks for the process's life.
+            os.close(fd)
+            raise
+
+        with os.fdopen(fd, 'w') as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        # os.replace() already removed tmp_path on success; only cleans up
+        # the leftover temp file if the write or replace failed partway.
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+def is_reparse_point(full_path: str) -> bool:
+    """True for a symlink or (Windows) NTFS junction/mount point.
+
+    Shared by modules/search/module.py (folder-tree traversal) and
+    AppContext.find_job_folders()/find_quote_folders() (live search and
+    indexing) so a link planted under a permitted customer/blueprint
+    directory can't be used to reach an excluded ITAR directory through any
+    of those paths (CodeRabbit, PR #315).
+
+    Fails closed on Windows: os.path.islink() doesn't reliably detect
+    junctions/mount points there, so a GetFileAttributesW lookup failure
+    (INVALID_FILE_ATTRIBUTES, or a raised exception) is treated as a
+    reparse point rather than falling through to a check that could miss
+    one (CodeRabbit, PR #315).
+    """
+    if os.name != "nt":
+        return os.path.islink(full_path)
+    try:
+        attrs = ctypes.windll.kernel32.GetFileAttributesW(full_path)
+    except (AttributeError, OSError):
+        return True
+    if attrs == -1:  # INVALID_FILE_ATTRIBUTES
+        return True
+    return bool(attrs & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
+
+
+def is_kiosk_install() -> bool:
+    """True when running as JobDocs Kiosk — see build_scripts/JobDocs.iss.
+
+    Single source of truth for this check: main.py's _is_readonly_install()
+    delegates here rather than duplicating the detection, and
+    get_config_dir() below uses it to keep Kiosk's settings/history/search
+    index isolated from a regular JobDocs install on the same machine.
+    Windows-only; always False in dev checkouts, Flatpak, and a regular
+    JobDocs install.
+
+    Checks for kiosk_build.marker, which the Kiosk installer's [Files]
+    section bakes into the install payload at build time (`iscc /DKIOSK`).
+    An earlier version checked a marker file the installer wrote via a
+    post-install script instead, which meant deleting it after install
+    silently switched get_config_dir() to the full app's directory and
+    disabled the AppContext persistence guard — not just the cosmetic
+    window title/menu bar it was assumed to control (CodeRabbit, PR #315).
+    Baking the check into the install payload itself closes that: nothing
+    a user can delete post-install changes the answer.
+    """
+    if os.getenv('FLATPAK_ID'):
+        return False
+    # This file lives at <install>/app/shared/utils.py; main.py lives at
+    # <install>/app/main.py — one more parent hop to reach the same app/ dir.
+    app_dir = Path(__file__).resolve().parent.parent
+    if not (app_dir.parent / 'runtime').is_dir():
+        return False  # dev checkout, not an embedded install
+    return (app_dir / 'shared' / 'kiosk_build.marker').exists()
+
+
 def get_config_dir() -> Path:
-    """Get the appropriate config directory for the current OS"""
+    """Get the appropriate config directory for the current OS.
+
+    JobDocs Kiosk gets its own subdirectory (a "Kiosk" suffix), isolated
+    from a regular JobDocs install's settings/history/search index. The two
+    are separate installers meant to coexist on one machine (see
+    build_scripts/JobDocs.iss); sharing a config dir would mean uninstalling
+    either one wipes the other's data.
+    """
+    suffix = ' Kiosk' if is_kiosk_install() else ''
     if platform.system() == "Windows":
-        # Windows: C:\Users\<Username>\AppData\Local\JobDocs
+        # Windows: C:\Users\<Username>\AppData\Local\JobDocs[ Kiosk]
         base = Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local'))
-        config_dir = base / 'JobDocs'
+        config_dir = base / f'JobDocs{suffix}'
     elif platform.system() == "Darwin":
-        # macOS: ~/Library/Application Support/JobDocs
-        config_dir = Path.home() / 'Library' / 'Application Support' / 'JobDocs'
+        # macOS: ~/Library/Application Support/JobDocs[ Kiosk]
+        config_dir = Path.home() / 'Library' / 'Application Support' / f'JobDocs{suffix}'
     else:
-        # Linux/other: ~/.local/share/JobDocs
+        # Linux/other: ~/.local/share/JobDocs[ Kiosk]
         xdg_data = os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')
-        config_dir = Path(xdg_data) / 'JobDocs'
+        config_dir = Path(xdg_data) / f'JobDocs{suffix}'
 
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir
@@ -228,7 +370,8 @@ def create_file_link(source: Path, dest: Path, link_type: str = 'hard') -> bool:
         else:
             shutil.copy2(source, dest)
         return True
-    except OSError:
+    except OSError as e:
+        logger.warning("create_file_link: failed to link %s -> %s (%s): %s", source, dest, link_type, e)
         return False
 
 

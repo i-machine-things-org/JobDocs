@@ -11,16 +11,41 @@ from PyQt6.QtWidgets import (
     QWidget, QSplitter, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, pyqtSlot, QSize, QThread
-from PyQt6.QtGui import QBrush, QColor, QDragEnterEvent, QDropEvent, QImage, QPixmap
+from PyQt6.QtGui import QBrush, QColor, QDragEnterEvent, QDropEvent, QImage, QImageReader, QPixmap
 from pathlib import Path
 import atexit
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import shutil
 import struct
 import tempfile
 
 logger = logging.getLogger(__name__)
+
+
+def _setup_dropzone_debug_log() -> None:
+    """Attach a rotating file handler so DropZone's debug logging is visible
+    without a console — the packaged app is launched windowed (pythonw-style),
+    and this repo has no logging config anywhere else (see CODING_NOTES.md:
+    Python Style & Error Handling), so `logger.debug(...)` calls would
+    otherwise silently go nowhere. Best-effort: a log-setup failure must never
+    block drag-and-drop itself.
+    """
+    if any(isinstance(h, RotatingFileHandler) for h in logger.handlers):
+        return  # already set up (e.g. module reloaded)
+    try:
+        from shared.utils import get_config_dir
+        log_path = get_config_dir() / 'dropzone_debug.log'
+        handler = RotatingFileHandler(log_path, maxBytes=2 * 1024 * 1024, backupCount=2, encoding='utf-8')
+        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+    except OSError as e:
+        print(f"[DropZone] Could not set up debug log file: {e}", flush=True)
+
+
+_setup_dropzone_debug_log()
 
 
 # Single atexit handler for all DropZone temp directories — avoids accumulating
@@ -86,11 +111,34 @@ class DropZone(QFrame):
 
     @staticmethod
     def _outlook_descriptor_format(mime_data) -> str:
-        """Return the FileGroupDescriptor format name if present, else empty string."""
+        """Return the FileGroupDescriptor format name if present, else empty string.
+
+        Prefers the Unicode (W) format over the ANSI one when a drag source
+        offers both — Qt's QMimeData.formats() order reflects how the source
+        registered them, not a fixed preference, so picking the first match
+        could pick ANSI and misdecode/truncate Unicode filenames even though
+        the better format was also available.
+        """
+        fallback = ''
         for fmt in mime_data.formats():
             if 'filegroupdescriptor' in fmt.lower():
-                return fmt
-        return ''
+                if DropZone._is_unicode_descriptor_format(fmt):
+                    return fmt
+                fallback = fallback or fmt
+        return fallback
+
+    @staticmethod
+    def _is_unicode_descriptor_format(fmt: str) -> bool:
+        """Return True if fmt identifies the Unicode (W) FileGroupDescriptor format.
+
+        Qt exposes this as a MIME identifier like
+        'application/x-qt-windows-mime;value="FileGroupDescriptorW"' — the
+        string ends with a closing quote, not 'W', so a plain
+        fmt.endswith('W') never matches and Unicode filenames get parsed as
+        Latin-1, truncating them at the first null byte. Match the token
+        itself instead.
+        """
+        return 'filegroupdescriptorw' in fmt.lower()
 
     @staticmethod
     def _is_classic_outlook(mime_data) -> bool:
@@ -111,8 +159,20 @@ class DropZone(QFrame):
     def dragEnterEvent(self, event: QDragEnterEvent):
         mime = event.mimeData()
         print(f"[DropZone] dragEnter formats: {mime.formats()}", flush=True)
-        if (mime.hasUrls() or self._outlook_descriptor_format(mime)
-                or self._is_classic_outlook(mime) or self._is_new_outlook(mime)):
+
+        has_urls = mime.hasUrls()
+        descriptor_fmt = self._outlook_descriptor_format(mime)
+        is_classic_outlook = self._is_classic_outlook(mime)
+        is_new_outlook = self._is_new_outlook(mime)
+        accepted = has_urls or descriptor_fmt or is_classic_outlook or is_new_outlook
+
+        logger.debug(
+            "dragEnterEvent: accepted=%s hasUrls=%s descriptor_fmt=%r "
+            "is_classic_outlook=%s is_new_outlook=%s formats=%s",
+            accepted, has_urls, descriptor_fmt, is_classic_outlook, is_new_outlook, mime.formats(),
+        )
+
+        if accepted:
             event.acceptProposedAction()
             self.setStyleSheet("""
                 DropZone {
@@ -181,6 +241,12 @@ class DropZone(QFrame):
         is_outlook_web = DropZone._is_new_outlook(mime)
         is_classic_outlook = DropZone._is_classic_outlook(mime) and not is_outlook_web
 
+        logger.debug(
+            "dropEvent: hasUrls=%s descriptor_fmt=%r is_outlook_web=%s "
+            "is_classic_outlook=%s formats=%s",
+            mime.hasUrls(), descriptor_fmt, is_outlook_web, is_classic_outlook, mime.formats(),
+        )
+
         files: list = []
         if is_outlook_web:
             files = DropZone._handle_outlook_web_drop(mime)
@@ -202,7 +268,7 @@ class DropZone(QFrame):
                     'drop the file here.'
                 )
         if not is_outlook_web and not files and is_classic_outlook:
-            files = DropZone._handle_classic_outlook_drop(mime)
+            files = DropZone._handle_classic_outlook_drop(mime, self)
             if not files:
                 from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(
@@ -230,11 +296,12 @@ class DropZone(QFrame):
                     # Non-local URL (blob:, https:, etc.) — log and skip for now
                     print(f"[DropZone]   Skipping non-local URL: {url.toString()}", flush=True)
         if not files and descriptor_fmt:
-            files = DropZone._handle_outlook_drop(mime, descriptor_fmt)
+            files = DropZone._handle_outlook_drop(mime, descriptor_fmt, self)
 
         print(f"[DropZone] emitting {len(files)} file(s)", flush=True)
         for f in files:
             print(f"  - {f}", flush=True)
+        logger.debug("dropEvent: emitting %d file(s)", len(files))
         if files:
             self.files_dropped.emit(files)
 
@@ -523,76 +590,184 @@ class DropZone(QFrame):
         return candidates
 
     @staticmethod
-    def _handle_classic_outlook_drop(mime_data) -> list:
-        """Handle drag from the classic Outlook desktop app.
+    def _handle_classic_outlook_drop(mime_data, parent=None) -> list:
+        """Handle drag from the classic Outlook desktop app — including
+        multiple selected emails dragged at once.
 
         Classic Outlook provides RenPrivateMessages (binary MAPI entry IDs) and a
-        Csv format containing the same entry ID as a UTF-16LE hex string.  FileContents
-        is typically 0 bytes when dropped on non-Shell targets, so we retrieve the email
-        via MAPI COM using the entry ID directly.
+        Csv format containing the same entry ID(s) as UTF-16LE hex strings, one
+        per line for a multi-select drag (mirroring the row-per-item layout the
+        neighbouring text/plain subject data already uses). FileContents is
+        typically 0 bytes when dropped on non-Shell targets, so we retrieve each
+        email via MAPI COM using its entry ID directly.
         """
-        # Entry ID is stored in the Csv format as a UTF-16LE hex string —
-        # exactly the format GetItemFromID expects, no conversion needed.
-        raw_id = ''
+        # Entry ID(s) are stored in the Csv format as UTF-16LE hex strings, one
+        # per line for a multi-select drag — exactly the format GetItemFromID
+        # expects, no conversion needed.
+        raw_ids: list = []
         try:
             csv_bytes = bytes(mime_data.data('application/x-qt-windows-mime;value="Csv"'))
             if csv_bytes:
-                raw_id = csv_bytes.decode('utf-16-le').rstrip('\x00').strip()
-                print(f"[DropZone] Classic Outlook entry ID: {raw_id[:40]}...", flush=True)
+                csv_text = csv_bytes.decode('utf-16-le').rstrip('\x00')
+                raw_ids = [ln.strip() for ln in csv_text.splitlines() if ln.strip()]
+                print(f"[DropZone] Classic Outlook entry ID(s): {len(raw_ids)}", flush=True)
         except Exception as e:
-            print(f"[DropZone] Could not read Csv entry ID: {e}", flush=True)
+            print(f"[DropZone] Could not read Csv entry ID(s): {e}", flush=True)
 
-        # Subject from text/plain tab-delimited: header row then data row
-        # "From\tSubject\tReceived\tSize\tCategories\t\nSender\tSubject..."
-        subject = ''
+        # Subjects from text/plain tab-delimited: header row then one data row
+        # per selected email — "From\tSubject\tReceived\tSize\tCategories\t\n
+        # Sender1\tSubject1...\nSender2\tSubject2...".
+        subjects: list = []
         try:
             plain_bytes = bytes(mime_data.data('text/plain'))
             plain = plain_bytes.decode('utf-8', errors='replace')
             lines = [ln for ln in plain.splitlines() if ln.strip()]
             for line in lines:
                 cols = line.split('\t')
-                if cols[0].strip().lower() not in ('from', ''):
-                    if len(cols) >= 2:
-                        subject = cols[1].strip()
-                        break
-            print(f"[DropZone] Classic Outlook subject: {subject!r}", flush=True)
+                if cols[0].strip().lower() in ('from', ''):
+                    continue
+                subjects.append(cols[1].strip() if len(cols) >= 2 else '')
+            print(f"[DropZone] Classic Outlook subject(s): {len(subjects)}", flush=True)
         except Exception as e:
-            print(f"[DropZone] Could not parse subject from text/plain: {e}", flush=True)
+            print(f"[DropZone] Could not parse subjects from text/plain: {e}", flush=True)
 
-        # Fallback: read subject from FileGroupDescriptorW filename (strip .msg)
-        if not subject:
+        # Fallback: read subject from the FileGroupDescriptor(W) filename(s) (strip .msg)
+        if not subjects:
             descriptor_fmt = DropZone._outlook_descriptor_format(mime_data)
             if descriptor_fmt:
                 try:
                     descriptor_bytes = bytes(mime_data.data(descriptor_fmt))
-                    is_unicode = descriptor_fmt.upper().endswith('W')
-                    name_offset = 4 + 72
-                    if is_unicode:
-                        name_bytes = descriptor_bytes[name_offset:name_offset + 520]
-                        parsed = name_bytes.decode('utf-16-le').split('\x00')[0]
-                    else:
-                        name_bytes = descriptor_bytes[name_offset:name_offset + 260]
-                        parsed = name_bytes.decode('latin-1').split('\x00')[0]
-                    if parsed:
-                        subject = os.path.splitext(parsed)[0]
-                        print(f"[DropZone] Classic Outlook subject (from descriptor): {subject!r}", flush=True)
+                    is_unicode = DropZone._is_unicode_descriptor_format(descriptor_fmt)
+                    subjects = [
+                        os.path.splitext(name)[0]
+                        for name in DropZone._parse_descriptor_filenames(descriptor_bytes, is_unicode)
+                    ]
+                    if subjects:
+                        print(f"[DropZone] Classic Outlook subject(s) (from descriptor): {len(subjects)}", flush=True)
                 except Exception as e:
-                    print(f"[DropZone] Could not parse descriptor for subject: {e}", flush=True)
+                    print(f"[DropZone] Could not parse descriptor for subject(s): {e}", flush=True)
 
-        if not raw_id and not subject:
+        # raw_ids and subjects come from two independently-filtered parses of
+        # separate MIME blobs (Csv vs. text/plain) with no shared row key —
+        # they're only ever paired by position. If one row is dropped from
+        # one list but not the other (e.g. a blank sender name skips a
+        # subjects row but not the matching raw_ids row), positional pairing
+        # silently shifts and every subsequent (raw_id, subject) pair points
+        # to the wrong email — which could feed a mismatched subject into
+        # _mapi_save_email's MAPI subject-search fallback and retrieve the
+        # WRONG email. When lengths disagree, treat raw_id as authoritative
+        # and drop subjects entirely rather than risk mis-pairing; retrieval
+        # then relies on the direct entry-ID lookup only for this drop.
+        if raw_ids and subjects and len(raw_ids) != len(subjects):
+            print(
+                f"[DropZone] Classic Outlook: entry ID count ({len(raw_ids)}) != "
+                f"subject count ({len(subjects)}) — positional pairing is unreliable; "
+                "discarding subjects to avoid mis-pairing IDs with the wrong subject",
+                flush=True,
+            )
+            subjects = []
+
+        if not raw_ids and not subjects:
             print('[DropZone] Classic Outlook: no entry ID or subject — cannot retrieve email', flush=True)
             return []
 
+        # At least one email is identified either by ID or by subject alone —
+        # process every one found by either signal, matching them by position.
+        item_count = max(len(raw_ids), len(subjects))
         tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
         _dropzone_tmp_dirs.append(tmp_dir)
-        return DropZone._mapi_save_email(raw_id, subject, tmp_dir, 0)
+
+        files: list = []
+        failed_labels: list = []
+        for idx in range(item_count):
+            raw_id = raw_ids[idx] if idx < len(raw_ids) else ''
+            subject = subjects[idx] if idx < len(subjects) else ''
+            results = DropZone._mapi_save_email(raw_id, subject, tmp_dir, idx)
+            if results:
+                files.extend(results)
+            else:
+                label = subject or (f"{raw_id[:20]}..." if raw_id else f"item {idx + 1}")
+                failed_labels.append(label)
+                print(f"[DropZone] Classic Outlook: could not retrieve item {idx}", flush=True)
+
+        print(f"[DropZone] Classic Outlook: retrieved {len(files)} file(s) from {item_count} email(s)", flush=True)
+
+        # Only warn here for a *partial* failure (some retrieved, some not) — a
+        # total failure (files empty) is already reported by dropEvent()'s
+        # existing "Email Not Retrieved" check on the caller side; warning here
+        # too would just double up the dialog for that case.
+        if failed_labels and files:
+            from PyQt6.QtCore import QTimer
+            from PyQt6.QtWidgets import QMessageBox
+            missed = ', '.join(failed_labels)
+            # Deferred via singleShot(0, ...): Windows OLE drag-drop runs its own
+            # nested event loop for the duration of dropEvent(), and showing a
+            # modal dialog synchronously from inside it can hang or crash.
+            QTimer.singleShot(0, lambda: QMessageBox.warning(
+                parent, 'Some Emails Not Retrieved',
+                f"{len(failed_labels)} of {item_count} selected emails could not be retrieved.\n\n"
+                f"Not retrieved: {missed}\n\n"
+                'Make sure Outlook is open and signed in, then try dragging the '
+                'missing email(s) again individually.'
+            ))
+
+        return files
+
+    # Fixed-size fields of a FILEDESCRIPTOR(W) struct before cFileName (dwFlags,
+    # clsid, sizel, pointl, dwFileAttributes, 3x FILETIME, nFileSizeHigh/Low).
+    _FILEDESCRIPTOR_HEADER_SIZE = 72
+    _FILEDESCRIPTORW_NAME_SIZE = 520   # WCHAR[260]
+    _FILEDESCRIPTORA_NAME_SIZE = 260   # CHAR[260]
+
+    @classmethod
+    def _parse_descriptor_filenames(cls, descriptor_bytes: bytes, is_unicode: bool) -> list:
+        """Parse every filename out of a FILEGROUPDESCRIPTOR(W) blob.
+
+        The struct is a 4-byte count followed by `count` fixed-size
+        FILEDESCRIPTOR(W) entries — this walks all of them, not just the
+        first, so callers know the true size of a multi-file virtual drop
+        even though FileContents (below) can only ever retrieve entry 0.
+        """
+        name_size = cls._FILEDESCRIPTORW_NAME_SIZE if is_unicode else cls._FILEDESCRIPTORA_NAME_SIZE
+        entry_size = cls._FILEDESCRIPTOR_HEADER_SIZE + name_size
+        encoding = 'utf-16-le' if is_unicode else 'latin-1'
+
+        filenames = []
+        try:
+            count = struct.unpack_from('<I', descriptor_bytes, 0)[0]
+        except struct.error as e:
+            print(f"[DropZone] Could not read descriptor count: {e}", flush=True)
+            return filenames
+
+        for i in range(count):
+            name_offset = 4 + i * entry_size + cls._FILEDESCRIPTOR_HEADER_SIZE
+            name_bytes = descriptor_bytes[name_offset:name_offset + name_size]
+            if len(name_bytes) < name_size:
+                print(f"[DropZone] descriptor entry {i} truncated — stopping at {len(filenames)}", flush=True)
+                break
+            try:
+                parsed = name_bytes.decode(encoding).split('\x00')[0]
+            except UnicodeDecodeError as e:
+                print(f"[DropZone] Could not decode descriptor entry {i} name: {e}", flush=True)
+                continue
+            if parsed:
+                filenames.append(parsed)
+        return filenames
 
     @staticmethod
-    def _handle_outlook_drop(mime_data, descriptor_fmt: str) -> list:
-        """Save the Outlook virtual-file bytes to a temp file, then extract attachments."""
+    def _handle_outlook_drop(mime_data, descriptor_fmt: str, parent=None) -> list:
+        """Save the Outlook virtual-file bytes to a temp file, then extract attachments.
+
+        CFSTR_FILECONTENTS (FileContents) is retrieved through Qt's QMimeData,
+        which has no way to request a specific FORMATETC.lindex — it always
+        returns the stream for entry 0 of the FILEGROUPDESCRIPTOR. When the
+        descriptor lists more than one file, entries 1..N-1's *content* is
+        genuinely unreachable through this API; the user is warned explicitly
+        instead of silently emitting only the first file as if the whole
+        drop had succeeded.
+        """
         try:
             descriptor_bytes = bytes(mime_data.data(descriptor_fmt))
-            # CFSTR_FILECONTENTS has no W variant per Windows OLE spec — always 'FileContents'
             content_bytes = bytes(mime_data.data('FileContents'))
         except Exception as e:
             print(f"[DropZone] Could not read Outlook mime data: {e}", flush=True)
@@ -605,25 +780,35 @@ class DropZone(QFrame):
             )
             return []
 
-        # Parse FILEGROUPDESCRIPTOR(W): 4-byte count, then FILEDESCRIPTOR structs.
-        is_unicode = descriptor_fmt.upper().endswith('W')
-        filename = 'email.eml'
-        try:
-            count = struct.unpack_from('<I', descriptor_bytes, 0)[0]
-            print(f"[DropZone] descriptor count={count}, is_unicode={is_unicode}", flush=True)
-            if count > 0:
-                name_offset = 4 + 72
-                if is_unicode:
-                    name_bytes = descriptor_bytes[name_offset:name_offset + 520]
-                    parsed = name_bytes.decode('utf-16-le').split('\x00')[0]
-                else:
-                    name_bytes = descriptor_bytes[name_offset:name_offset + 260]
-                    parsed = name_bytes.decode('latin-1').split('\x00')[0]
-                if parsed:
-                    filename = parsed
-                    print(f"[DropZone] Parsed filename: {filename}", flush=True)
-        except Exception as e:
-            print(f"[DropZone] Could not parse descriptor: {e}", flush=True)
+        is_unicode = DropZone._is_unicode_descriptor_format(descriptor_fmt)
+        filenames = DropZone._parse_descriptor_filenames(descriptor_bytes, is_unicode)
+        # Descriptor filenames come from the drag source (untrusted) — strip any
+        # path components before joining into tmp_dir to prevent traversal.
+        filename = os.path.basename(
+            (filenames[0] if filenames else '').replace('\\', '/')
+        ).strip() or 'email.eml'
+        print(
+            f"[DropZone] descriptor lists {len(filenames)} file(s): {filenames}; "
+            f"only entry 0 ({filename!r}) is retrievable via this drop path",
+            flush=True,
+        )
+
+        if len(filenames) > 1:
+            from PyQt6.QtCore import QTimer
+            from PyQt6.QtWidgets import QMessageBox
+            missed = ', '.join(filenames[1:])
+            # Deferred via singleShot(0, ...): Windows OLE drag-drop runs its own
+            # nested event loop for the duration of dropEvent(), and showing a
+            # modal dialog synchronously from inside it can hang or crash.
+            QTimer.singleShot(0, lambda: QMessageBox.warning(
+                parent, 'Only First File Retrieved',
+                f"This drop contains {len(filenames)} files, but only "
+                f"'{filename}' could be retrieved.\n\n"
+                f"Not retrieved: {missed}\n\n"
+                'This is a Windows drag-and-drop limitation for virtual '
+                '(non-file) sources — drag the remaining files individually, '
+                'or save them to disk first and drop the saved files.'
+            ))
 
         tmp_dir = tempfile.mkdtemp(prefix='jobdocs_email_')
         _dropzone_tmp_dirs.append(tmp_dir)
@@ -944,160 +1129,6 @@ class JobSearchDialog(QDialog):
         return None
 
 
-class FileCopyDialog(QDialog):
-    """Dialog for selecting files to copy from a source folder"""
-
-    def __init__(self, parent, source_folder: str, title: str = "Select Files to Copy"):
-        super().__init__(parent)
-        self.source_folder = Path(source_folder)
-        self.selected_files = []
-
-        self.setWindowTitle(title)
-        self.resize(600, 450)
-
-        layout = QVBoxLayout(self)
-
-        # Header
-        header_label = QLabel(f"Source: {self.source_folder.name}")
-        header_label.setStyleSheet("font-weight: bold; padding: 5px;")
-        layout.addWidget(header_label)
-
-        # File tree with checkboxes
-        self.file_tree = QTreeWidget()
-        self.file_tree.setHeaderLabels(["File", "Size", "Type"])
-        self.file_tree.setRootIsDecorated(False)
-        self.file_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.file_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.file_tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        layout.addWidget(self.file_tree)
-
-        # Populate files
-        self._populate_files()
-
-        # Select All / Select None buttons
-        button_layout = QHBoxLayout()
-        select_all_btn = QPushButton("Select All")
-        select_all_btn.clicked.connect(self._select_all)
-        select_none_btn = QPushButton("Select None")
-        select_none_btn.clicked.connect(self._select_none)
-        button_layout.addWidget(select_all_btn)
-        button_layout.addWidget(select_none_btn)
-        button_layout.addStretch()
-        layout.addLayout(button_layout)
-
-        # Status label
-        self.status_label = QLabel()
-        self._update_status()
-        layout.addWidget(self.status_label)
-
-        # Dialog buttons
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok |
-            QDialogButtonBox.StandardButton.Cancel
-        )
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-
-    def _populate_files(self):
-        """Populate the file tree with files from source folder"""
-        if not self.source_folder.exists():
-            return
-
-        # Collect all files (including from job documents subfolder)
-        files_to_show = []
-
-        # Files in main folder
-        for item in self.source_folder.iterdir():
-            if item.is_file():
-                files_to_show.append(item)
-
-        # Check for "job documents" subfolder
-        job_docs = self.source_folder / "job documents"
-        if job_docs.exists() and job_docs.is_dir():
-            for item in job_docs.iterdir():
-                if item.is_file():
-                    files_to_show.append(item)
-
-        # Sort by name
-        files_to_show.sort(key=lambda f: f.name.lower())
-
-        for file_path in files_to_show:
-            item = QTreeWidgetItem()
-
-            # Checkbox in first column
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(0, Qt.CheckState.Checked)
-
-            # File name (show relative path if from subfolder)
-            try:
-                rel_path = file_path.relative_to(self.source_folder)
-                item.setText(0, str(rel_path))
-            except ValueError:
-                item.setText(0, file_path.name)
-
-            # File size
-            try:
-                size = file_path.stat().st_size
-                if size < 1024:
-                    size_str = f"{size} B"
-                elif size < 1024 * 1024:
-                    size_str = f"{size / 1024:.1f} KB"
-                else:
-                    size_str = f"{size / (1024 * 1024):.1f} MB"
-                item.setText(1, size_str)
-            except OSError:
-                item.setText(1, "?")
-
-            # File type (extension)
-            item.setText(2, file_path.suffix.upper() or "File")
-
-            # Store full path in data
-            item.setData(0, Qt.ItemDataRole.UserRole, str(file_path))
-
-            self.file_tree.addTopLevelItem(item)
-
-        # Connect check state changes to update status
-        self.file_tree.itemChanged.connect(self._update_status)
-
-    def _select_all(self):
-        """Select all files"""
-        for i in range(self.file_tree.topLevelItemCount()):
-            item = self.file_tree.topLevelItem(i)
-            item.setCheckState(0, Qt.CheckState.Checked)
-
-    def _select_none(self):
-        """Deselect all files"""
-        for i in range(self.file_tree.topLevelItemCount()):
-            item = self.file_tree.topLevelItem(i)
-            item.setCheckState(0, Qt.CheckState.Unchecked)
-
-    def _update_status(self):
-        """Update the status label with selection count"""
-        selected = 0
-        total = self.file_tree.topLevelItemCount()
-        for i in range(total):
-            item = self.file_tree.topLevelItem(i)
-            if item.checkState(0) == Qt.CheckState.Checked:
-                selected += 1
-        self.status_label.setText(f"Selected: {selected} of {total} files")
-
-    def get_selected_files(self) -> list:
-        """Return list of selected file paths"""
-        selected = []
-        for i in range(self.file_tree.topLevelItemCount()):
-            item = self.file_tree.topLevelItem(i)
-            if item.checkState(0) == Qt.CheckState.Checked:
-                file_path = item.data(0, Qt.ItemDataRole.UserRole)
-                if file_path:
-                    selected.append(file_path)
-        return selected
-
-    def has_files(self) -> bool:
-        """Check if there are any files to show"""
-        return self.file_tree.topLevelItemCount() > 0
-
-
 class DrawingSearchDialog(QDialog):
     """Dialog for searching and linking existing drawings by drawing number"""
 
@@ -1266,6 +1297,22 @@ class FilePreviewWidget(QWidget):
     _CAD_EXTS = {'.step', '.stp', '.iges', '.igs', '.x_t', '.x_b', '.prt', '.asm'}
     _MESH_EXTS = {'.stl', '.obj', '.ply', '.3mf'}
 
+    # Cap decoded size to this many pixels on the longer side — a full-res
+    # decode of a high-res scan/photo can run tens of MB for what's ultimately
+    # shown in a ~200-400px preview pane. Shared with the PDF render path below.
+    #
+    # NOTE: setScaledSize() below only bounds the *decode itself* for formats
+    # whose Qt plugin advertises QImageIOHandler.ImageOption.ScaledSize
+    # support — JPEG does, but PNG/BMP/WEBP/ICO/GIF do not (verified against
+    # this repo's Qt build: supportsOption(ScaledSize) is False for all
+    # five). For those formats — which includes the common "scanned drawing"
+    # case (PNG/TIFF) — Qt still decodes at full native resolution
+    # internally before scaling down, so the transient decode-time memory
+    # spike is unchanged from the old QPixmap(path) behavior. What this DOES
+    # fix for every format is steady-state memory: self._pixmap only ever
+    # holds the small scaled copy, never a full-res decode, between previews.
+    _PREVIEW_MAX_DIM = 600
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._pixmap: QPixmap | None = None
@@ -1303,8 +1350,8 @@ class FilePreviewWidget(QWidget):
             size_str = ""
 
         if ext in self._IMAGE_EXTS:
-            pix = QPixmap(file_path)
-            if not pix.isNull():
+            pix = self._load_bounded_image(file_path)
+            if pix is not None and not pix.isNull():
                 self._set_pixmap(pix, path.name, size_str)
                 return
 
@@ -1330,6 +1377,34 @@ class FilePreviewWidget(QWidget):
         type_label = (ext.upper().lstrip('.') + " file") if ext else "File"
         self._set_text(type_label, f"{path.name}\n{size_str}")
 
+    def _load_bounded_image(self, file_path: str) -> QPixmap | None:
+        """Decode file_path bounded to _PREVIEW_MAX_DIM on the longer side.
+
+        Requests QImageReader.setScaledSize() so the decoder produces a small
+        image directly — but this only bounds actual *decode-time* memory for
+        formats whose Qt plugin supports native scaled reading (JPEG, on this
+        Qt build). For formats that don't (PNG, BMP, WEBP, ICO, GIF — see
+        _PREVIEW_MAX_DIM's comment), Qt silently falls back to decoding at
+        full native resolution and then scaling the QImage down in software,
+        same peak memory as the old QPixmap(file_path) path. Either way, only
+        the small scaled result is kept afterward, so steady-state/resident
+        memory is bounded for all formats even when decode-time memory isn't.
+        """
+        reader = QImageReader(file_path)
+        reader.setAutoTransform(True)  # respect EXIF orientation
+        size = reader.size()
+        if size.isValid() and size.width() > 0 and size.height() > 0:
+            scale = min(self._PREVIEW_MAX_DIM / size.width(), self._PREVIEW_MAX_DIM / size.height(), 1.0)
+            if scale < 1.0:
+                reader.setScaledSize(QSize(
+                    max(1, round(size.width() * scale)),
+                    max(1, round(size.height() * scale)),
+                ))
+        image = reader.read()
+        if image.isNull():
+            return None
+        return QPixmap.fromImage(image)
+
     def _try_pdf_preview(self, file_path: str) -> bool:
         try:
             import fitz  # pymupdf
@@ -1341,7 +1416,7 @@ class FilePreviewWidget(QWidget):
                 # Cap rendered size: a fixed 1.5× scale can exceed Qt's 256 MB
                 # allocation limit for high-res embedded images. Scale to fit
                 # within MAX_DIM × MAX_DIM pixels instead.
-                MAX_DIM = 600
+                MAX_DIM = self._PREVIEW_MAX_DIM
                 rect = page.rect
                 scale = min(MAX_DIM / rect.width, MAX_DIM / rect.height, 1.5)
                 pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale))

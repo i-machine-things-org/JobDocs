@@ -19,8 +19,13 @@ staging      - Integration/test branch; all feature PRs land here first
 - Only ever updated by merging `staging` in (see Branch Workflow below)
 - Tagged with version numbers for releases (`vMAJOR.MINOR.PATCH`)
 - `.github/workflows/require-staging-base.yml` fails any PR into `master`
-  whose head isn't `staging`; branch protection on `master` marks this
-  check required so a failing check blocks the merge button
+  whose head isn't `staging`; branch protection on `master` requires this
+  check plus full CI (lint, tests, both builds) before the merge button
+  unlocks
+- **Caveat**: `enforce_admins` is intentionally off, so a repo admin can
+  still push straight to `master` or `staging`, bypassing all of this —
+  an accepted emergency escape hatch, not a guarantee. Don't rely on
+  branch protection alone for anything security-sensitive.
 
 ---
 
@@ -32,6 +37,9 @@ staging      - Integration/test branch; all feature PRs land here first
 - Where CodeRabbit/CI review and manual testing happen before promotion
 - Periodically merged into `master` via a `staging` → `master` PR once its
   contents are verified
+- Branch-protected: requires a PR (no direct pushes) and full CI (lint,
+  tests, both builds) passing before merging — see the `master` caveat
+  above, which applies here too
 
 **Use When**:
 - Opening any new PR with `gh pr create --base staging`.
