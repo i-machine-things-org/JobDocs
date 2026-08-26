@@ -445,8 +445,11 @@ class AddToJobModule(BaseModule):
 
                     job_dest = Path(job_path) / file_name
                     if not job_dest.exists():
-                        create_file_link(bp_dest, job_dest, link_type)
-                        added += 1
+                        if create_file_link(bp_dest, job_dest, link_type):
+                            added += 1
+                        else:
+                            skipped += 1
+                            self.log_message(f"Warning: Could not link {file_name} to job")
                     else:
                         skipped += 1
 

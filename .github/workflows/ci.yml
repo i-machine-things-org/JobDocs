@@ -178,17 +178,26 @@ jobs:
             choco install innosetup --confirm --no-progress
           }
 
-      - name: Build Windows installer
+      - name: Build Windows installers (full + Kiosk)
         shell: pwsh
         run: |
-          $env:RELEASE_VERSION = "${{ env.RELEASE_VERSION }}"
           iscc build_scripts\JobDocs.iss
+          if ($LASTEXITCODE -ne 0) { Write-Error "Standard installer build failed"; exit 1 }
+          iscc /DKIOSK build_scripts\JobDocs.iss
+          if ($LASTEXITCODE -ne 0) { Write-Error "Kiosk installer build failed"; exit 1 }
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: JobDocs-windows-pr-${{ github.event.pull_request.number }}
           path: installer_out/JobDocs-${{ env.RELEASE_VERSION }}-windows-setup.exe
+          retention-days: 7
+
+      - name: Upload Windows Kiosk artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: JobDocs-windows-kiosk-pr-${{ github.event.pull_request.number }}
+          path: installer_out/JobDocs-Kiosk-${{ env.RELEASE_VERSION }}-windows-setup.exe
           retention-days: 7
 
   # ---------------------------------------------------------------------------

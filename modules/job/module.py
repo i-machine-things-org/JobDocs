@@ -35,13 +35,31 @@ from shared.utils import (
 logger = logging.getLogger(__name__)
 
 
+class JobAlreadyExistsError(Exception):
+    """Raised by create_single_job() when the target job folder was created
+    by someone else (e.g. another workstation on the shared drive) between
+    this call's duplicate check and its own mkdir() -- callers should treat
+    this as a duplicate, not a generic failure (CodeRabbit, PR #317
+    promotion review).
+    """
+
+
 class JobTreeWorker(QThread):
     """Background worker for loading job tree data"""
 
     # Signal emitted when a customer with jobs is found
     customer_loaded = pyqtSignal(str, str, list)  # (display_name, customer_path, jobs_list)
-    # Signal emitted when loading is complete
-    finished = pyqtSignal()
+    # Completion is reported via the inherited QThread.finished signal, not
+    # a locally-declared one -- Qt only emits that one after run() has
+    # actually returned, so isRunning() is reliably False by the time a
+    # connected slot runs. A custom signal emitted as the last statement in
+    # run() doesn't have that guarantee (it's a queued cross-thread
+    # delivery, and the GUI event loop can process it before the thread
+    # object finishes its own post-run() bookkeeping) -- refresh_job_tree()/
+    # search_jobs()'s deferred-restart handler depends on isRunning() being
+    # accurate at that point, or a queued refresh/search could re-defer
+    # itself forever against a worker that will never signal completion
+    # again (CodeRabbit, PR #317 promotion review follow-up).
 
     def __init__(self, dirs_to_search, selected_customer, show_all_customers, app_context):
         super().__init__()
@@ -80,7 +98,17 @@ class JobTreeWorker(QThread):
                         continue
 
                     display_name = f"[{prefix}] {customer}" if prefix else customer
-                    jobs = self.app_context.find_job_folders(customer_path)
+                    jobs = self.app_context.find_job_folders(
+                        customer_path, is_cancelled=lambda: self._is_cancelled
+                    )
+
+                    # A cancelled scan can still return here with partial results
+                    # (find_job_folders() stops mid-walk but still returns what it
+                    # had). Don't emit them -- a refresh that cancelled this worker
+                    # has already moved on to a new one, and a stale customer_loaded
+                    # signal would land on the freshly-cleared tree.
+                    if self._is_cancelled:
+                        break
 
                     # Only emit if customer has jobs
                     if jobs:
@@ -89,7 +117,9 @@ class JobTreeWorker(QThread):
             except OSError as e:
                 print(f"[JobTreeWorker] OSError: {e}", flush=True)
 
-        self.finished.emit()
+        # No self.finished.emit() here -- see the class docstring/comment
+        # above. QThread's own finished signal fires automatically once
+        # run() returns, whether cancelled or not.
 
 
 class JobModule(BaseModule):
@@ -102,6 +132,18 @@ class JobModule(BaseModule):
         self.add_files: List[str] = []  # For "Add to Existing" tab
         self._widget = None
         self._worker = None  # Background thread worker
+        # A refresh/search requested while a stale worker was still finishing
+        # up (after cancel()) is deferred here instead of starting a new
+        # worker against one that might still be running; _on_loading_finished()
+        # runs it once that worker's finished signal confirms it's actually
+        # stopped (CodeRabbit, PR #317 promotion review).
+        self._pending_tree_action = None
+        self._job_tab_widget = None
+        self._add_to_job_tab = None
+        # The Add to Existing tab's job tree isn't built until that sub-tab is
+        # actually activated — avoids an eager full customer-directory walk at
+        # startup. True means a refresh is owed the next time it's shown.
+        self._add_tree_stale = True
 
         # Create New tab widget references
         self.customer_combo = None
@@ -158,6 +200,10 @@ class JobModule(BaseModule):
         # Load UI file
         ui_file = self._get_ui_path('job/ui/job_tab.ui')
         uic.loadUi(ui_file, widget)
+
+        self._job_tab_widget = widget.job_tab_widget
+        self._add_to_job_tab = widget.addToJobTab
+        self._job_tab_widget.currentChanged.connect(self._on_job_subtab_changed)
 
         # ===== Setup "Create New" Tab =====
         self.customer_combo = widget.customer_combo
@@ -390,14 +436,27 @@ class JobModule(BaseModule):
         is_new_customer = customer not in existing_customers
 
         created = 0
+        lost_race = []
         for job_num in job_numbers:
-            if self.create_single_job(
-                    customer, job_num, po_number, po_line,
-                    description, drawings, revision, is_itar, all_files):
-                created += 1
+            # The pre-check above narrows the window but doesn't close it —
+            # another workstation can still win the create race between that
+            # check and this call. create_single_job() raises
+            # JobAlreadyExistsError for that case specifically so it's
+            # surfaced as a duplicate here, not folded into a silent
+            # "not created" or a generic error dialog.
+            try:
+                if self.create_single_job(
+                        customer, job_num, po_number, po_line,
+                        description, drawings, revision, is_itar, all_files):
+                    created += 1
+            except JobAlreadyExistsError:
+                lost_race.append(job_num)
 
         if created > 0:
-            self.show_info("Success", f"Created {created}/{len(job_numbers)} job(s)")
+            msg = f"Created {created}/{len(job_numbers)} job(s)"
+            if lost_race:
+                msg += f"\n\nAlready existed and were skipped: {', '.join(lost_race)}"
+            self.show_info("Success", msg)
             self.job_files.clear()
             self.job_files_list.clear()
 
@@ -406,6 +465,11 @@ class JobModule(BaseModule):
                 self.app_context.main_window.refresh_history()
                 if is_new_customer:
                     self.app_context.main_window.populate_customer_lists()
+        elif lost_race:
+            self.show_error(
+                "Duplicate Job Numbers",
+                f"The following job number(s) were just created by someone else:\n\n{', '.join(lost_race)}"
+            )
         else:
             self.show_error("Error", "Failed to create jobs")
 
@@ -427,75 +491,140 @@ class JobModule(BaseModule):
 
             # Build job path using configured structure
             job_path = self.app_context.build_job_path(cf_dir, customer, job_dir_name, po_number)
-            job_path.mkdir(parents=True, exist_ok=True)
 
-            customer_bp = Path(bp_dir) / customer
-            customer_bp.mkdir(parents=True, exist_ok=True)
+            # mkdir(exist_ok=True) can't tell "I created this" from "it
+            # already existed" -- two racing callers (e.g. two workstations
+            # on the shared drive) would both get a truthy result and both
+            # add history/index entries for one folder. Ensure ancestors
+            # exist (not the uniqueness key, safe to share), then reserve
+            # job_path itself atomically: a bare mkdir() raises
+            # FileExistsError if we lost the race, which is treated as a
+            # duplicate rather than a generic failure (CodeRabbit, PR #317
+            # promotion review). Not proof against every network-filesystem
+            # edge case (e.g. a DFS namespace with multiple replica
+            # targets), but closes the ordinary check-then-create race.
+            job_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                job_path.mkdir()
+            except FileExistsError:
+                raise JobAlreadyExistsError(str(job_path)) from None
 
-            # Get settings
-            blueprint_extensions = self.app_context.get_setting('blueprint_extensions', ['.pdf', '.dwg', '.dxf'])
-            link_type = self.app_context.get_setting('link_type', 'hard')
+            # job_path is now reserved and exists on disk. If anything below
+            # fails, roll it back rather than leaving a half-initialized
+            # folder behind -- otherwise a retry would hit the
+            # FileExistsError guard above and be told "duplicate" for a job
+            # that was never actually completed, with no way to finish it or
+            # recover its history/index records (CodeRabbit, PR #320
+            # follow-up).
+            try:
+                customer_bp = Path(bp_dir) / customer
+                customer_bp.mkdir(parents=True, exist_ok=True)
 
-            # Process files
-            for file_path in files:
-                file_name = os.path.basename(file_path)
+                # Get settings
+                blueprint_extensions = self.app_context.get_setting(
+                    'blueprint_extensions', ['.pdf', '.dwg', '.dxf']
+                )
+                link_type = self.app_context.get_setting('link_type', 'hard')
 
-                if is_blueprint_file(file_name, blueprint_extensions):
-                    bp_dest = customer_bp / file_name
-                    if not bp_dest.exists():
-                        try:
-                            shutil.copy2(file_path, bp_dest)
-                        except PermissionError:
-                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                # Process files
+                for file_path in files:
+                    file_name = os.path.basename(file_path)
 
-                    job_dest = job_path / file_name
-                    if bp_dest.exists() and not job_dest.exists():
-                        create_file_link(bp_dest, job_dest, link_type)
-                else:
-                    job_dest = job_path / file_name
-                    if not job_dest.exists():
-                        try:
-                            shutil.copy2(file_path, job_dest)
-                        except PermissionError:
-                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                    if is_blueprint_file(file_name, blueprint_extensions):
+                        bp_dest = customer_bp / file_name
+                        if not bp_dest.exists():
+                            try:
+                                shutil.copy2(file_path, bp_dest)
+                            except PermissionError:
+                                self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
-            # Link existing drawings
-            if drawings:
-                exts = blueprint_extensions
-                available_bps = {}
-                try:
-                    for bp_file in customer_bp.iterdir():
-                        if bp_file.is_file() and bp_file.suffix.lower() in [e.lower() for e in exts]:
-                            available_bps[bp_file.name.lower()] = bp_file
-                except OSError:
-                    pass
+                        job_dest = job_path / file_name
+                        if bp_dest.exists() and not job_dest.exists():
+                            if not create_file_link(bp_dest, job_dest, link_type):
+                                self.log_message(f"Warning: Could not link {file_name} to job")
+                    else:
+                        job_dest = job_path / file_name
+                        if not job_dest.exists():
+                            try:
+                                shutil.copy2(file_path, job_dest)
+                            except PermissionError:
+                                self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
-                for drawing in drawings:
-                    drawing_lower = drawing.lower()
-                    for ext in exts:
-                        for bp_name, bp_file in available_bps.items():
-                            if drawing_lower in bp_name and bp_name.endswith(ext.lower()):
-                                dest = job_path / bp_file.name
-                                if not dest.exists():
-                                    create_file_link(bp_file, dest, link_type)
+                # Link existing drawings
+                if drawings:
+                    exts = blueprint_extensions
+                    available_bps = {}
+                    try:
+                        for bp_file in customer_bp.iterdir():
+                            if bp_file.is_file() and bp_file.suffix.lower() in [e.lower() for e in exts]:
+                                available_bps[bp_file.name.lower()] = bp_file
+                    except OSError:
+                        pass
 
-            # Add to history
-            self.app_context.add_to_history('job', {
-                'date': datetime.now().isoformat(),
-                'customer': customer,
-                'job_number': job_number,
-                'po_number': po_number,
-                'po_line': po_line,
-                'description': description,
-                'drawings': drawings,
-                'revision': revision,
-                'path': str(job_path)
-            })
-            self.app_context.save_history()
+                    for drawing in drawings:
+                        drawing_lower = drawing.lower()
+                        for ext in exts:
+                            for bp_name, bp_file in available_bps.items():
+                                if drawing_lower in bp_name and bp_name.endswith(ext.lower()):
+                                    dest = job_path / bp_file.name
+                                    if not dest.exists():
+                                        if not create_file_link(bp_file, dest, link_type):
+                                            self.log_message(f"Warning: Could not link {bp_file.name} to job")
 
-            self.log_message(f"Created: {job_path}")
-            return True
+                # Add to history
+                self.app_context.add_to_history('job', {
+                    'date': datetime.now().isoformat(),
+                    'customer': customer,
+                    'job_number': job_number,
+                    'po_number': po_number,
+                    'po_line': po_line,
+                    'description': description,
+                    'drawings': drawings,
+                    'revision': revision,
+                    'path': str(job_path)
+                })
+                self.app_context.save_history()
 
+                # Make the new job searchable this session immediately — the
+                # background indexer only runs once per app launch, so without
+                # this a job created mid-session would be invisible to search
+                # until the app restarts (see is_fully_covered() in
+                # core/search_index.py for why a zero-result search can't be
+                # trusted to fall back to a filesystem walk otherwise).
+                search_index = self.app_context.get_search_index()
+                if search_index is not None:
+                    search_index.add_job(
+                        'ITAR' if is_itar else '', customer, job_number,
+                        description, drawings, str(job_path),
+                        po_number=po_number,
+                    )
+
+                self.log_message(f"Created: {job_path}")
+                return True
+            except Exception:
+                shutil.rmtree(job_path, ignore_errors=True)
+                # add_to_history() above mutates the shared in-memory
+                # history dict directly -- if save_history() or the index
+                # write that follows it is what raised, that mutation isn't
+                # undone by removing job_path alone. _check_duplicate_job()
+                # checks recent_jobs first, so a retry would be told the
+                # job it just watched get rolled back is still a duplicate
+                # (CodeRabbit, PR #320 follow-up). Drop the entry this
+                # attempt added -- identified by its path, unique to this
+                # reservation -- so an in-process retry isn't blocked by
+                # metadata for a folder that no longer exists.
+                recent_jobs = self.app_context.history.get('recent_jobs', [])
+                self.app_context.history['recent_jobs'] = [
+                    entry for entry in recent_jobs if entry.get('path') != str(job_path)
+                ]
+                raise
+
+        except JobAlreadyExistsError:
+            # Let this propagate to the caller (create_job()/create_bulk_jobs())
+            # instead of falling into the generic handler below -- a lost
+            # create race is a duplicate, not an error to show a modal
+            # dialog for.
+            raise
         except Exception as e:
             self.log_message(f"Error: {e}")
             self.show_error("Error", f"Error creating job {job_number}: {e}")
@@ -658,12 +787,42 @@ class JobModule(BaseModule):
 
     # ==================== Add to Existing Tab: Job Tree Management ====================
 
+    def _is_add_tab_active(self) -> bool:
+        return (
+            self._job_tab_widget is not None
+            and self._job_tab_widget.currentWidget() is self._add_to_job_tab
+        )
+
+    def _on_job_subtab_changed(self, index: int):
+        """Load the job tree the first time the Add to Existing sub-tab is shown
+        (or the next time it's shown after data went stale), instead of walking
+        the whole customer directory tree eagerly at startup."""
+        if self._add_tree_stale and self._is_add_tab_active():
+            self.refresh_job_tree()
+
     def refresh_job_tree(self):
         """Refresh the job tree with current filter settings (async with background thread)"""
-        # Cancel any existing worker
+        if not self._is_add_tab_active():
+            self._add_tree_stale = True
+            # Don't let a walk started while the tab was active keep running
+            # in the background after the user has switched away from it.
+            # Non-blocking: see the cancel below for why.
+            if self._worker and self._worker.isRunning():
+                self._worker.cancel()
+            return
+        self._add_tree_stale = False
+
         if self._worker and self._worker.isRunning():
+            # cancel() is cooperative -- the worker may be blocked deep
+            # inside a hung os.listdir() on a dead network share and won't
+            # notice for as long as that call hangs. Don't block the GUI
+            # thread waiting for it (JobTreeWorker.wait()) like this used
+            # to; defer starting the real refresh until finished() confirms
+            # the stale worker has actually stopped (CodeRabbit, PR #317
+            # promotion review).
             self._worker.cancel()
-            self._worker.wait()
+            self._pending_tree_action = self.refresh_job_tree
+            return
 
         self.job_tree.clear()
         self.add_status_label.setText("Loading jobs...")
@@ -708,8 +867,29 @@ class JobModule(BaseModule):
         total_items = self.job_tree.topLevelItemCount()
         self.add_status_label.setText(f"Loaded {total_items} customer(s) with jobs")
 
+        # A refresh/search requested while this worker was still finishing
+        # up was deferred rather than started against it -- run it now that
+        # it's confirmed stopped (self._worker isn't reassigned until the
+        # action below actually starts a new one, so there's no race with a
+        # newer worker's own finished signal).
+        if self._pending_tree_action is not None:
+            action, self._pending_tree_action = self._pending_tree_action, None
+            action()
+
     def search_jobs(self):
         """Search for jobs matching the search term"""
+        if not self._is_add_tab_active():
+            # A search deferred while a stale tree-refresh worker was still
+            # finishing must not run its synchronous traversal against a
+            # tab the user has since navigated away from -- that's exactly
+            # the GUI-freeze risk this fix exists to close, just reached
+            # through the deferred path instead of a direct call
+            # (CodeRabbit, PR #321 follow-up).
+            self._add_tree_stale = True
+            if self._worker and self._worker.isRunning():
+                self._worker.cancel()
+            return
+
         search_term = self.add_search_edit.text().strip().lower()
 
         if not search_term:
@@ -717,8 +897,12 @@ class JobModule(BaseModule):
             return
 
         if self._worker and self._worker.isRunning():
+            # See refresh_job_tree() -- same non-blocking cancel + deferred
+            # restart, so a stale tree-refresh worker can't freeze the GUI
+            # here either.
             self._worker.cancel()
-            self._worker.wait()
+            self._pending_tree_action = self.search_jobs
+            return
 
         self.job_tree.clear()
 
@@ -740,6 +924,14 @@ class JobModule(BaseModule):
 
         results = 0
 
+        # Known residual limitation (CodeRabbit, PR #317 promotion review):
+        # this loop itself is still synchronous on the GUI thread, with no
+        # worker and no is_cancelled passed to find_job_folders() -- a hung
+        # network share can still freeze the GUI during a live search, same
+        # as before this fix. Only the *previous* fix's blocking wait() (the
+        # cancel above) is what's addressed here; making this loop itself
+        # non-blocking would mean a dedicated background worker for search,
+        # a larger architectural change tracked separately.
         for prefix, cf_dir in dirs_to_search:
             try:
                 if show_all:
@@ -935,8 +1127,11 @@ class JobModule(BaseModule):
 
                     job_dest = Path(job_path) / file_name
                     if bp_ready and not job_dest.exists():
-                        create_file_link(bp_dest, job_dest, link_type)
-                        added += 1
+                        if create_file_link(bp_dest, job_dest, link_type):
+                            added += 1
+                        else:
+                            skipped += 1
+                            self.log_message(f"Warning: Could not link {file_name} to job")
                     else:
                         skipped += 1
 
@@ -1057,7 +1252,12 @@ class JobModule(BaseModule):
 
     def cleanup(self):
         """Cleanup resources"""
-        # Stop any running worker thread
+        # Stop any running worker thread. Unlike refresh_job_tree()/
+        # search_jobs() above, this intentionally stays blocking: module
+        # teardown can't proceed with a background thread still touching
+        # self.app_context or widgets that are about to be torn down
+        # (mirrors modules/search/module.py's SearchWorker cleanup(), which
+        # is exempt from the non-blocking treatment for the same reason).
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait()

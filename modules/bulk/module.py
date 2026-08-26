@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 from PyQt6 import uic
 
 from core.base_module import BaseModule
+from modules.job.module import JobAlreadyExistsError
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,11 @@ class BulkCreateDialog(QDialog):
         self.bulk_table = inner.bulk_table
         self.bulk_status_label = inner.bulk_status_label
         self.bulk_progress = inner.bulk_progress
+        self.import_btn = inner.import_btn
+        self.clear_bulk_btn = inner.clear_bulk_btn
+        self.validate_btn = inner.validate_btn
+        self.create_bulk_btn = inner.create_bulk_btn
+        self.bulk_cancel_btn = inner.bulk_cancel_btn
 
         self.bulk_table.horizontalHeader().setStretchLastSection(True)
 
@@ -65,6 +71,69 @@ class BulkCreateDialog(QDialog):
         inner.clear_bulk_btn.clicked.connect(lambda: self.bulk_text.clear())
         inner.validate_btn.clicked.connect(self.validate_bulk_data)
         inner.create_bulk_btn.clicked.connect(self.create_bulk_jobs)
+        inner.bulk_cancel_btn.clicked.connect(self.request_bulk_cancel)
+
+        # Guards the in-flight create_bulk_jobs() loop, which pumps the event
+        # queue via QApplication.processEvents() instead of a QThread. Without
+        # this, closing the dialog (or Esc) mid-loop lets Qt process the close
+        # event, and the loop's subsequent widget accesses then run against a
+        # disposed dialog ("wrapped C/C++ object has been deleted").
+        #
+        # IMPORTANT: any new way to tear down this dialog (a future
+        # QDialogButtonBox, etc.) must also be guarded like closeEvent()/
+        # reject()/done() below, or it silently bypasses this.
+        self._bulk_create_in_progress = False
+        # Set by the Cancel button (or a confirmed close-while-busy prompt)
+        # and checked between jobs in create_bulk_jobs(), so a runaway batch
+        # can always be stopped instead of the dialog being unclosable.
+        self._bulk_cancel_requested = False
+
+    def closeEvent(self, event):
+        if self._bulk_create_in_progress:
+            event.ignore()
+            self._confirm_bulk_cancel()
+            return
+        super().closeEvent(event)
+
+    def reject(self):
+        if self._bulk_create_in_progress:
+            self._confirm_bulk_cancel()
+            return
+        super().reject()
+
+    def done(self, result):
+        # No QDialogButtonBox/accept() path exists today, but done() is the
+        # common choke point accept()/reject() both funnel through, so
+        # guarding it here future-proofs against one being added later.
+        if self._bulk_create_in_progress:
+            self._confirm_bulk_cancel()
+            return
+        super().done(result)
+
+    def _confirm_bulk_cancel(self):
+        """A close/Esc/done() attempt while busy needs a way out, not just a
+        silent block: ask whether to cancel the batch rather than ignoring
+        the attempt with no feedback at all."""
+        if self._bulk_cancel_requested:
+            return
+        reply = QMessageBox.question(
+            self, "Bulk Create In Progress",
+            "A bulk job creation is still in progress.\n\n"
+            "Cancel the remaining jobs and stop?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.request_bulk_cancel()
+
+    def request_bulk_cancel(self):
+        """Ask the in-flight create_bulk_jobs() loop to stop after the job
+        it's currently on. Wired to the Cancel button and to a confirmed
+        close-while-busy prompt."""
+        if not self._bulk_create_in_progress or self._bulk_cancel_requested:
+            return
+        self._bulk_cancel_requested = True
+        self.bulk_cancel_btn.setEnabled(False)
+        self.bulk_status_label.setText("Cancelling after current job...")
 
     # ==================== CSV Import ====================
 
@@ -243,10 +312,20 @@ class BulkCreateDialog(QDialog):
             QMessageBox.critical(self, "Error", "Directories not configured")
             return
 
+        # Remember which jobs already existed on disk before this run so the
+        # creation pass below can reuse this instead of re-scanning the
+        # filesystem for the same (customer, job_number) a second time.
         duplicates = []
+        pre_existing: set = set()
+        scanned_keys: set = set()
         for job in jobs:
-            if self.job_exists(job['customer'], job['job_number'], is_itar):
+            key = (job['customer'], job['job_number'])
+            if key in scanned_keys:
+                continue
+            scanned_keys.add(key)
+            if self.job_exists(*key, is_itar):
                 duplicates.append(f"{job['customer']} - Job #{job['job_number']}")
+                pre_existing.add(key)
 
         if duplicates:
             dup_list = "\n".join(duplicates[:10])
@@ -259,6 +338,18 @@ class BulkCreateDialog(QDialog):
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
+
+            # QMessageBox.question() above blocks indefinitely with no timeout
+            # while waiting on the user — this app is used against what looks
+            # like a shared network path, so a job could be created externally
+            # (another workstation) during that wait. Re-check every job not
+            # already flagged as a duplicate before trusting pre_existing in
+            # the creation loop below; jobs already flagged don't need
+            # re-checking since they're skipped either way.
+            unconfirmed_keys = {(j['customer'], j['job_number']) for j in jobs} - pre_existing
+            for customer_key, job_number_key in unconfirmed_keys:
+                if self.job_exists(customer_key, job_number_key, is_itar):
+                    pre_existing.add((customer_key, job_number_key))
 
         # Find the job module (the one that has create_single_job)
         job_module = None
@@ -279,31 +370,79 @@ class BulkCreateDialog(QDialog):
         new_customers = set()
         created = 0
         skipped = 0
+        created_this_run: set = set()
 
-        for i, job in enumerate(jobs):
-            customer = job['customer']
-            if customer not in existing_customers and customer not in new_customers:
-                new_customers.add(customer)
+        controls = [
+            self.import_btn, self.clear_bulk_btn, self.validate_btn,
+            self.create_bulk_btn, self.bulk_itar_check, self.bulk_text,
+        ]
+        self._bulk_create_in_progress = True
+        self._bulk_cancel_requested = False
+        for control in controls:
+            control.setEnabled(False)
+        self.bulk_cancel_btn.setEnabled(True)
+        self.bulk_cancel_btn.setVisible(True)
+        try:
+            for i, job in enumerate(jobs):
+                # Checked between jobs (not mid-job) so a cancel always lets
+                # the job already underway finish cleanly instead of leaving
+                # partial state.
+                if self._bulk_cancel_requested:
+                    break
 
-            if self.job_exists(customer, job['job_number'], is_itar):
-                skipped += 1
-            else:
-                if job_module.create_single_job(
-                    customer, job['job_number'],
-                    job.get('po_number', ''), job.get('po_line', ''),
-                    job['description'], job['drawings'],
-                    job.get('revision', ''), is_itar, []
-                ):
-                    created += 1
+                customer = job['customer']
+                if customer not in existing_customers and customer not in new_customers:
+                    new_customers.add(customer)
 
-            self.bulk_progress.setValue(i + 1)
-            QApplication.processEvents()
+                self.bulk_status_label.setText(f"Processing job {i + 1} of {len(jobs)}...")
+
+                # Reuses the pre_existing set from the scan above instead of
+                # calling job_exists() (a filesystem scan) again — duplicates
+                # within this same batch are still caught via created_this_run.
+                key = (customer, job['job_number'])
+                if key in pre_existing or key in created_this_run:
+                    skipped += 1
+                else:
+                    # The re-check above narrows the race window but doesn't
+                    # close it -- create_single_job() itself now reserves
+                    # the job folder atomically and raises
+                    # JobAlreadyExistsError if another workstation won the
+                    # create race in that remaining gap. Treat that the same
+                    # as an already-known duplicate rather than a silent
+                    # non-created, non-skipped job or a mid-batch modal
+                    # error dialog.
+                    try:
+                        if job_module.create_single_job(
+                            customer, job['job_number'],
+                            job.get('po_number', ''), job.get('po_line', ''),
+                            job['description'], job['drawings'],
+                            job.get('revision', ''), is_itar, []
+                        ):
+                            created += 1
+                            created_this_run.add(key)
+                    except JobAlreadyExistsError:
+                        skipped += 1
+                        pre_existing.add(key)
+
+                self.bulk_progress.setValue(i + 1)
+                QApplication.processEvents()
+        finally:
+            cancelled = self._bulk_cancel_requested
+            self._bulk_create_in_progress = False
+            self._bulk_cancel_requested = False
+            self.bulk_cancel_btn.setVisible(False)
+            self.bulk_cancel_btn.setEnabled(True)
+            for control in controls:
+                control.setEnabled(True)
 
         self.bulk_progress.hide()
         msg = f"Created {created}/{len(jobs)} jobs"
         if skipped > 0:
             msg += f" (Skipped {skipped} duplicates)"
-        QMessageBox.information(self, "Complete", msg)
+        if cancelled:
+            msg += f"\n\nCancelled before all {len(jobs)} jobs were processed."
+        self.bulk_status_label.setText("")
+        QMessageBox.information(self, "Cancelled" if cancelled else "Complete", msg)
 
         main_window = self.app_context.main_window
         if main_window:

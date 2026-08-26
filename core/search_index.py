@@ -16,6 +16,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
+from shared.utils import is_reparse_point
+
 logger = logging.getLogger(__name__)
 
 _SCHEMA = """
@@ -271,20 +273,6 @@ class SearchIndex:
         except OSError:
             return 0.0
 
-    def _subtree_mtime(self, path: str) -> float:
-        """Return the max mtime of path and all descendant directories (not files)."""
-        try:
-            result = os.path.getmtime(path)
-            for root, dirs, _ in os.walk(path):
-                for d in dirs:
-                    try:
-                        result = max(result, os.path.getmtime(os.path.join(root, d)))
-                    except OSError:
-                        pass
-            return result
-        except OSError:
-            return 0.0
-
     def _is_stale(
         self, conn: sqlite3.Connection, dir_path: str, prefix: str, kind: str, *, recursive: bool = False
     ) -> bool:
@@ -379,6 +367,8 @@ class SearchIndex:
                 return
             bp_prefixes_seen.add(prefix)
 
+        readonly = app_context.is_readonly()
+
         try:
             with closing(self._connect()) as conn, conn:
                 # Purge rows for prefixes that are no longer in config so stale
@@ -427,6 +417,7 @@ class SearchIndex:
                         customers = [
                             d for d in os.listdir(base_dir)
                             if os.path.isdir(os.path.join(base_dir, d))
+                            and not (readonly and is_reparse_point(os.path.join(base_dir, d)))
                         ]
                     except OSError:
                         continue
@@ -469,9 +460,11 @@ class SearchIndex:
                         # that hold job folders). Checking these — not just the customer
                         # root — detects new/deleted jobs inside existing subdirs.
                         scan_errors: List[Exception] = []
+                        po_containers: List[str] = []
                         try:
                             jobs = app_context.find_job_folders(
                                 customer_path, errors=scan_errors, include_po_number=True,
+                                containers=po_containers,
                             )
                         except OSError as exc:
                             logger.warning("search_index: find_job_folders(%s): %s", customer_path, exc)
@@ -489,10 +482,14 @@ class SearchIndex:
                         # in indexed_dirs. customer_path must be included so the
                         # precheck can confirm it was indexed and avoid calling
                         # find_job_folders every run.
+                        # po_containers additionally covers PO folders that matched
+                        # the naming convention but currently hold zero jobs --
+                        # without them, an empty PO container is never recorded, so
+                        # a job created in it later goes undetected by is_fully_covered().
                         # Also track the quotes dir so a new quote folder triggers
                         # re-indexing even when no job folders changed.
                         customer_p = Path(customer_path)
-                        container_dirs: set = {customer_path}
+                        container_dirs: set = {customer_path, *po_containers}
                         for _, job_docs_path, _ in jobs:
                             for p in Path(job_docs_path).parents:
                                 if p == customer_p:
@@ -631,6 +628,7 @@ class SearchIndex:
                         customers = [
                             d for d in os.listdir(base_dir)
                             if os.path.isdir(os.path.join(base_dir, d))
+                            and not (readonly and is_reparse_point(os.path.join(base_dir, d)))
                         ]
                     except OSError:
                         continue
@@ -744,6 +742,124 @@ class SearchIndex:
                 return bool(row[0])
         except sqlite3.Error:
             return False
+
+    def is_fully_covered(
+        self, cf_dirs: List[Tuple[str, str]], bp_dirs: List[Tuple[str, str]],
+    ) -> bool:
+        """Return True if every customer directory currently on disk under
+        cf_dirs/bp_dirs is indexed and unchanged since its last successful scan.
+
+        Lets a zero-result search trust the index instead of always falling
+        back to a live filesystem walk: a customer folder is only marked in
+        indexed_dirs once its scan completes successfully (update() skips
+        marking it on cancellation/scan failure), so an unmarked or
+        since-modified customer means the index hasn't caught up yet — e.g.
+        a folder created after the last background index run. For cf, a
+        customer directory's own mtime only reflects changes to its *direct*
+        children, so a new job added inside an existing PO-container
+        subdirectory doesn't touch it — every previously-recorded container
+        beneath the customer dir is checked too, mirroring update()'s own
+        prev_containers staleness check. bp coverage reuses its single-row
+        recursive mtime check since update() indexes each bp customer as one
+        unit. Only os.listdir()/getmtime() calls, no directory walk of its own.
+
+        Doesn't exclude reparse-point "customer" entries the way update()
+        and find_job_folders()/find_quote_folders() now do (CodeRabbit, PR
+        #315) — this method only decides whether to trust the index or fall
+        back to a live scan, via mtime checks; it never reads or exposes
+        file content/names itself, and doesn't take app_context (so it has
+        no is_readonly() to gate on without a signature change touching ~20
+        call sites). Left out of that fix's scope on that basis.
+        """
+        try:
+            with closing(self._connect(timeout=2.0)) as conn:
+                for kind, dirs in (('cf', cf_dirs), ('bp', bp_dirs)):
+                    for prefix, base_dir in dirs:
+                        try:
+                            customers = [
+                                d for d in os.listdir(base_dir)
+                                if os.path.isdir(os.path.join(base_dir, d))
+                            ]
+                        except OSError:
+                            continue
+                        for customer in customers:
+                            customer_path = os.path.join(base_dir, customer)
+                            if self._is_stale(conn, customer_path, prefix, kind, recursive=(kind == 'bp')):
+                                return False
+                            if kind == 'cf':
+                                containers = conn.execute(
+                                    "SELECT dir_path FROM indexed_dirs"
+                                    " WHERE prefix=? AND kind=? AND dir_path LIKE ? ESCAPE '!'",
+                                    (prefix, kind, _like_prefix(customer_path)),
+                                ).fetchall()
+                                for row in containers:
+                                    if self._is_stale(conn, row['dir_path'], prefix, kind):
+                                        return False
+        except sqlite3.Error:
+            return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Incremental updates
+    # ------------------------------------------------------------------
+    #
+    # is_fully_covered() and the once-per-launch background indexer
+    # (start_indexer() in modules/search/module.py, wired via
+    # QTimer.singleShot(0, ...) in main.py) only prove a customer directory
+    # was indexed *at some point* — not that the index reflects a job/quote
+    # created after that pass. Job/quote creation call these right after a
+    # successful create so the new entry is searchable immediately this
+    # session, instead of being invisible to search until the app restarts.
+
+    def add_job(
+        self, prefix: str, customer: str, job_number: str, description: str,
+        drawings: List[str], path: str, mtime: Optional[float] = None,
+        *, po_number: str = '',
+    ) -> None:
+        """Incrementally add/update a single row in the jobs table.
+
+        Safe to call even if the index has never been fully built — this
+        just adds one row and does not touch indexed_dirs, so it never
+        makes is_fully_covered() claim more coverage than actually exists.
+
+        po_number is keyword-only so a positional 6th argument still binds
+        to path, not po_number -- this method previously omitted po_number
+        from the INSERT entirely, and since the insert is INSERT OR REPLACE
+        keyed on UNIQUE(prefix, path), calling it for an already-indexed
+        path silently wiped a real PO number back to '' (CodeRabbit, PR #317
+        promotion review). update()'s full-index INSERT already writes
+        po_number correctly; this mirrors that column order.
+        """
+        if mtime is None:
+            mtime = self._dir_mtime(path)
+        try:
+            with closing(self._connect(timeout=2.0)) as conn, conn:
+                conn.execute(
+                    """INSERT OR REPLACE INTO jobs
+                       (prefix, customer, job_number, description, drawings, po_number, path, mtime)
+                       VALUES(?,?,?,?,?,?,?,?)""",
+                    (prefix, customer, job_number, description, ','.join(drawings), po_number, path, mtime),
+                )
+        except sqlite3.Error as exc:
+            logger.warning("search_index: add_job failed for %s/%s: %s", customer, job_number, exc)
+
+    def add_quote(
+        self, prefix: str, customer: str, quote_name: str, path: str,
+        mtime: Optional[float] = None,
+    ) -> None:
+        """Incrementally add/update a single row in the quotes table. See add_job()."""
+        if mtime is None:
+            mtime = self._dir_mtime(path)
+        try:
+            with closing(self._connect(timeout=2.0)) as conn, conn:
+                conn.execute(
+                    """INSERT OR REPLACE INTO quotes
+                       (prefix, customer, quote_name, path, mtime)
+                       VALUES(?,?,?,?,?)""",
+                    (prefix, customer, quote_name, path, mtime),
+                )
+        except sqlite3.Error as exc:
+            logger.warning("search_index: add_quote failed for %s/%s: %s", customer, quote_name, exc)
 
     def find_job_by_number(self, job_number: str) -> Optional[Dict]:
         """Return the most recently indexed job with an exact (case-insensitive)

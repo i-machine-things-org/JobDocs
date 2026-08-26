@@ -35,8 +35,17 @@ class QuoteTreeWorker(QThread):
 
     # Signal emitted when a customer with quotes is found
     customer_loaded = pyqtSignal(str, str, list)  # (display_name, customer_path, quotes_list)
-    # Signal emitted when loading is complete
-    finished = pyqtSignal()
+    # Completion is reported via the inherited QThread.finished signal, not
+    # a locally-declared one -- Qt only emits that one after run() has
+    # actually returned, so isRunning() is reliably False by the time a
+    # connected slot runs. A custom signal emitted as the last statement in
+    # run() doesn't have that guarantee (it's a queued cross-thread
+    # delivery, and the GUI event loop can process it before the thread
+    # object finishes its own post-run() bookkeeping) -- refresh_quote_tree()/
+    # search_quotes()'s deferred-restart handler depends on isRunning()
+    # being accurate at that point, or a queued refresh/search could
+    # re-defer itself forever against a worker that will never signal
+    # completion again (CodeRabbit, PR #317 promotion review follow-up).
 
     def __init__(self, dirs_to_search, selected_customer, show_all_customers, app_context):
         super().__init__()
@@ -75,7 +84,17 @@ class QuoteTreeWorker(QThread):
                         continue
 
                     display_name = f"[{prefix}] {customer}" if prefix else customer
-                    quotes = self.app_context.find_quote_folders(customer_path)
+                    quotes = self.app_context.find_quote_folders(
+                        customer_path, is_cancelled=lambda: self._is_cancelled
+                    )
+
+                    # A cancelled scan can still return here with partial results
+                    # (find_quote_folders() stops mid-walk but still returns what
+                    # it had). Don't emit them -- a refresh that cancelled this
+                    # worker has already moved on to a new one, and a stale
+                    # customer_loaded signal would land on the freshly-cleared tree.
+                    if self._is_cancelled:
+                        break
 
                     # Only emit if customer has quotes
                     if quotes:
@@ -84,7 +103,9 @@ class QuoteTreeWorker(QThread):
             except OSError as e:
                 print(f"[QuoteTreeWorker] OSError: {e}", flush=True)
 
-        self.finished.emit()
+        # No self.finished.emit() here -- see the class docstring/comment
+        # above. QThread's own finished signal fires automatically once
+        # run() returns, whether cancelled or not.
 
 
 class QuoteModule(BaseModule):
@@ -97,6 +118,18 @@ class QuoteModule(BaseModule):
         self.add_files: List[str] = []  # For "Add to Existing" tab
         self._widget = None
         self._worker = None  # Background thread worker
+        # A refresh/search requested while a stale worker was still finishing
+        # up (after cancel()) is deferred here instead of starting a new
+        # worker against one that might still be running; _on_loading_finished()
+        # runs it once that worker's finished signal confirms it's actually
+        # stopped (CodeRabbit, PR #317 promotion review).
+        self._pending_tree_action = None
+        self._quote_tab_widget = None
+        self._add_to_quote_tab = None
+        # The Add to Existing tab's quote tree isn't built until that sub-tab
+        # is actually activated — avoids an eager full customer-directory
+        # walk at startup. True means a refresh is owed the next time it's shown.
+        self._add_tree_stale = True
 
         # Preview panels
         self.quote_preview: FilePreviewWidget | None = None
@@ -149,6 +182,10 @@ class QuoteModule(BaseModule):
         # Load UI file
         ui_file = self._get_ui_path('quote/ui/quote_tab.ui')
         uic.loadUi(ui_file, widget)
+
+        self._quote_tab_widget = widget.quote_tab_widget
+        self._add_to_quote_tab = widget.addToQuoteTab
+        self._quote_tab_widget.currentChanged.connect(self._on_quote_subtab_changed)
 
         # ===== Setup "Create New" Tab =====
         self.quote_customer_combo = widget.quote_customer_combo
@@ -341,13 +378,6 @@ class QuoteModule(BaseModule):
             return
         self.add_preview.preview_file(self.add_files[row] if 0 <= row < len(self.add_files) else None)
 
-    def clear_quote_files(self):
-        """Clear all files from quote files list"""
-        self.quote_files.clear()
-        self.quote_files_list.clear()
-        if self.quote_preview:
-            self.quote_preview.clear()
-
     # ==================== Create New Tab: Quote Creation ====================
 
     def create_quote(self):
@@ -437,7 +467,8 @@ class QuoteModule(BaseModule):
 
                     quote_dest = quote_path / file_name
                     if not quote_dest.exists():
-                        create_file_link(bp_dest, quote_dest, link_type)
+                        if not create_file_link(bp_dest, quote_dest, link_type):
+                            self.log_message(f"Warning: Could not link {file_name} to quote")
                 else:
                     quote_dest = quote_path / file_name
                     if not quote_dest.exists():
@@ -464,7 +495,8 @@ class QuoteModule(BaseModule):
                             if drawing_lower in bp_name and bp_name.endswith(ext.lower()):
                                 dest = quote_path / bp_file.name
                                 if not dest.exists():
-                                    create_file_link(bp_file, dest, link_type)
+                                    if not create_file_link(bp_file, dest, link_type):
+                                        self.log_message(f"Warning: Could not link {bp_file.name} to quote")
 
             # Add to history
             self.app_context.add_to_history('quote', {
@@ -476,6 +508,16 @@ class QuoteModule(BaseModule):
                 'path': str(quote_path)
             })
             self.app_context.save_history()
+
+            # Make the new quote searchable this session immediately — see
+            # the matching comment in job/module.py's create_single_job()
+            # and core/search_index.py's is_fully_covered() docstring for why
+            # the background indexer alone isn't enough.
+            search_index = self.app_context.get_search_index()
+            if search_index is not None:
+                search_index.add_quote(
+                    'ITAR' if is_itar else '', customer, quote_dir_name, str(quote_path),
+                )
 
             self.log_message(f"Created: {quote_path}")
             return True
@@ -581,12 +623,42 @@ class QuoteModule(BaseModule):
 
     # ==================== Add to Existing Tab: Quote Tree Management ====================
 
+    def _is_add_tab_active(self) -> bool:
+        return (
+            self._quote_tab_widget is not None
+            and self._quote_tab_widget.currentWidget() is self._add_to_quote_tab
+        )
+
+    def _on_quote_subtab_changed(self, index: int):
+        """Load the quote tree the first time the Add to Existing sub-tab is
+        shown (or the next time it's shown after data went stale), instead of
+        walking the whole customer directory tree eagerly at startup."""
+        if self._add_tree_stale and self._is_add_tab_active():
+            self.refresh_quote_tree()
+
     def refresh_quote_tree(self):
         """Refresh the quote tree with current filter settings (async with background thread)"""
-        # Cancel any existing worker
+        if not self._is_add_tab_active():
+            self._add_tree_stale = True
+            # Don't let a walk started while the tab was active keep running
+            # in the background after the user has switched away from it.
+            # Non-blocking: see the cancel below for why.
+            if self._worker and self._worker.isRunning():
+                self._worker.cancel()
+            return
+        self._add_tree_stale = False
+
         if self._worker and self._worker.isRunning():
+            # cancel() is cooperative -- the worker may be blocked deep
+            # inside a hung os.listdir() on a dead network share and won't
+            # notice for as long as that call hangs. Don't block the GUI
+            # thread waiting for it (QuoteTreeWorker.wait()) like this used
+            # to; defer starting the real refresh until finished() confirms
+            # the stale worker has actually stopped (CodeRabbit, PR #317
+            # promotion review).
             self._worker.cancel()
-            self._worker.wait()
+            self._pending_tree_action = self.refresh_quote_tree
+            return
 
         self.quote_tree.clear()
         self.add_status_label.setText("Loading quotes...")
@@ -631,8 +703,29 @@ class QuoteModule(BaseModule):
         total_items = self.quote_tree.topLevelItemCount()
         self.add_status_label.setText(f"Loaded {total_items} customer(s) with quotes")
 
+        # A refresh/search requested while this worker was still finishing
+        # up was deferred rather than started against it -- run it now that
+        # it's confirmed stopped (self._worker isn't reassigned until the
+        # action below actually starts a new one, so there's no race with a
+        # newer worker's own finished signal).
+        if self._pending_tree_action is not None:
+            action, self._pending_tree_action = self._pending_tree_action, None
+            action()
+
     def search_quotes(self):
         """Search for quotes matching the search term"""
+        if not self._is_add_tab_active():
+            # A search deferred while a stale tree-refresh worker was still
+            # finishing must not run its synchronous traversal against a
+            # tab the user has since navigated away from -- that's exactly
+            # the GUI-freeze risk this fix exists to close, just reached
+            # through the deferred path instead of a direct call
+            # (CodeRabbit, PR #321 follow-up).
+            self._add_tree_stale = True
+            if self._worker and self._worker.isRunning():
+                self._worker.cancel()
+            return
+
         search_term = self.add_search_edit.text().strip().lower()
 
         if not search_term:
@@ -640,8 +733,12 @@ class QuoteModule(BaseModule):
             return
 
         if self._worker and self._worker.isRunning():
+            # See refresh_quote_tree() -- same non-blocking cancel + deferred
+            # restart, so a stale tree-refresh worker can't freeze the GUI
+            # here either.
             self._worker.cancel()
-            self._worker.wait()
+            self._pending_tree_action = self.search_quotes
+            return
 
         self.quote_tree.clear()
 
@@ -663,6 +760,14 @@ class QuoteModule(BaseModule):
 
         results = 0
 
+        # Known residual limitation (CodeRabbit, PR #317 promotion review):
+        # this loop itself is still synchronous on the GUI thread, with no
+        # worker and no is_cancelled passed to find_quote_folders() -- a
+        # hung network share can still freeze the GUI during a live search,
+        # same as before this fix. Only the *previous* fix's blocking
+        # wait() (the cancel above) is what's addressed here; making this
+        # loop itself non-blocking would mean a dedicated background worker
+        # for search, a larger architectural change tracked separately.
         for prefix, cf_dir in dirs_to_search:
             try:
                 if show_all:
@@ -858,8 +963,11 @@ class QuoteModule(BaseModule):
 
                     quote_dest = Path(quote_path) / file_name
                     if bp_ready and not quote_dest.exists():
-                        create_file_link(bp_dest, quote_dest, link_type)
-                        added += 1
+                        if create_file_link(bp_dest, quote_dest, link_type):
+                            added += 1
+                        else:
+                            skipped += 1
+                            self.log_message(f"Warning: Could not link {file_name} to quote")
                     else:
                         skipped += 1
 
@@ -972,7 +1080,12 @@ class QuoteModule(BaseModule):
 
     def cleanup(self):
         """Cleanup resources"""
-        # Stop any running worker thread
+        # Stop any running worker thread. Unlike refresh_quote_tree()/
+        # search_quotes() above, this intentionally stays blocking: module
+        # teardown can't proceed with a background thread still touching
+        # self.app_context or widgets that are about to be torn down
+        # (mirrors modules/search/module.py's SearchWorker cleanup(), which
+        # is exempt from the non-blocking treatment for the same reason).
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait()
