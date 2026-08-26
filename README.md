@@ -42,12 +42,14 @@ two Windows installers — download whichever fits the machine:
   Search, Settings, plugins, everything.
 - **`JobDocs-Kiosk-<version>-windows-setup.exe`** — **JobDocs Kiosk**, a search-only
   build for shared/shop-floor machines that should look up jobs but not create, edit, or
-  browse the filesystem. Only the Search tab's code is on disk (Job, Quote, Bulk,
-  Settings, etc. are never installed, not merely hidden), it never indexes or searches
-  ITAR-controlled directories, and its Search tab offers no "open folder" / "copy path" —
-  only printing and viewing individual files. It installs and updates independently of
-  the full app (separate Start Menu entry, separate uninstall) and can coexist with it on
-  the same machine.
+  browse the filesystem. Only the Search tab's module code is on disk (the Job, Quote,
+  and Bulk tabs are never installed, not merely hidden). The Settings dialog's code is
+  also on disk but unreachable — Kiosk never builds a menu bar, so there's no File menu
+  to open it from. It never indexes or searches ITAR-controlled directories, and its
+  Search tab offers no "open folder" / "copy path" — only printing and viewing
+  individual files. It installs and updates independently of the full app
+  (separate Start Menu entry, separate uninstall) and can coexist with it on the same
+  machine.
 
 Each installer offers:
 
@@ -64,11 +66,12 @@ time, not a file it writes and a user could delete afterward). To actually restr
 a shared machine's user can do, run it under a separately managed Windows account with
 the installation directory locked down.
 
-JobDocs Kiosk has no Settings dialog and no first-run setup wizard (both are write-capable
-admin tools, so neither is installed) — the JobDocs Kiosk installer itself prompts for the
-customer files, ITAR customer files, blueprints, and ITAR blueprints directories. Leave the
-ITAR fields blank if the site doesn't use them. Re-run the installer to change these later;
-it pre-fills your previous answers.
+JobDocs Kiosk has no menu bar and no first-run setup wizard (both write-capable admin
+surfaces) — the JobDocs Kiosk installer itself prompts for the customer files, ITAR
+customer files, blueprints, and ITAR blueprints directories instead. Leave the ITAR
+fields blank if the site doesn't use them. Re-run the installer to change these later;
+it pre-fills your previous answers. The Settings dialog's code ships with Kiosk too,
+but there's no File → Settings to open it from — the menu bar itself is never built.
 
 ### Linux (Flatpak)
 

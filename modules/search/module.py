@@ -42,14 +42,30 @@ _ITAR_LABEL_PREFIXES = ('[ITAR] ', '[ITAR-BP] ', '[ITAR Quote] ')
 
 # Temp dirs created to view a file on a read-only (search-only) install
 # without exposing its real path to the external viewer — see
-# SearchModule._open_item_externally(). Single atexit handler mirrors
+# SearchModule._open_item_externally(). Cleaned up before each new temp
+# copy is made (never more than the most-recently-viewed file's copy sits
+# on disk at once) and again via this atexit handler as a fallback, mirroring
 # shared/widgets.py's _dropzone_tmp_dirs pattern.
 _kiosk_view_tmp_dirs: list = []
 
 
 def _cleanup_kiosk_view_tmp_dirs() -> None:
+    # Called both as the atexit fallback and before every new temp copy, so
+    # a successfully-removed path must not be re-walked (and no-op
+    # re-rmtree'd) by a later call. But shutil.rmtree(ignore_errors=True)
+    # can silently fail to remove a dir the external viewer still has a
+    # file open in (a real possibility on Windows, where an open handle
+    # blocks deletion) -- popping unconditionally would then forget that
+    # path forever, leaking it past both the next open's cleanup and the
+    # atexit fallback. Keep only the paths that actually still exist after
+    # the attempt, so a failed removal gets retried next time
+    # (CodeRabbit, PR #317 promotion review).
+    still_present = []
     for d in _kiosk_view_tmp_dirs:
         shutil.rmtree(d, ignore_errors=True)
+        if os.path.exists(d):
+            still_present.append(d)
+    _kiosk_view_tmp_dirs[:] = still_present
 
 
 atexit.register(_cleanup_kiosk_view_tmp_dirs)
@@ -1143,10 +1159,14 @@ class SearchModule(BaseModule):
         Files open from a temp copy on a read-only install, never the
         original path: the external viewer's own "Save As" / "Recent
         Files" would otherwise hand the user the real customer network
-        path, working around every other restriction in this module. See
-        _cleanup_kiosk_view_tmp_dirs for why cleanup happens at app exit
-        rather than "when the viewer closes" — QDesktopServices hands off
-        to the OS shell association, not a process JobDocs can track.
+        path, working around every other restriction in this module. The
+        previous temp copy (if any) is removed before making a new one —
+        a kiosk left running for days must not accumulate one plaintext
+        copy of every document ever viewed that session — with the
+        _cleanup_kiosk_view_tmp_dirs atexit handler as a fallback for
+        whichever copy is still open when the process exits, since
+        QDesktopServices hands off to the OS shell association, not a
+        process JobDocs can track to know when the viewer closes.
 
         Also refuses a path whose canonical location resolves outside the
         currently permitted (non-ITAR) roots — see
@@ -1164,6 +1184,7 @@ class SearchModule(BaseModule):
         if readonly and os.path.isdir(path):
             return
         if readonly and os.path.isfile(path):
+            _cleanup_kiosk_view_tmp_dirs()
             try:
                 tmp_dir = tempfile.mkdtemp(prefix='jobdocs_kiosk_view_')
                 _kiosk_view_tmp_dirs.append(tmp_dir)
