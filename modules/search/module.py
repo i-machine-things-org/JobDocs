@@ -460,7 +460,11 @@ class FolderNamingCheckWorker(QThread):
                 display_customer = f"[ITAR] {customer}" if prefix == 'ITAR' else customer
                 unrecognized: List = []
                 try:
-                    self.app_context.find_job_folders(customer_path, unrecognized=unrecognized)
+                    self.app_context.find_job_folders(
+                        customer_path,
+                        unrecognized=unrecognized,
+                        is_cancelled=lambda: self._is_cancelled,
+                    )
                 except OSError:
                     continue
                 for path, reason in unrecognized:
@@ -950,10 +954,13 @@ class SearchModule(BaseModule):
     # ==================== Search Control ====================
 
     def cancel_search(self):
-        """Cancel the running search"""
+        """Cancel the running search or folder naming check"""
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self.search_status_label.setText("Cancelling search...")
+        if self._naming_worker and self._naming_worker.isRunning():
+            self._naming_worker.cancel()
+            self.search_status_label.setText("Cancelling folder naming check...")
 
     def check_folder_naming(self):
         """Scan customer directories for folders that don't match the
@@ -967,6 +974,7 @@ class SearchModule(BaseModule):
             return
 
         self.check_naming_btn.setEnabled(False)
+        self.cancel_btn.show()
         self.search_status_label.setText("Checking folder names…")
 
         self._naming_worker = FolderNamingCheckWorker(customer_dirs, self.app_context)
@@ -978,6 +986,7 @@ class SearchModule(BaseModule):
         """Slot called when a folder naming check completes"""
         self.check_naming_btn.setEnabled(True)
         if not (self._worker and self._worker.isRunning()):
+            self.cancel_btn.hide()
             self.search_status_label.setText("")
 
         if not results:
@@ -1019,9 +1028,13 @@ class SearchModule(BaseModule):
 
         self._apply_sort(selected_path=selected_path)
 
-        self.search_status_label.setText(f"Found {result_count} result(s)")
         self.search_progress.hide()
         self.search_btn.setEnabled(True)
+        if self._naming_worker and self._naming_worker.isRunning():
+            # Leave cancel_btn and the status label alone -- the naming
+            # check is still using them.
+            return
+        self.search_status_label.setText(f"Found {result_count} result(s)")
         self.cancel_btn.hide()
 
     def clear_search(self):
@@ -1514,6 +1527,9 @@ class SearchModule(BaseModule):
         if self._index_worker and self._index_worker.isRunning():
             self._index_worker.cancel()
             self._index_worker.wait()
+        if self._naming_worker and self._naming_worker.isRunning():
+            self._naming_worker.cancel()
+            self._naming_worker.wait()
         self.search_results.clear()
         # Best-effort now, on normal shutdown; the atexit.register fallback
         # in _cleanup_kiosk_view_tmp_dirs still covers a hard exit/crash.

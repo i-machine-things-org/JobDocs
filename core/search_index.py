@@ -156,7 +156,7 @@ COMMIT;
 
 _MIGRATION_V5 = """
 BEGIN;
-DELETE FROM indexed_dirs WHERE kind='cf';
+DELETE FROM indexed_dirs WHERE kind IN ('cf', 'bp');
 PRAGMA user_version = 5;
 COMMIT;
 """
@@ -289,13 +289,16 @@ class SearchIndex:
                 conn.execute("DELETE FROM indexed_dirs WHERE kind='cf'")
                 conn.execute("PRAGMA user_version = 4")
         if version < 5:
-            # Force a clean re-index so any customer whose indexed_dirs rows
-            # were written before path normalization was fixed (see
-            # _norm_path) get rebuilt under consistent separators, and so any
-            # customer indexed between the po_number/V4 migration and the
-            # later PO-vs-legacy detection refinements (same file, no version
-            # bump at the time) picks up the fully-corrected discovery logic.
-            logger.info("search_index: migrating schema to v5 (normalized cf paths, force re-index)")
+            # Force a clean re-index (both cf and bp) so any indexed_dirs rows
+            # written before path normalization was fixed (see _norm_path) get
+            # rebuilt under consistent separators -- including bp rows, which
+            # the customer-purge cleanup in the bp loop also matched via a
+            # LIKE prefix built from the same unnormalized base_dir. Also
+            # covers any cf customer indexed between the po_number/V4
+            # migration and the later PO-vs-legacy detection refinements
+            # (same file, no version bump at the time), which now get the
+            # fully-corrected discovery logic too.
+            logger.info("search_index: migrating schema to v5 (normalized paths, force re-index)")
             conn.executescript(_MIGRATION_V5)
 
     def _dir_mtime(self, path: str) -> float:
@@ -655,6 +658,7 @@ class SearchIndex:
                 for prefix, base_dir in bp_dirs:
                     if _cancelled():
                         return
+                    base_dir = _norm_path(base_dir)
                     try:
                         customers = [
                             d for d in os.listdir(base_dir)
@@ -684,7 +688,7 @@ class SearchIndex:
                                 (prefix, 'bp', _like_prefix(base_dir)),
                             )
                         }
-                        valid_paths = {os.path.join(base_dir, c) for c in customer_set}
+                        valid_paths = {_norm_path(os.path.join(base_dir, c)) for c in customer_set}
                         for stale_path in prev_indexed - valid_paths:
                             conn.execute(
                                 "DELETE FROM indexed_dirs WHERE dir_path=? AND prefix=? AND kind=?",

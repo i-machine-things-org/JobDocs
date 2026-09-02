@@ -1,6 +1,7 @@
 """Tests for core/search_index.py — pure sqlite logic, no Qt."""
 
 import os
+import shutil
 import sqlite3
 
 import pytest
@@ -654,13 +655,51 @@ class TestUpdateHandlesMixedPathSeparators:
         assert index.is_fully_covered(cf_dirs=[('', base_dir)], bp_dirs=[]) is False
 
 
+class TestUpdateNormalizesBlueprintCleanupPaths:
+    """Regression test (CodeRabbit finding on this PR): the bp customer-purge
+    cleanup built its LIKE prefix and valid_paths from raw base_dir, not
+    normalized the way the per-customer staleness check just below it is --
+    so a removed blueprint customer under a forward-slash root (same Qt
+    QFileDialog scenario as the cf staleness bug) left an orphaned
+    indexed_dirs row behind forever instead of being pruned.
+    """
+
+    @pytest.mark.skipif(os.name != 'nt', reason="Windows-only, see class docstring")
+    def test_removed_blueprint_customer_is_pruned_under_forward_slash_root(self, tmp_path):
+        bp_root = tmp_path / 'blueprints'
+        customer_path = bp_root / 'Acme'
+        customer_path.mkdir(parents=True)
+        (customer_path / 'drawing.pdf').write_text('x')
+
+        # Mimic Qt's QFileDialog output -- forward slashes even on Windows.
+        base_dir = str(bp_root).replace(os.sep, '/')
+
+        ctx = _make_app_context()
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[], bp_dirs=[('', base_dir)], app_context=ctx)
+
+        with sqlite3.connect(str(index._db_path)) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM indexed_dirs WHERE kind='bp'").fetchone()[0]
+        assert count == 1
+
+        shutil.rmtree(customer_path)
+        index.update(cf_dirs=[], bp_dirs=[('', base_dir)], app_context=ctx)
+
+        with sqlite3.connect(str(index._db_path)) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM indexed_dirs WHERE kind='bp'").fetchone()[0]
+        assert count == 0
+
+
 class TestMigrationToV5NormalizesPaths:
-    def test_existing_v4_database_forces_cf_reindex(self, tmp_path):
+    def test_existing_v4_database_forces_cf_and_bp_reindex(self, tmp_path):
         # Simulate a database already migrated to v4 (po_number column
         # present) whose indexed_dirs rows may have been written under the
-        # pre-fix mixed-separator representation. Opening it with the current
-        # SearchIndex must bump to v5 and force a clean cf re-index so those
-        # rows get rebuilt under consistently-normalized paths.
+        # pre-fix mixed-separator representation -- both cf (the customer
+        # staleness precheck) and bp (the blueprint customer-purge cleanup,
+        # which had the same unnormalized-base_dir bug). Opening it with the
+        # current SearchIndex must bump to v5 and force a clean re-index of
+        # both kinds so those rows get rebuilt under consistently-normalized
+        # paths.
         db_path = tmp_path / 'search_index.db'
         conn = sqlite3.connect(str(db_path))
         conn.executescript("""
@@ -688,6 +727,8 @@ class TestMigrationToV5NormalizesPaths:
                 VALUES ('', 'Acme', '12345', 'Bracket', '', '', 'Z:/Acme/12345', 1.0);
             INSERT INTO indexed_dirs (dir_path, prefix, kind, mtime, indexed_at)
                 VALUES ('Z:/Acme', '', 'cf', 1.0, 1.0);
+            INSERT INTO indexed_dirs (dir_path, prefix, kind, mtime, indexed_at)
+                VALUES ('Z:/Blueprints/Acme', '', 'bp', 1.0, 1.0);
             PRAGMA user_version = 4;
         """)
         conn.commit()
@@ -697,11 +738,9 @@ class TestMigrationToV5NormalizesPaths:
 
         conn = sqlite3.connect(str(db_path))
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        cf_dirs_remaining = conn.execute(
-            "SELECT COUNT(*) FROM indexed_dirs WHERE kind='cf'"
-        ).fetchone()[0]
+        dirs_remaining = conn.execute("SELECT COUNT(*) FROM indexed_dirs").fetchone()[0]
         job_row = conn.execute("SELECT job_number FROM jobs").fetchone()
 
         assert version == 5
-        assert cf_dirs_remaining == 0  # forced re-index
+        assert dirs_remaining == 0  # forced re-index of both cf and bp
         assert job_row == ('12345',)  # existing job rows preserved, not wiped

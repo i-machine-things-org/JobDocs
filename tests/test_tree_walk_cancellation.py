@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from modules.job.module import JobTreeWorker  # noqa: E402
 from modules.quote.module import QuoteTreeWorker  # noqa: E402
+from modules.search.module import FolderNamingCheckWorker  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -118,6 +119,54 @@ def test_quote_worker_cancel_does_not_block_on_slow_in_flight_customer(qapp, tmp
     worker.start()
     try:
         time.sleep(0.15)
+        start = time.monotonic()
+        worker.cancel()
+        finished = worker.wait(2000)
+        elapsed = time.monotonic() - start
+        assert finished, "worker did not finish within the wait timeout"
+        assert elapsed < 1.0, (
+            f"cancel()+wait() took {elapsed:.2f}s -- cancellation is not "
+            "taking effect inside the per-customer scan"
+        )
+    finally:
+        if worker.isRunning():
+            worker.cancel()
+            worker.wait()
+
+
+class _SlowNamingAppContext:
+    """Stands in for a customer directory scan slow enough to still be "in
+    flight" when cancel() is requested. Mirrors the shape of
+    AppContext.find_job_folders(): must honor is_cancelled() *inside* its
+    per-item loop -- CodeRabbit's finding on FolderNamingCheckWorker was that
+    it never passed is_cancelled at all, so cancel() could only take effect
+    between customers, not mid-scan on one large/slow one."""
+
+    def __init__(self, num_items=40, step_delay=0.05):
+        self.num_items = num_items
+        self.step_delay = step_delay
+
+    def is_readonly(self):
+        return False
+
+    def find_job_folders(self, customer_path, is_cancelled=None, unrecognized=None, **kwargs):
+        cancelled = is_cancelled or (lambda: False)
+        for _ in range(self.num_items):
+            if cancelled():
+                break
+            time.sleep(self.step_delay)
+        return []
+
+
+def test_folder_naming_worker_cancel_does_not_block_on_slow_in_flight_customer(qapp, tmp_path):
+    cf_root = tmp_path / 'customer_files'
+    (cf_root / 'Acme').mkdir(parents=True)
+
+    slow_ctx = _SlowNamingAppContext(num_items=40, step_delay=0.05)  # ~2s if uninterrupted
+    worker = FolderNamingCheckWorker([('', str(cf_root))], slow_ctx)
+    worker.start()
+    try:
+        time.sleep(0.15)  # let it get into the middle of the slow scan
         start = time.monotonic()
         worker.cancel()
         finished = worker.wait(2000)
