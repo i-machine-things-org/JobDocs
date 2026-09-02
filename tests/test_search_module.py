@@ -120,6 +120,25 @@ def _patched_naming_dialogs(mock_box, mock_dialog):
     )
 
 
+class TestCheckFolderNamingReadonlyGuard:
+    """A read-only (search-only) kiosk install can't act on a naming-
+    convention finding (fixing one means renaming folders on the actual
+    share) and the report dialog's own reveal-in-Explorer actions are
+    already disabled read-only, so the button is hidden entirely in
+    _create_widget() -- this guard is the defense-in-depth backstop if the
+    method is somehow still reached (e.g. a stale/queued signal)."""
+
+    def test_is_a_noop_when_readonly(self):
+        module = _make_module_for_naming_check()
+        module._app_context = MagicMock(is_readonly=MagicMock(return_value=True))
+
+        module.check_folder_naming()
+
+        module.check_naming_btn.setEnabled.assert_not_called()
+        module.cancel_btn.show.assert_not_called()
+        assert module._naming_worker is None
+
+
 class TestNamingCheckFinishedDistinguishesCancellation:
     """CodeRabbit finding on PR #325: a cancelled FolderNamingCheckWorker still
     emits whatever results it collected before cancellation -- showing that as
