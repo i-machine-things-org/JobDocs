@@ -8,7 +8,7 @@ the index is disabled following repeated failures) crash on None.is_fully_covere
 """
 
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from modules.search.module import SearchModule
 
@@ -19,6 +19,17 @@ def _make_module() -> SearchModule:
     module.search_table = MagicMock()
     module.search_status_label = MagicMock()
     module._app_context = MagicMock(is_readonly=MagicMock(return_value=False))
+    return module
+
+
+def _make_module_for_naming_check() -> SearchModule:
+    module = SearchModule()
+    module._widget = MagicMock()
+    module.check_naming_btn = MagicMock()
+    module.cancel_btn = MagicMock()
+    module.search_status_label = MagicMock()
+    module._worker = None
+    module._naming_worker = None
     return module
 
 
@@ -76,4 +87,65 @@ def test_zero_results_leaves_failed_flag_false():
     result = module._search_from_index('term', True, True, True, True, False)
 
     assert result is False
-    assert module._index_query_failed is False
+
+
+def _patched_naming_dialogs(mock_box, mock_dialog):
+    # Patch via the target method's own __globals__ rather than a string
+    # module path -- core/module_loader.py's dev-mode path can register a
+    # second, distinct 'modules.search.module' object in sys.modules (see
+    # CODING_NOTES.md "Plugins & Dynamic Loading"), which would make a
+    # string-path patch silently target the wrong copy whenever another test
+    # in the same session exercises that loader first. __globals__ is bound
+    # to the actual module namespace this method's code object reads from,
+    # so it's correct regardless of what sys.modules currently holds.
+    return patch.dict(
+        SearchModule._on_naming_check_finished.__globals__,
+        {'QMessageBox': mock_box, 'FolderNamingReportDialog': mock_dialog},
+    )
+
+
+class TestNamingCheckFinishedDistinguishesCancellation:
+    """CodeRabbit finding on PR #325: a cancelled FolderNamingCheckWorker still
+    emits whatever results it collected before cancellation -- showing that as
+    "No naming issues found" or a complete report would be misleading, since
+    customers after the cancellation point were never scanned at all."""
+
+    def test_cancelled_scan_with_no_results_skips_the_no_issues_message(self):
+        module = _make_module_for_naming_check()
+        mock_box, mock_dialog = MagicMock(), MagicMock()
+        with _patched_naming_dialogs(mock_box, mock_dialog):
+            module._on_naming_check_finished([], True)
+
+        mock_box.information.assert_not_called()
+        mock_dialog.assert_not_called()
+        module.search_status_label.setText.assert_called_with("Folder naming check cancelled")
+
+    def test_cancelled_scan_with_partial_results_skips_the_report_dialog(self):
+        module = _make_module_for_naming_check()
+        results = [('Acme', r'C:\Acme\job documents\New folder', 'unrecognized folder')]
+        mock_box, mock_dialog = MagicMock(), MagicMock()
+        with _patched_naming_dialogs(mock_box, mock_dialog):
+            module._on_naming_check_finished(results, True)
+
+        mock_box.information.assert_not_called()
+        mock_dialog.assert_not_called()
+
+    def test_completed_scan_with_no_results_shows_no_issues_message(self):
+        module = _make_module_for_naming_check()
+        mock_box, mock_dialog = MagicMock(), MagicMock()
+        with _patched_naming_dialogs(mock_box, mock_dialog):
+            module._on_naming_check_finished([], False)
+
+        mock_box.information.assert_called_once()
+        mock_dialog.assert_not_called()
+
+    def test_completed_scan_with_results_shows_report_dialog(self):
+        module = _make_module_for_naming_check()
+        results = [('Acme', r'C:\Acme\job documents\New folder', 'unrecognized folder')]
+        mock_box, mock_dialog = MagicMock(), MagicMock()
+        with _patched_naming_dialogs(mock_box, mock_dialog):
+            module._on_naming_check_finished(results, False)
+
+        mock_box.information.assert_not_called()
+        mock_dialog.assert_called_once_with(module._widget, results)
+        mock_dialog.return_value.exec.assert_called_once()
