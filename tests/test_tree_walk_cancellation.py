@@ -20,6 +20,7 @@ AppContext implementation.
 """
 
 import os
+import threading
 import time
 
 import pytest
@@ -145,11 +146,13 @@ class _SlowNamingAppContext:
     def __init__(self, num_items=40, step_delay=0.05):
         self.num_items = num_items
         self.step_delay = step_delay
+        self.entered = threading.Event()
 
     def is_readonly(self):
         return False
 
     def find_job_folders(self, customer_path, is_cancelled=None, unrecognized=None, **kwargs):
+        self.entered.set()
         cancelled = is_cancelled or (lambda: False)
         for _ in range(self.num_items):
             if cancelled():
@@ -166,7 +169,10 @@ def test_folder_naming_worker_cancel_does_not_block_on_slow_in_flight_customer(q
     worker = FolderNamingCheckWorker([('', str(cf_root))], slow_ctx)
     worker.start()
     try:
-        time.sleep(0.15)  # let it get into the middle of the slow scan
+        # Synchronize on actual scan entry rather than a fixed sleep -- a
+        # late-starting worker could otherwise let this test pass even if
+        # cancellation only takes effect between customers, not mid-scan.
+        assert slow_ctx.entered.wait(timeout=2), "worker never entered find_job_folders()"
         start = time.monotonic()
         worker.cancel()
         finished = worker.wait(2000)

@@ -426,7 +426,7 @@ class FolderNamingCheckWorker(QThread):
     """
 
     progress_update = pyqtSignal(str)
-    finished = pyqtSignal(list)  # list of (customer_display, path, reason)
+    finished = pyqtSignal(list, bool)  # (customer_display, path, reason) list, was_cancelled
 
     def __init__(self, dirs_to_check, app_context):
         super().__init__()
@@ -470,7 +470,7 @@ class FolderNamingCheckWorker(QThread):
                 for path, reason in unrecognized:
                     results.append((display_customer, path, reason))
 
-        self.finished.emit(results)
+        self.finished.emit(results, self._is_cancelled)
 
 
 class FolderNamingReportDialog(QDialog):
@@ -982,11 +982,22 @@ class SearchModule(BaseModule):
         self._naming_worker.finished.connect(self._on_naming_check_finished)
         self._naming_worker.start()
 
-    def _on_naming_check_finished(self, results: list):
+    def _on_naming_check_finished(self, results: list, was_cancelled: bool):
         """Slot called when a folder naming check completes"""
         self.check_naming_btn.setEnabled(True)
-        if not (self._worker and self._worker.isRunning()):
+        other_worker_active = self._worker and self._worker.isRunning()
+        if not other_worker_active:
             self.cancel_btn.hide()
+
+        if was_cancelled:
+            # results only reflects customers scanned before cancellation --
+            # showing it as "no issues found" or a complete report would be
+            # misleading, so skip both and just report that it was cancelled.
+            if not other_worker_active:
+                self.search_status_label.setText("Folder naming check cancelled")
+            return
+
+        if not other_worker_active:
             self.search_status_label.setText("")
 
         if not results:
