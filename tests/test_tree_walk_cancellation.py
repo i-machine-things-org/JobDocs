@@ -188,6 +188,56 @@ def test_folder_naming_worker_cancel_does_not_block_on_slow_in_flight_customer(q
             worker.wait()
 
 
+def test_clear_search_disconnect_prevents_stale_finished_delivery(qapp, tmp_path):
+    """Real-Qt regression test (CodeRabbit, PR #325) for the queued-signal
+    race: finished is a cross-thread queued connection, so the worker can
+    emit it before wait() returns, but Qt only actually delivers it once
+    control returns to the event loop -- which, without the disconnect()
+    clear_search() now does first, would happen *after* clear_search() had
+    already reset the status label, clobbering it with a stale "cancelled"
+    message. This is deterministic, not timing-flaky: QThread.wait() never
+    pumps the event loop, so a queued emission during it is *always*
+    deferred past the caller's return, every run.
+    """
+    from unittest.mock import MagicMock
+
+    from modules.search.module import SearchModule
+
+    cf_root = tmp_path / 'customer_files'
+    (cf_root / 'Acme').mkdir(parents=True)
+
+    module = SearchModule()
+    module.search_edit = MagicMock()
+    module.search_table = MagicMock()
+    module.folder_tree = MagicMock()
+    module.file_preview = None
+    module.search_status_label = MagicMock()
+    module.search_progress = MagicMock()
+    module.search_btn = MagicMock()
+    module.check_naming_btn = MagicMock()
+    module.cancel_btn = MagicMock()
+    module.search_results = []
+    module._worker = None
+
+    slow_ctx = _SlowNamingAppContext(num_items=20, step_delay=0.05)
+    module._naming_worker = FolderNamingCheckWorker([('', str(cf_root))], slow_ctx)
+    module._naming_worker.finished.connect(module._on_naming_check_finished)
+    module._naming_worker.start()
+    try:
+        assert slow_ctx.entered.wait(timeout=2), "worker never entered find_job_folders()"
+
+        module.clear_search()
+        qapp.processEvents()  # let anything still queued get delivered
+
+        # clear_search() itself sets "" last; a stale finished delivery
+        # would have overwritten it with "Folder naming check cancelled".
+        module.search_status_label.setText.assert_called_with("")
+    finally:
+        if module._naming_worker.isRunning():
+            module._naming_worker.cancel()
+            module._naming_worker.wait()
+
+
 def test_job_worker_uses_inherited_finished_signal_not_a_shadowing_one(qapp):
     """Regression test (CodeRabbit, PR #321 follow-up on the non-blocking-
     cancel fix in PR #317's promotion review): JobTreeWorker used to declare

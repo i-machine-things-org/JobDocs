@@ -1058,6 +1058,14 @@ class SearchModule(BaseModule):
             self._worker.cancel()
             self._worker.wait()
         if self._naming_worker and self._naming_worker.isRunning():
+            # finished is a queued cross-thread connection: the worker can
+            # emit it (e.g. right after cancel() takes effect) before wait()
+            # returns, but delivery only happens once this method returns
+            # control to the Qt event loop -- by which point the UI reset
+            # below has already run. Disconnecting first makes Qt drop that
+            # already-queued delivery instead of invoking it afterward and
+            # clobbering the reset state with a stale "cancelled" message.
+            self._naming_worker.finished.disconnect(self._on_naming_check_finished)
             self._naming_worker.cancel()
             self._naming_worker.wait()
 
@@ -1546,6 +1554,10 @@ class SearchModule(BaseModule):
             self._index_worker.cancel()
             self._index_worker.wait()
         if self._naming_worker and self._naming_worker.isRunning():
+            # See clear_search()'s equivalent guard: without disconnecting
+            # first, a finished delivery queued during wait() would run
+            # after teardown, against widgets that may already be deleted.
+            self._naming_worker.finished.disconnect(self._on_naming_check_finished)
             self._naming_worker.cancel()
             self._naming_worker.wait()
         self.search_results.clear()
