@@ -20,6 +20,7 @@ AppContext implementation.
 """
 
 import os
+import threading
 import time
 
 import pytest
@@ -35,6 +36,7 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from modules.job.module import JobTreeWorker  # noqa: E402
 from modules.quote.module import QuoteTreeWorker  # noqa: E402
+from modules.search.module import FolderNamingCheckWorker  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -131,6 +133,127 @@ def test_quote_worker_cancel_does_not_block_on_slow_in_flight_customer(qapp, tmp
         if worker.isRunning():
             worker.cancel()
             worker.wait()
+
+
+class _SlowNamingAppContext:
+    """Stands in for a customer directory scan slow enough to still be "in
+    flight" when cancel() is requested. Mirrors the shape of
+    AppContext.find_job_folders(): must honor is_cancelled() *inside* its
+    per-item loop -- CodeRabbit's finding on FolderNamingCheckWorker was that
+    it never passed is_cancelled at all, so cancel() could only take effect
+    between customers, not mid-scan on one large/slow one."""
+
+    def __init__(self, num_items=40, step_delay=0.05):
+        self.num_items = num_items
+        self.step_delay = step_delay
+        self.entered = threading.Event()
+
+    def is_readonly(self):
+        return False
+
+    def find_job_folders(self, customer_path, is_cancelled=None, unrecognized=None, **kwargs):
+        self.entered.set()
+        cancelled = is_cancelled or (lambda: False)
+        for _ in range(self.num_items):
+            if cancelled():
+                break
+            time.sleep(self.step_delay)
+        return []
+
+
+def test_folder_naming_worker_cancel_does_not_block_on_slow_in_flight_customer(qapp, tmp_path):
+    cf_root = tmp_path / 'customer_files'
+    (cf_root / 'Acme').mkdir(parents=True)
+
+    slow_ctx = _SlowNamingAppContext(num_items=40, step_delay=0.05)  # ~2s if uninterrupted
+    worker = FolderNamingCheckWorker([('', str(cf_root))], slow_ctx)
+    worker.start()
+    try:
+        # Synchronize on actual scan entry rather than a fixed sleep -- a
+        # late-starting worker could otherwise let this test pass even if
+        # cancellation only takes effect between customers, not mid-scan.
+        assert slow_ctx.entered.wait(timeout=2), "worker never entered find_job_folders()"
+        start = time.monotonic()
+        worker.cancel()
+        finished = worker.wait(2000)
+        elapsed = time.monotonic() - start
+        assert finished, "worker did not finish within the wait timeout"
+        assert elapsed < 1.0, (
+            f"cancel()+wait() took {elapsed:.2f}s -- cancellation is not "
+            "taking effect inside the per-customer scan"
+        )
+    finally:
+        if worker.isRunning():
+            worker.cancel()
+            worker.wait()
+
+
+def test_stale_naming_worker_deliveries_are_ignored_after_clear_search(qapp, tmp_path):
+    """Real-Qt regression test (CodeRabbit, PR #325) for the queued-signal
+    race: progress_update/finished are cross-thread queued connections, so
+    the worker can emit one before wait() returns, but Qt only actually
+    delivers it once control returns to the event loop -- after
+    clear_search() has already reset the status label. This is
+    deterministic, not timing-flaky: QThread.wait() never pumps the event
+    loop, so a queued emission during it is *always* deferred past the
+    caller's return, every run.
+
+    An earlier fix tried disconnecting the signal before cancel()+wait(),
+    but Qt's own docs say disconnect() only stops *future* emissions from
+    being queued -- it does not un-queue one already posted. The actual fix
+    is the _naming_scan_id guard clear_search() bumps and the connected
+    wrapper slots check; this test wires the worker up exactly the way
+    check_folder_naming() does (scan id + lambda-wrapped connections) rather
+    than connecting the bare slot, so it exercises the real protection
+    mechanism, not a simplified stand-in for it.
+    """
+    from unittest.mock import MagicMock
+
+    from modules.search.module import SearchModule
+
+    cf_root = tmp_path / 'customer_files'
+    (cf_root / 'Acme').mkdir(parents=True)
+
+    module = SearchModule()
+    module.search_edit = MagicMock()
+    module.search_table = MagicMock()
+    module.folder_tree = MagicMock()
+    module.file_preview = None
+    module.search_status_label = MagicMock()
+    module.search_progress = MagicMock()
+    module.search_btn = MagicMock()
+    module.check_naming_btn = MagicMock()
+    module.cancel_btn = MagicMock()
+    module.search_results = []
+    module._worker = None
+
+    slow_ctx = _SlowNamingAppContext(num_items=20, step_delay=0.05)
+    module._naming_scan_id += 1
+    scan_id = module._naming_scan_id
+    module._naming_worker = FolderNamingCheckWorker([('', str(cf_root))], slow_ctx)
+    module._naming_worker.progress_update.connect(
+        lambda status, sid=scan_id: module._on_naming_progress_update(status, sid)
+    )
+    module._naming_worker.finished.connect(
+        lambda results, cancelled, sid=scan_id: module._on_naming_check_finished_if_current(
+            results, cancelled, sid
+        )
+    )
+    module._naming_worker.start()
+    try:
+        assert slow_ctx.entered.wait(timeout=2), "worker never entered find_job_folders()"
+
+        module.clear_search()
+        qapp.processEvents()  # let anything still queued get delivered
+
+        # clear_search() itself sets "" last; a stale progress_update or
+        # finished delivery would have overwritten it (with old "Checking…"
+        # text or "Folder naming check cancelled" respectively).
+        module.search_status_label.setText.assert_called_with("")
+    finally:
+        if module._naming_worker.isRunning():
+            module._naming_worker.cancel()
+            module._naming_worker.wait()
 
 
 def test_job_worker_uses_inherited_finished_signal_not_a_shadowing_one(qapp):
