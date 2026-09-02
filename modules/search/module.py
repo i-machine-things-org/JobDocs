@@ -696,6 +696,14 @@ class SearchModule(BaseModule):
         self.search_btn = widget.search_btn
         self.cancel_btn = widget.cancel_btn
         self.check_naming_btn = widget.check_naming_btn
+        if self.app_context.is_readonly():
+            # A kiosk user can't act on a naming-convention finding (fixing
+            # one means renaming folders on the actual share, which a
+            # read-only install never permits), and the report dialog's own
+            # reveal-in-Explorer actions are already disabled read-only --
+            # see check_folder_naming()'s own guard for the defense-in-depth
+            # check if this button is somehow still reached.
+            self.check_naming_btn.hide()
 
         # Keep criteria group compact, let results group expand
         widget.layout().setStretchFactor(widget.searchCriteriaGroup, 0)
@@ -1019,7 +1027,19 @@ class SearchModule(BaseModule):
 
     def check_folder_naming(self):
         """Scan customer directories for folders that don't match the
-        configured job/PO naming convention and show them in a report."""
+        configured job/PO naming convention and show them in a report.
+
+        Not offered on a read-only (search-only) kiosk install at all --
+        the button is hidden in _create_widget() -- but guarded here too as
+        defense-in-depth (e.g. a stale/queued signal), matching every other
+        readonly-gated action in this module. A kiosk user can't act on a
+        naming-convention finding anyway (fixing it means renaming folders
+        on the actual share), and the report's own reveal-in-Explorer
+        actions are already disabled read-only, so the whole feature would
+        just be a dead end for that install.
+        """
+        if self.app_context.is_readonly():
+            return
         if self._naming_worker and self._naming_worker.isRunning():
             return
 
