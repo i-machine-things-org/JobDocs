@@ -414,6 +414,43 @@ def open_folder(path: str) -> Tuple[bool, Optional[str]]:
         return False, f"Failed to open folder: {e}"
 
 
+def reveal_in_file_manager(path: str) -> Tuple[bool, Optional[str]]:
+    """
+    Open path's containing directory in the OS file browser with path
+    itself selected/highlighted, rather than opening path as a listing.
+
+    Args:
+        path: Path to the file or folder to select
+
+    Returns:
+        Tuple of (success, error_message)
+    """
+    if not os.path.exists(path):
+        return False, f"Not found: {path}"
+    try:
+        norm_path = os.path.normpath(path)
+        system = platform.system()
+        if system == "Windows":
+            # No shell involved (list form), so no quoting/injection concerns;
+            # explorer.exe's own exit code is unreliable and not meaningful
+            # to check here.
+            subprocess.Popen(["explorer", f"/select,{norm_path}"])
+        elif system == "Darwin":
+            subprocess.Popen(["open", "-R", norm_path])
+        else:
+            # No universal "select in file manager" command on Linux across
+            # file managers; open the containing directory as the best
+            # available fallback (no highlight).
+            subprocess.Popen(["xdg-open", os.path.dirname(norm_path)])
+        return True, None
+    except FileNotFoundError:
+        return False, f"File manager not found for path: {path}"
+    except PermissionError:
+        return False, f"Permission denied: {path}"
+    except Exception as e:
+        return False, f"Failed to reveal path: {e}"
+
+
 def print_files(paths: List[str]) -> None:
     """Send each file to the OS print handler (opens the system print dialog)."""
     for path in paths:

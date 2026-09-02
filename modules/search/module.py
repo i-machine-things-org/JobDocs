@@ -31,7 +31,7 @@ from PyQt6 import uic
 
 from core.base_module import BaseModule
 from core.search_index import SearchIndex, _parse_job_folder
-from shared.utils import open_folder, get_config_dir, is_reparse_point
+from shared.utils import open_folder, reveal_in_file_manager, get_config_dir, is_reparse_point
 from shared.widgets import print_files_with_dialog
 
 logger = logging.getLogger(__name__)
@@ -485,8 +485,9 @@ class FolderNamingReportDialog(QDialog):
     }
     _SEVERITY_ORDER = {'unrecognized folder': 0, 'near-miss PO folder': 1}
 
-    def __init__(self, parent, results):
+    def __init__(self, parent, results, app_context):
         super().__init__(parent)
+        self.app_context = app_context
         self.setWindowTitle("Folder Naming Check")
         self.resize(750, 400)
 
@@ -498,34 +499,53 @@ class FolderNamingReportDialog(QDialog):
             "naming convention."
         ))
 
-        table = QTableWidget(0, 3, self)
-        table.setHorizontalHeaderLabels(["Customer", "Folder", "Issue"])
-        table.horizontalHeader().setStretchLastSection(True)
-        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        table.setAlternatingRowColors(True)
+        self.table = QTableWidget(0, 3, self)
+        self.table.setHorizontalHeaderLabels(["Customer", "Folder", "Issue"])
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setAlternatingRowColors(True)
 
         ordered = sorted(
             results, key=lambda r: (self._SEVERITY_ORDER.get(r[2], 2), r[0], r[1])
         )
         for customer, path, reason in ordered:
-            row = table.rowCount()
-            table.insertRow(row)
-            table.setItem(row, 0, QTableWidgetItem(customer))
-            table.setItem(row, 1, QTableWidgetItem(path))
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(customer))
+            self.table.setItem(row, 1, QTableWidgetItem(path))
             issue_item = QTableWidgetItem(self._REASON_LABELS.get(reason, reason))
             if reason == 'unrecognized folder':
                 issue_item.setForeground(QColor('#c0392b'))
                 font = issue_item.font()
                 font.setBold(True)
                 issue_item.setFont(font)
-            table.setItem(row, 2, issue_item)
+            self.table.setItem(row, 2, issue_item)
 
-        layout.addWidget(table)
+        if not self.app_context.is_readonly():
+            self.table.doubleClicked.connect(self._on_row_double_clicked)
+
+        layout.addWidget(self.table)
 
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         button_box.rejected.connect(self.accept)
         layout.addWidget(button_box)
+
+    def _on_row_double_clicked(self, index):
+        """Reveal the double-clicked row's folder in the OS file browser,
+        highlighted in its containing directory.
+
+        Not connected at all on a read-only (search-only) install -- see
+        _open_item_externally()'s own docstring for why a kiosk build must
+        never launch Explorer on a directory.
+        """
+        path_item = self.table.item(index.row(), 1)
+        if path_item is None:
+            return
+        path = path_item.text()
+        success, error = reveal_in_file_manager(path)
+        if not success:
+            QMessageBox.warning(self, "Not Found", error)
 
 
 class SearchModule(BaseModule):
@@ -1038,7 +1058,7 @@ class SearchModule(BaseModule):
             )
             return
 
-        dialog = FolderNamingReportDialog(self._widget, results)
+        dialog = FolderNamingReportDialog(self._widget, results, self.app_context)
         dialog.exec()
 
     def _on_result_found(self, result: dict):

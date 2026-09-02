@@ -163,7 +163,7 @@ class TestNamingCheckFinishedDistinguishesCancellation:
             module._on_naming_check_finished(results, False)
 
         mock_box.information.assert_not_called()
-        mock_dialog.assert_called_once_with(module._widget, results)
+        mock_dialog.assert_called_once_with(module._widget, results, module.app_context)
         mock_dialog.return_value.exec.assert_called_once()
 
 
