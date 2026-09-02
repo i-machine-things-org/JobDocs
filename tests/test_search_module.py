@@ -194,37 +194,76 @@ class TestClearSearchCancelsNamingWorkerToo:
         module.cancel_btn.hide.assert_called_once()
 
 
-class TestNamingWorkerFinishedDisconnectedBeforeBlockingWait:
-    """CodeRabbit finding on PR #325: finished is a queued cross-thread
-    connection, so the worker can emit it before wait() returns, but Qt only
-    delivers it once control returns to the event loop -- after clear_search()/
-    cleanup() have already reset the UI (or, for cleanup(), possibly deleted
-    it). Disconnecting before cancel()+wait() makes Qt drop that already-queued
-    delivery instead of invoking it against stale/deleted state afterward."""
+class TestNamingScanIdInvalidatesStaleQueuedDeliveries:
+    """CodeRabbit findings on PR #325: progress_update/finished are queued
+    cross-thread connections, so the worker can emit one before wait()
+    returns, but Qt only actually delivers it once control returns to the
+    event loop -- after clear_search()/cleanup() have already reset the UI
+    (or, for cleanup(), possibly deleted it). disconnect() alone doesn't
+    prevent this: per Qt's own docs, it only stops *future* emissions from
+    being queued, not ones already posted. clear_search()/cleanup() instead
+    bump _naming_scan_id, and the connected wrapper slots drop any delivery
+    whose captured scan id no longer matches -- correct regardless of
+    whether the event was already queued before invalidation."""
 
-    def test_clear_search_disconnects_before_waiting(self):
+    def test_clear_search_bumps_the_scan_id(self):
         module = _make_module_for_clear_search()
         module._naming_worker = MagicMock()
         module._naming_worker.isRunning.return_value = True
+        module._naming_scan_id = 5
 
         module.clear_search()
 
-        module._naming_worker.finished.disconnect.assert_called_once_with(
-            module._on_naming_check_finished
-        )
+        assert module._naming_scan_id == 6
+        module._naming_worker.cancel.assert_called_once()
+        module._naming_worker.wait.assert_called_once()
 
-    def test_cleanup_disconnects_before_waiting(self):
+    def test_cleanup_bumps_the_scan_id(self):
         module = SearchModule()
         module._worker = None
         module._index_worker = None
         module._naming_worker = MagicMock()
         module._naming_worker.isRunning.return_value = True
+        module._naming_scan_id = 5
         module.search_results = []
 
         module.cleanup()
 
-        module._naming_worker.finished.disconnect.assert_called_once_with(
-            module._on_naming_check_finished
-        )
+        assert module._naming_scan_id == 6
         module._naming_worker.cancel.assert_called_once()
         module._naming_worker.wait.assert_called_once()
+
+    def test_stale_progress_update_is_dropped(self):
+        module = _make_module_for_naming_check()
+        module._naming_scan_id = 2
+
+        module._on_naming_progress_update("Checking Acme…", 1)  # scan 1, now stale
+
+        module.search_status_label.setText.assert_not_called()
+
+    def test_current_progress_update_is_applied(self):
+        module = _make_module_for_naming_check()
+        module._naming_scan_id = 2
+
+        module._on_naming_progress_update("Checking Acme…", 2)
+
+        module.search_status_label.setText.assert_called_once_with("Checking Acme…")
+
+    def test_stale_finished_delivery_is_dropped(self):
+        module = _make_module_for_naming_check()
+        module._naming_scan_id = 2
+        mock_box, mock_dialog = MagicMock(), MagicMock()
+        with _patched_naming_dialogs(mock_box, mock_dialog):
+            module._on_naming_check_finished_if_current([], False, 1)  # scan 1, now stale
+
+        mock_box.information.assert_not_called()
+        mock_dialog.assert_not_called()
+
+    def test_current_finished_delivery_is_applied(self):
+        module = _make_module_for_naming_check()
+        module._naming_scan_id = 2
+        mock_box, mock_dialog = MagicMock(), MagicMock()
+        with _patched_naming_dialogs(mock_box, mock_dialog):
+            module._on_naming_check_finished_if_current([], False, 2)
+
+        mock_box.information.assert_called_once()
