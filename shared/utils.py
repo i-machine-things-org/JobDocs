@@ -431,10 +431,16 @@ def reveal_in_file_manager(path: str) -> Tuple[bool, Optional[str]]:
         norm_path = os.path.normpath(path)
         system = platform.system()
         if system == "Windows":
-            # No shell involved (list form), so no quoting/injection concerns;
-            # explorer.exe's own exit code is unreliable and not meaningful
-            # to check here.
-            subprocess.Popen(["explorer", f"/select,{norm_path}"])
+            # explorer.exe's own exit code is unreliable and not meaningful to
+            # check here. Must be a single command-line *string*, not a list:
+            # Popen's list form quotes the whole "/select,<path>" token when
+            # the path has a space, and explorer's parser doesn't understand
+            # a quoted comma-prefix -- it silently falls back to opening the
+            # default library instead of raising or erroring. Quoting only
+            # the path (comma left bare) is the form explorer actually
+            # understands. Safe from injection: `"` is not a legal character
+            # in a Windows path, so norm_path can't break out of the quotes.
+            subprocess.Popen(f'explorer /select,"{norm_path}"')
         elif system == "Darwin":
             subprocess.Popen(["open", "-R", norm_path])
         else:
