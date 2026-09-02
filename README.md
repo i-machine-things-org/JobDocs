@@ -296,6 +296,10 @@ The **Search** tab provides powerful search capabilities:
 - Click column headers to sort results
 - Double-click a result to open the job folder
 - Right-click for context menu (copy path, open location, print)
+- **Check Folder Naming…** — on-demand scan for customer folders that don't match your configured
+  job/PO naming convention (e.g. a mistyped `PO 1001` missing the dash, or unrelated clutter like a
+  stray `New folder`). These are otherwise invisible to search entirely; the report flags unrecognized
+  folders separately from near-miss PO-naming typos so the ones most likely to need fixing stand out.
 
 ## File Structure
 
