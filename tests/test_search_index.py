@@ -492,6 +492,8 @@ class TestMigrationToV4AddsPoNumber:
         # it with the current SearchIndex adds the column, preserves existing
         # rows (defaulting po_number to ''), and forces a re-index so already
         # -indexed customers pick up po_number on the next update() call.
+        # Migration cascades on to v5 too (path normalization, also a forced
+        # cf re-index) since that's the current schema version.
         db_path = tmp_path / 'search_index.db'
         conn = sqlite3.connect(str(db_path))
         conn.executescript("""
@@ -534,7 +536,7 @@ class TestMigrationToV4AddsPoNumber:
         job_row = conn.execute("SELECT job_number, po_number FROM jobs").fetchone()
 
         assert 'po_number' in cols
-        assert version == 4
+        assert version == 5
         assert cf_dirs_remaining == 0  # forced re-index so po_number gets backfilled
         assert job_row == ('12345', '')
 
@@ -585,5 +587,121 @@ class TestMigrationToV4AddsPoNumber:
             "SELECT COUNT(*) FROM indexed_dirs WHERE kind='cf'"
         ).fetchone()[0]
 
-        assert version == 4
+        assert version == 5  # cascades on to v5 (path normalization), also current schema
         assert cf_dirs_remaining == 0  # forced re-index despite column already existing
+
+
+class TestUpdateHandlesMixedPathSeparators:
+    """Regression test: Qt's QFileDialog.getExistingDirectory() returns forward-slash
+    paths even on Windows, so a customer_files_dir picked via Settings' "Browse..."
+    button ends up saved like "Z:/Customer Files". os.path.join(base_dir, customer)
+    preserves that forward slash, while container paths derived via
+    pathlib.Path(...).parents always normalize to the OS-native separator --
+    without normalizing both to the same form, the two representations of the same
+    directory ("job documents") don't string-match. update()'s incremental "cheap
+    precheck" then can't find the previously-recorded "job documents" container via
+    its LIKE-prefix lookup, falls back to checking only the customer root's own mtime
+    (which never changes -- job folders are never a direct child of the customer root
+    under this structure), and wrongly treats the customer as fully up to date --
+    silently freezing the index for that customer on every subsequent update(), no
+    matter what's added inside it later. Confirmed against real production data
+    (a customer's job added weeks after the last successful scan never appeared in
+    Strict search, despite "Search All Folders" -- an uncached os.walk -- finding it
+    immediately).
+    """
+
+    @pytest.mark.skipif(
+        os.name != 'nt',
+        reason="Windows-only: pathlib.PosixPath never diverges from os.path.join "
+               "the way WindowsPath does, so this mismatch can't occur on POSIX.",
+    )
+    def test_job_added_after_first_index_is_picked_up_on_second_update(self, tmp_path):
+        cf_root = tmp_path / 'customer_files'
+        customer_path = cf_root / 'Acme'
+        (customer_path / 'job documents' / '11111_First').mkdir(parents=True)
+
+        # Mimic Qt's QFileDialog output -- forward slashes even on Windows.
+        base_dir = str(cf_root).replace(os.sep, '/')
+
+        ctx = _make_app_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', base_dir)], bp_dirs=[], app_context=ctx)
+
+        assert [r['job_number'] for r in index.search_jobs('11111', search_customer=False)] == ['11111']
+
+        # A second job appears after the first index run. This only gets
+        # picked up if the customer-root LIKE-prefix lookup for previously
+        # recorded containers (like "job documents") actually finds them.
+        (customer_path / 'job documents' / '22222_Second').mkdir(parents=True)
+        index.update(cf_dirs=[('', base_dir)], bp_dirs=[], app_context=ctx)
+
+        results = index.search_jobs('22222', search_customer=False)
+        assert [r['job_number'] for r in results] == ['22222']
+
+    @pytest.mark.skipif(os.name != 'nt', reason="Windows-only, see class docstring")
+    def test_is_fully_covered_does_not_falsely_trust_stale_data(self, tmp_path):
+        cf_root = tmp_path / 'customer_files'
+        customer_path = cf_root / 'Acme'
+        (customer_path / 'job documents' / '11111_First').mkdir(parents=True)
+        base_dir = str(cf_root).replace(os.sep, '/')
+
+        ctx = _make_app_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        index = _make_index(tmp_path)
+        index.update(cf_dirs=[('', base_dir)], bp_dirs=[], app_context=ctx)
+
+        (customer_path / 'job documents' / '22222_Second').mkdir(parents=True)
+
+        assert index.is_fully_covered(cf_dirs=[('', base_dir)], bp_dirs=[]) is False
+
+
+class TestMigrationToV5NormalizesPaths:
+    def test_existing_v4_database_forces_cf_reindex(self, tmp_path):
+        # Simulate a database already migrated to v4 (po_number column
+        # present) whose indexed_dirs rows may have been written under the
+        # pre-fix mixed-separator representation. Opening it with the current
+        # SearchIndex must bump to v5 and force a clean cf re-index so those
+        # rows get rebuilt under consistently-normalized paths.
+        db_path = tmp_path / 'search_index.db'
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript("""
+            CREATE TABLE jobs (
+                id          INTEGER PRIMARY KEY,
+                prefix      TEXT    NOT NULL DEFAULT '',
+                customer    TEXT    NOT NULL,
+                job_number  TEXT    NOT NULL DEFAULT '',
+                description TEXT    NOT NULL DEFAULT '',
+                drawings    TEXT    NOT NULL DEFAULT '',
+                po_number   TEXT    NOT NULL DEFAULT '',
+                path        TEXT    NOT NULL,
+                mtime       REAL    NOT NULL,
+                UNIQUE(prefix, path)
+            );
+            CREATE TABLE indexed_dirs (
+                dir_path    TEXT    NOT NULL,
+                prefix      TEXT    NOT NULL DEFAULT '',
+                kind        TEXT    NOT NULL DEFAULT '',
+                mtime       REAL    NOT NULL,
+                indexed_at  REAL    NOT NULL,
+                PRIMARY KEY (dir_path, prefix, kind)
+            );
+            INSERT INTO jobs (prefix, customer, job_number, description, drawings, po_number, path, mtime)
+                VALUES ('', 'Acme', '12345', 'Bracket', '', '', 'Z:/Acme/12345', 1.0);
+            INSERT INTO indexed_dirs (dir_path, prefix, kind, mtime, indexed_at)
+                VALUES ('Z:/Acme', '', 'cf', 1.0, 1.0);
+            PRAGMA user_version = 4;
+        """)
+        conn.commit()
+        conn.close()
+
+        SearchIndex(db_path)
+
+        conn = sqlite3.connect(str(db_path))
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        cf_dirs_remaining = conn.execute(
+            "SELECT COUNT(*) FROM indexed_dirs WHERE kind='cf'"
+        ).fetchone()[0]
+        job_row = conn.execute("SELECT job_number FROM jobs").fetchone()
+
+        assert version == 5
+        assert cf_dirs_remaining == 0  # forced re-index
+        assert job_row == ('12345',)  # existing job rows preserved, not wiped
