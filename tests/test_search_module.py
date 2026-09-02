@@ -192,3 +192,39 @@ class TestClearSearchCancelsNamingWorkerToo:
         module.clear_search()  # must not raise
 
         module.cancel_btn.hide.assert_called_once()
+
+
+class TestNamingWorkerFinishedDisconnectedBeforeBlockingWait:
+    """CodeRabbit finding on PR #325: finished is a queued cross-thread
+    connection, so the worker can emit it before wait() returns, but Qt only
+    delivers it once control returns to the event loop -- after clear_search()/
+    cleanup() have already reset the UI (or, for cleanup(), possibly deleted
+    it). Disconnecting before cancel()+wait() makes Qt drop that already-queued
+    delivery instead of invoking it against stale/deleted state afterward."""
+
+    def test_clear_search_disconnects_before_waiting(self):
+        module = _make_module_for_clear_search()
+        module._naming_worker = MagicMock()
+        module._naming_worker.isRunning.return_value = True
+
+        module.clear_search()
+
+        module._naming_worker.finished.disconnect.assert_called_once_with(
+            module._on_naming_check_finished
+        )
+
+    def test_cleanup_disconnects_before_waiting(self):
+        module = SearchModule()
+        module._worker = None
+        module._index_worker = None
+        module._naming_worker = MagicMock()
+        module._naming_worker.isRunning.return_value = True
+        module.search_results = []
+
+        module.cleanup()
+
+        module._naming_worker.finished.disconnect.assert_called_once_with(
+            module._on_naming_check_finished
+        )
+        module._naming_worker.cancel.assert_called_once()
+        module._naming_worker.wait.assert_called_once()
