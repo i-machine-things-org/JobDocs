@@ -1050,10 +1050,16 @@ class SearchModule(BaseModule):
 
     def clear_search(self):
         """Clear search results and input"""
-        # Cancel any running search
+        # Cancel any running search or folder naming check -- otherwise the
+        # scan keeps running with no cancellation control visible (cancel_btn
+        # is about to be hidden below) and can still show a report dialog
+        # after the user has already cleared the UI.
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait()
+        if self._naming_worker and self._naming_worker.isRunning():
+            self._naming_worker.cancel()
+            self._naming_worker.wait()
 
         self.search_edit.clear()
         self.search_table.setRowCount(0)
@@ -1064,6 +1070,7 @@ class SearchModule(BaseModule):
         self.search_status_label.setText("")
         self.search_progress.hide()
         self.search_btn.setEnabled(True)
+        self.check_naming_btn.setEnabled(True)
         self.cancel_btn.hide()
 
     # ==================== Helper Methods ====================
