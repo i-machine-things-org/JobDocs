@@ -237,3 +237,58 @@ class TestFindJobFoldersWithPoNumber:
         jobs = ctx.find_job_folders(str(customer_path))
 
         assert [name for name, _ in jobs] == ['22222_NewJob']
+
+
+class TestFindJobFoldersFlagsUnrecognizedNames:
+    """A folder that neither matches the PO naming convention nor looks like
+    a job folder (no leading digit) is currently found by find_job_folders()
+    and then silently dropped by every caller's digit-first filter -- with no
+    trace anywhere. The optional `unrecognized` collector surfaces these so a
+    "Check Folder Naming" report can show the user what needs fixing."""
+
+    def test_unrelated_folder_name_is_flagged_as_unrecognized(self, tmp_path):
+        customer_path = tmp_path / 'Acme'
+        (customer_path / 'job documents' / 'New folder').mkdir(parents=True)
+        (customer_path / 'job documents' / 'PO-1001' / '22222_NewJob').mkdir(parents=True)
+
+        ctx = _make_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        unrecognized = []
+        jobs = ctx.find_job_folders(str(customer_path), unrecognized=unrecognized)
+
+        assert [os.path.basename(p) for p, _ in unrecognized] == ['New folder']
+        assert unrecognized[0][1] == 'unrecognized folder'
+        # jobs/other behavior is unaffected -- still found (and still the
+        # caller's job to filter out non-digit names downstream, unchanged).
+        assert 'New folder' in [name for name, _ in jobs]
+        assert '22222_NewJob' in [name for name, _ in jobs]
+
+    def test_near_miss_po_folder_name_is_flagged(self, tmp_path):
+        customer_path = tmp_path / 'Acme'
+        (customer_path / 'job documents' / 'PO 1001').mkdir(parents=True)
+
+        ctx = _make_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        unrecognized = []
+        ctx.find_job_folders(str(customer_path), unrecognized=unrecognized)
+
+        assert [os.path.basename(p) for p, _ in unrecognized] == ['PO 1001']
+        assert unrecognized[0][1] == 'near-miss PO folder'
+
+    def test_empty_but_correctly_named_po_folder_is_not_flagged(self, tmp_path):
+        customer_path = tmp_path / 'Acme'
+        (customer_path / 'job documents' / 'PO-1001').mkdir(parents=True)
+
+        ctx = _make_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        unrecognized = []
+        ctx.find_job_folders(str(customer_path), unrecognized=unrecognized)
+
+        assert unrecognized == []
+
+    def test_unrecognized_none_is_default_and_no_op(self, tmp_path):
+        customer_path = tmp_path / 'Acme'
+        (customer_path / 'job documents' / 'New folder').mkdir(parents=True)
+
+        ctx = _make_context('{customer}/job documents/PO-{po_number}/{job_folder}')
+        # Must not raise when the caller doesn't pass unrecognized at all.
+        jobs = ctx.find_job_folders(str(customer_path))
+
+        assert 'New folder' in [name for name, _ in jobs]

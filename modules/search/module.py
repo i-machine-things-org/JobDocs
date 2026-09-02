@@ -21,11 +21,12 @@ from typing import List, Dict, Any, Optional
 from PyQt6.QtWidgets import (
     QWidget, QMessageBox, QTableWidgetItem, QApplication, QMenu,
     QTreeWidget, QTreeWidgetItem, QHeaderView, QAbstractItemView,
-    QSplitter, QGroupBox, QVBoxLayout, QCheckBox
+    QSplitter, QGroupBox, QVBoxLayout, QCheckBox,
+    QDialog, QTableWidget, QDialogButtonBox, QLabel
 )
 from shared.widgets import FilePreviewWidget
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QDesktopServices, QColor
 from PyQt6 import uic
 
 from core.base_module import BaseModule
@@ -412,6 +413,121 @@ class IndexWorker(QThread):
         self.finished.emit(self._index.job_count())
 
 
+class FolderNamingCheckWorker(QThread):
+    """Background scan for folders that don't match the configured job/PO
+    naming convention.
+
+    find_job_folders() already discovers these entries (e.g. a mistyped
+    "PO 1001" missing the dash, or unrelated clutter like "New folder"), but
+    every consumer of its `jobs` list drops them via a digit-first-char
+    filter before they're ever shown anywhere -- found, then silently
+    thrown away, with no trace. This surfaces them as an on-demand report
+    instead.
+    """
+
+    progress_update = pyqtSignal(str)
+    finished = pyqtSignal(list, bool)  # (customer_display, path, reason) list, was_cancelled
+
+    def __init__(self, dirs_to_check, app_context):
+        super().__init__()
+        self.dirs_to_check = dirs_to_check
+        self.app_context = app_context
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
+
+    def run(self):
+        results = []
+        readonly = self.app_context.is_readonly()
+        for prefix, base_dir in self.dirs_to_check:
+            if self._is_cancelled:
+                break
+            self.progress_update.emit(f"Checking {prefix if prefix else 'standard'} directories...")
+            try:
+                customers = [
+                    d for d in os.listdir(base_dir)
+                    if os.path.isdir(os.path.join(base_dir, d))
+                    and not (readonly and is_reparse_point(os.path.join(base_dir, d)))
+                ]
+            except OSError:
+                continue
+
+            for customer in customers:
+                if self._is_cancelled:
+                    break
+                customer_path = os.path.join(base_dir, customer)
+                display_customer = f"[ITAR] {customer}" if prefix == 'ITAR' else customer
+                unrecognized: List = []
+                try:
+                    self.app_context.find_job_folders(
+                        customer_path,
+                        unrecognized=unrecognized,
+                        is_cancelled=lambda: self._is_cancelled,
+                    )
+                except OSError:
+                    continue
+                for path, reason in unrecognized:
+                    results.append((display_customer, path, reason))
+
+        self.finished.emit(results, self._is_cancelled)
+
+
+class FolderNamingReportDialog(QDialog):
+    """Lists folders flagged by a FolderNamingCheckWorker scan, grouping the
+    genuinely unrecognized ones ahead of near-miss PO-naming typos so the
+    "wildly wrong" entries are easy to spot rather than buried in the list.
+    """
+
+    _REASON_LABELS = {
+        'unrecognized folder': 'Unrecognized',
+        'near-miss PO folder': 'Near-miss PO folder',
+    }
+    _SEVERITY_ORDER = {'unrecognized folder': 0, 'near-miss PO folder': 1}
+
+    def __init__(self, parent, results):
+        super().__init__(parent)
+        self.setWindowTitle("Folder Naming Check")
+        self.resize(750, 400)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            f"Found {len(results)} folder(s) that don't match the configured job/PO "
+            "naming convention. \"Unrecognized\" folders are the most likely to need "
+            "fixing; \"Near-miss PO folder\" entries look like a typo of the PO "
+            "naming convention."
+        ))
+
+        table = QTableWidget(0, 3, self)
+        table.setHorizontalHeaderLabels(["Customer", "Folder", "Issue"])
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.setAlternatingRowColors(True)
+
+        ordered = sorted(
+            results, key=lambda r: (self._SEVERITY_ORDER.get(r[2], 2), r[0], r[1])
+        )
+        for customer, path, reason in ordered:
+            row = table.rowCount()
+            table.insertRow(row)
+            table.setItem(row, 0, QTableWidgetItem(customer))
+            table.setItem(row, 1, QTableWidgetItem(path))
+            issue_item = QTableWidgetItem(self._REASON_LABELS.get(reason, reason))
+            if reason == 'unrecognized folder':
+                issue_item.setForeground(QColor('#c0392b'))
+                font = issue_item.font()
+                font.setBold(True)
+                issue_item.setFont(font)
+            table.setItem(row, 2, issue_item)
+
+        layout.addWidget(table)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        button_box.rejected.connect(self.accept)
+        layout.addWidget(button_box)
+
+
 class SearchModule(BaseModule):
     """Module for searching jobs across customer directories"""
 
@@ -423,6 +539,14 @@ class SearchModule(BaseModule):
         self.search_results: List[Dict[str, Any]] = []
         self._worker = None       # Background search worker
         self._index_worker = None  # Background index builder
+        self._naming_worker: Optional[FolderNamingCheckWorker] = None
+        # Bumped whenever a naming scan is cancelled/torn down, so queued
+        # progress_update/finished deliveries already posted to the event
+        # loop before that point (disconnect() does not un-queue them -- Qt
+        # only guarantees it stops *future* emissions from being queued) get
+        # ignored by the slots below instead of overwriting freshly-reset UI
+        # state with stale text.
+        self._naming_scan_id = 0
         self._index: Optional[SearchIndex] = None
         self._index_failures = 0  # consecutive query errors
         self._index_query_failed = False  # True if the most recent query raised
@@ -445,6 +569,7 @@ class SearchModule(BaseModule):
         self.legacy_options_widget = None
         self.search_btn = None
         self.cancel_btn = None
+        self.check_naming_btn = None
         self.folder_tree = None
         self.file_preview: FilePreviewWidget | None = None
 
@@ -522,6 +647,7 @@ class SearchModule(BaseModule):
         self.legacy_options_widget = widget.legacy_options_widget
         self.search_btn = widget.search_btn
         self.cancel_btn = widget.cancel_btn
+        self.check_naming_btn = widget.check_naming_btn
 
         # Keep criteria group compact, let results group expand
         widget.layout().setStretchFactor(widget.searchCriteriaGroup, 0)
@@ -580,6 +706,7 @@ class SearchModule(BaseModule):
         # Connect signals
         self.search_btn.clicked.connect(self.perform_search)
         self.cancel_btn.clicked.connect(self.cancel_search)
+        self.check_naming_btn.clicked.connect(self.check_folder_naming)
         self.search_edit.returnPressed.connect(self.perform_search)
         widget.clear_btn.clicked.connect(self.clear_search)
         self.search_all_radio.toggled.connect(self.update_search_field_checkboxes)
@@ -834,10 +961,85 @@ class SearchModule(BaseModule):
     # ==================== Search Control ====================
 
     def cancel_search(self):
-        """Cancel the running search"""
+        """Cancel the running search or folder naming check"""
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self.search_status_label.setText("Cancelling search...")
+        if self._naming_worker and self._naming_worker.isRunning():
+            self._naming_worker.cancel()
+            self.search_status_label.setText("Cancelling folder naming check...")
+
+    def check_folder_naming(self):
+        """Scan customer directories for folders that don't match the
+        configured job/PO naming convention and show them in a report."""
+        if self._naming_worker and self._naming_worker.isRunning():
+            return
+
+        customer_dirs = self._get_customer_files_dirs()
+        if not customer_dirs:
+            self.show_error("Error", "No customer directories configured")
+            return
+
+        self.check_naming_btn.setEnabled(False)
+        self.cancel_btn.show()
+        self.search_status_label.setText("Checking folder names…")
+
+        self._naming_scan_id += 1
+        scan_id = self._naming_scan_id
+        self._naming_worker = FolderNamingCheckWorker(customer_dirs, self.app_context)
+        self._naming_worker.progress_update.connect(
+            lambda status, sid=scan_id: self._on_naming_progress_update(status, sid)
+        )
+        self._naming_worker.finished.connect(
+            lambda results, cancelled, sid=scan_id: self._on_naming_check_finished_if_current(
+                results, cancelled, sid
+            )
+        )
+        self._naming_worker.start()
+
+    def _on_naming_progress_update(self, status: str, scan_id: int):
+        """Slot for FolderNamingCheckWorker.progress_update -- ignores a
+        delivery already queued before clear_search()/cleanup() invalidated
+        this scan (see _naming_scan_id)."""
+        if scan_id != self._naming_scan_id:
+            return
+        self.search_status_label.setText(status)
+
+    def _on_naming_check_finished_if_current(self, results: list, was_cancelled: bool, scan_id: int):
+        """Wrapper connected to FolderNamingCheckWorker.finished -- ignores a
+        delivery already queued before clear_search()/cleanup() invalidated
+        this scan (see _naming_scan_id), so it can't run against UI state
+        that's already been reset or torn down."""
+        if scan_id != self._naming_scan_id:
+            return
+        self._on_naming_check_finished(results, was_cancelled)
+
+    def _on_naming_check_finished(self, results: list, was_cancelled: bool):
+        """Slot called when a folder naming check completes"""
+        self.check_naming_btn.setEnabled(True)
+        other_worker_active = self._worker and self._worker.isRunning()
+        if not other_worker_active:
+            self.cancel_btn.hide()
+
+        if was_cancelled:
+            # results only reflects customers scanned before cancellation --
+            # showing it as "no issues found" or a complete report would be
+            # misleading, so skip both and just report that it was cancelled.
+            if not other_worker_active:
+                self.search_status_label.setText("Folder naming check cancelled")
+            return
+
+        if not other_worker_active:
+            self.search_status_label.setText("")
+
+        if not results:
+            QMessageBox.information(
+                self._widget, "Folder Naming Check", "No naming issues found."
+            )
+            return
+
+        dialog = FolderNamingReportDialog(self._widget, results)
+        dialog.exec()
 
     def _on_result_found(self, result: dict):
         """Slot called when a search result is found"""
@@ -869,17 +1071,39 @@ class SearchModule(BaseModule):
 
         self._apply_sort(selected_path=selected_path)
 
-        self.search_status_label.setText(f"Found {result_count} result(s)")
         self.search_progress.hide()
         self.search_btn.setEnabled(True)
+        if self._naming_worker and self._naming_worker.isRunning():
+            # Leave cancel_btn and the status label alone -- the naming
+            # check is still using them.
+            return
+        self.search_status_label.setText(f"Found {result_count} result(s)")
         self.cancel_btn.hide()
 
     def clear_search(self):
         """Clear search results and input"""
-        # Cancel any running search
+        # Cancel any running search or folder naming check -- otherwise the
+        # scan keeps running with no cancellation control visible (cancel_btn
+        # is about to be hidden below) and can still show a report dialog
+        # after the user has already cleared the UI.
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait()
+        if self._naming_worker and self._naming_worker.isRunning():
+            # progress_update/finished are queued cross-thread connections:
+            # the worker can emit one (e.g. right as cancel() takes effect)
+            # before wait() returns, but Qt only actually delivers it once
+            # this method returns control to the event loop -- by which
+            # point the UI reset below has already run. disconnect() does
+            # NOT un-queue an already-posted delivery (Qt only guarantees it
+            # stops *future* emissions from being queued), so bump the scan
+            # id first -- _on_naming_progress_update()/
+            # _on_naming_check_finished_if_current() check it and drop any
+            # delivery that's now stale, instead of clobbering the reset
+            # state with old text or a "cancelled" message.
+            self._naming_scan_id += 1
+            self._naming_worker.cancel()
+            self._naming_worker.wait()
 
         self.search_edit.clear()
         self.search_table.setRowCount(0)
@@ -890,6 +1114,7 @@ class SearchModule(BaseModule):
         self.search_status_label.setText("")
         self.search_progress.hide()
         self.search_btn.setEnabled(True)
+        self.check_naming_btn.setEnabled(True)
         self.cancel_btn.hide()
 
     # ==================== Helper Methods ====================
@@ -1364,6 +1589,13 @@ class SearchModule(BaseModule):
         if self._index_worker and self._index_worker.isRunning():
             self._index_worker.cancel()
             self._index_worker.wait()
+        if self._naming_worker and self._naming_worker.isRunning():
+            # See clear_search()'s equivalent guard: a queued delivery could
+            # otherwise run after teardown, against widgets that may already
+            # be deleted.
+            self._naming_scan_id += 1
+            self._naming_worker.cancel()
+            self._naming_worker.wait()
         self.search_results.clear()
         # Best-effort now, on normal shutdown; the atexit.register fallback
         # in _cleanup_kiosk_view_tmp_dirs still covers a hard exit/crash.
