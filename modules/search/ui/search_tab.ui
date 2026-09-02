@@ -87,6 +87,16 @@
           </property>
          </widget>
         </item>
+        <item>
+         <widget class="QPushButton" name="check_naming_btn">
+          <property name="toolTip">
+           <string>Scan customer folders for names that don't match the configured job/PO folder convention</string>
+          </property>
+          <property name="text">
+           <string>Check Folder Naming…</string>
+          </property>
+         </widget>
+        </item>
        </layout>
       </item>
       <item>
