@@ -33,6 +33,22 @@ def _make_module_for_naming_check() -> SearchModule:
     return module
 
 
+def _make_module_for_clear_search() -> SearchModule:
+    module = SearchModule()
+    module.search_edit = MagicMock()
+    module.search_table = MagicMock()
+    module.folder_tree = MagicMock()
+    module.file_preview = None
+    module.search_status_label = MagicMock()
+    module.search_progress = MagicMock()
+    module.search_btn = MagicMock()
+    module.check_naming_btn = MagicMock()
+    module.cancel_btn = MagicMock()
+    module._worker = None
+    module._naming_worker = None
+    return module
+
+
 def test_query_failure_sets_failed_flag_and_returns_false():
     module = _make_module()
     module._index = MagicMock()
@@ -149,3 +165,30 @@ class TestNamingCheckFinishedDistinguishesCancellation:
         mock_box.information.assert_not_called()
         mock_dialog.assert_called_once_with(module._widget, results)
         mock_dialog.return_value.exec.assert_called_once()
+
+
+class TestClearSearchCancelsNamingWorkerToo:
+    """CodeRabbit finding on PR #325: clear_search() cancelled/waited on the
+    search worker but not a running folder naming check, then unconditionally
+    hid cancel_btn -- the scan kept running with no way to cancel it, and
+    could still pop a report dialog after the user had already cleared the
+    UI."""
+
+    def test_running_naming_worker_is_cancelled_and_waited_on(self):
+        module = _make_module_for_clear_search()
+        module._naming_worker = MagicMock()
+        module._naming_worker.isRunning.return_value = True
+
+        module.clear_search()
+
+        module._naming_worker.cancel.assert_called_once()
+        module._naming_worker.wait.assert_called_once()
+        module.check_naming_btn.setEnabled.assert_called_with(True)
+
+    def test_no_naming_worker_running_is_a_no_op(self):
+        module = _make_module_for_clear_search()
+        module._naming_worker = None
+
+        module.clear_search()  # must not raise
+
+        module.cancel_btn.hide.assert_called_once()
