@@ -154,7 +154,29 @@ PRAGMA user_version = 4;
 COMMIT;
 """
 
+_MIGRATION_V5 = """
+BEGIN;
+DELETE FROM indexed_dirs WHERE kind='cf';
+PRAGMA user_version = 5;
+COMMIT;
+"""
+
 _MAX_RESULTS = 500
+
+
+def _norm_path(path: str) -> str:
+    """Canonicalize a path string to the OS-native separator.
+
+    os.path.join(base_dir, customer) preserves whatever separator style the
+    source setting used -- e.g. Qt's QFileDialog.getExistingDirectory() always
+    returns forward slashes, even on Windows, so a customer_files_dir picked
+    via Settings' "Browse..." button ends up like "Z:/Customer Files". Sibling
+    container paths built via pathlib.Path(...).parents always normalize to
+    the OS-native separator ("Z:\\Customer Files\\..." on Windows). Without
+    normalizing, these two representations of the same directory don't
+    string-match, silently breaking the indexed_dirs staleness lookups below.
+    """
+    return os.path.normpath(path)
 
 
 def _escape_like(term: str) -> str:
@@ -237,7 +259,7 @@ class SearchIndex:
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version >= 4:
+        if version >= 5:
             return
         if version < 1:
             row = conn.execute(
@@ -266,6 +288,15 @@ class SearchIndex:
                 # get backfilled, not left with an empty value forever.
                 conn.execute("DELETE FROM indexed_dirs WHERE kind='cf'")
                 conn.execute("PRAGMA user_version = 4")
+        if version < 5:
+            # Force a clean re-index so any customer whose indexed_dirs rows
+            # were written before path normalization was fixed (see
+            # _norm_path) get rebuilt under consistent separators, and so any
+            # customer indexed between the po_number/V4 migration and the
+            # later PO-vs-legacy detection refinements (same file, no version
+            # bump at the time) picks up the fully-corrected discovery logic.
+            logger.info("search_index: migrating schema to v5 (normalized cf paths, force re-index)")
+            conn.executescript(_MIGRATION_V5)
 
     def _dir_mtime(self, path: str) -> float:
         try:
@@ -442,7 +473,7 @@ class SearchIndex:
                     for customer in customers:
                         if _cancelled():
                             return
-                        customer_path = os.path.join(base_dir, customer)
+                        customer_path = _norm_path(os.path.join(base_dir, customer))
 
                         # Cheap precheck using previously indexed container dirs
                         # before calling the expensive find_job_folders.
@@ -663,7 +694,7 @@ class SearchIndex:
                     for customer in customers:
                         if _cancelled():
                             return
-                        customer_path = os.path.join(base_dir, customer)
+                        customer_path = _norm_path(os.path.join(base_dir, customer))
 
                         if not self._is_stale(conn, customer_path, prefix, 'bp', recursive=True):
                             continue
@@ -783,7 +814,7 @@ class SearchIndex:
                         except OSError:
                             continue
                         for customer in customers:
-                            customer_path = os.path.join(base_dir, customer)
+                            customer_path = _norm_path(os.path.join(base_dir, customer))
                             if self._is_stale(conn, customer_path, prefix, kind, recursive=(kind == 'bp')):
                                 return False
                             if kind == 'cf':
