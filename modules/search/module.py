@@ -524,12 +524,26 @@ class FolderNamingReportDialog(QDialog):
 
         if not self.app_context.is_readonly():
             self.table.doubleClicked.connect(self._on_row_double_clicked)
+            self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            self.table.customContextMenuRequested.connect(self._show_context_menu)
 
         layout.addWidget(self.table)
 
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         button_box.rejected.connect(self.accept)
         layout.addWidget(button_box)
+
+    def _row_path(self, row: int) -> Optional[str]:
+        path_item = self.table.item(row, 1)
+        return path_item.text() if path_item is not None else None
+
+    def _reveal_row(self, row: int):
+        path = self._row_path(row)
+        if path is None:
+            return
+        success, error = reveal_in_file_manager(path)
+        if not success:
+            QMessageBox.warning(self, "Not Found", error)
 
     def _on_row_double_clicked(self, index):
         """Reveal the double-clicked row's folder in the OS file browser,
@@ -539,13 +553,27 @@ class FolderNamingReportDialog(QDialog):
         _open_item_externally()'s own docstring for why a kiosk build must
         never launch Explorer on a directory.
         """
-        path_item = self.table.item(index.row(), 1)
-        if path_item is None:
+        self._reveal_row(index.row())
+
+    def _show_context_menu(self, pos):
+        """Right-click menu mirroring the double-click reveal action, plus
+        Copy Path -- same two actions and same readonly gate (never
+        connected at all on a read-only install) as show_search_context_menu().
+        """
+        row = self.table.rowAt(pos.y())
+        if row < 0:
             return
-        path = path_item.text()
-        success, error = reveal_in_file_manager(path)
-        if not success:
-            QMessageBox.warning(self, "Not Found", error)
+        self.table.selectRow(row)
+        path = self._row_path(row)
+        if path is None:
+            return
+
+        menu = QMenu(self)
+        open_action = menu.addAction("Open")
+        open_action.triggered.connect(lambda: self._reveal_row(row))
+        copy_action = menu.addAction("Copy Path")
+        copy_action.triggered.connect(lambda: QApplication.clipboard().setText(path))
+        menu.exec(self.table.viewport().mapToGlobal(pos))
 
 
 class SearchModule(BaseModule):
