@@ -15,6 +15,25 @@ from shared.utils import is_reparse_point
 logger = logging.getLogger(__name__)
 
 
+def _looks_like_po_typo(name: str, po_name_prefix: str, po_name_suffix: str) -> bool:
+    """Return True if `name` looks like it was meant to match the PO folder
+    naming convention but doesn't quite (e.g. "PO 1001" against prefix "PO-").
+
+    Compares case-insensitively against the prefix/suffix stripped of
+    trailing/leading separator punctuation, so a stray space or missing dash
+    still gets flagged as a likely typo rather than an unrelated folder name.
+    """
+    if po_name_prefix:
+        stripped = po_name_prefix.rstrip('-_ ').lower()
+        if stripped and name.lower().lstrip().startswith(stripped):
+            return True
+    if po_name_suffix:
+        stripped = po_name_suffix.lstrip('-_ ').lower()
+        if stripped and name.lower().rstrip().endswith(stripped):
+            return True
+    return False
+
+
 class AppContext:
     """
     Context object passed to all modules providing access to shared resources.
@@ -306,6 +325,7 @@ class AppContext:
         is_cancelled: Optional[Callable[[], bool]] = None,
         include_po_number: bool = False,
         containers: Optional[List[str]] = None,
+        unrecognized: Optional[List[Tuple[str, str]]] = None,
     ) -> List[Tuple[str, ...]]:
         """
         Find all job folders in a customer directory.
@@ -329,6 +349,19 @@ class AppContext:
                 what to mark "indexed") would otherwise never learn an empty
                 PO container exists, so a job created in it later goes
                 undetected.
+            unrecognized: Optional list to collect (path, reason) tuples for
+                entries under a PO-number base directory that neither match
+                the PO naming convention nor look like a job folder (i.e. the
+                name doesn't start with a digit). These are still returned in
+                `jobs` as-is (unchanged existing behavior — callers that only
+                accept digit-first names already filter them out downstream),
+                but without this param they're silently dropped with no trace
+                anywhere, so folders like a mistyped "PO 1001" (missing the
+                dash) or unrelated clutter ("New folder") are invisible to
+                the user. reason is 'near-miss PO folder' or
+                'unrecognized folder'. Only populated for structures where
+                {po_number} shares a segment with the PO container name — the
+                only branch with a naming convention to compare against.
 
         Returns:
             List of (job_name, job_docs_path) tuples, or (job_name,
@@ -410,6 +443,21 @@ class AppContext:
                                     (not po_name_prefix or po_dir.startswith(po_name_prefix))
                                     and (not po_name_suffix or po_dir.endswith(po_name_suffix))
                                 )
+                                if (
+                                    not matches_po_name
+                                    and unrecognized is not None
+                                    and not (po_dir and po_dir[0].isdigit())
+                                ):
+                                    # Doesn't match the PO convention and doesn't look like a
+                                    # job folder either -- a folder that matches the PO
+                                    # convention but is just empty/new isn't a naming problem,
+                                    # so this only fires in the genuinely-ambiguous case.
+                                    reason = (
+                                        'near-miss PO folder'
+                                        if _looks_like_po_typo(po_dir, po_name_prefix, po_name_suffix)
+                                        else 'unrecognized folder'
+                                    )
+                                    unrecognized.append((po_path, reason))
                                 handled_as_po_container = False
                                 if matches_po_name:
                                     # Record po_path as soon as it's recognized as a PO

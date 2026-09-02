@@ -154,7 +154,29 @@ PRAGMA user_version = 4;
 COMMIT;
 """
 
+_MIGRATION_V5 = """
+BEGIN;
+DELETE FROM indexed_dirs WHERE kind IN ('cf', 'bp');
+PRAGMA user_version = 5;
+COMMIT;
+"""
+
 _MAX_RESULTS = 500
+
+
+def _norm_path(path: str) -> str:
+    """Canonicalize a path string to the OS-native separator.
+
+    os.path.join(base_dir, customer) preserves whatever separator style the
+    source setting used -- e.g. Qt's QFileDialog.getExistingDirectory() always
+    returns forward slashes, even on Windows, so a customer_files_dir picked
+    via Settings' "Browse..." button ends up like "Z:/Customer Files". Sibling
+    container paths built via pathlib.Path(...).parents always normalize to
+    the OS-native separator ("Z:\\Customer Files\\..." on Windows). Without
+    normalizing, these two representations of the same directory don't
+    string-match, silently breaking the indexed_dirs staleness lookups below.
+    """
+    return os.path.normpath(path)
 
 
 def _escape_like(term: str) -> str:
@@ -237,7 +259,7 @@ class SearchIndex:
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version >= 4:
+        if version >= 5:
             return
         if version < 1:
             row = conn.execute(
@@ -266,6 +288,18 @@ class SearchIndex:
                 # get backfilled, not left with an empty value forever.
                 conn.execute("DELETE FROM indexed_dirs WHERE kind='cf'")
                 conn.execute("PRAGMA user_version = 4")
+        if version < 5:
+            # Force a clean re-index (both cf and bp) so any indexed_dirs rows
+            # written before path normalization was fixed (see _norm_path) get
+            # rebuilt under consistent separators -- including bp rows, which
+            # the customer-purge cleanup in the bp loop also matched via a
+            # LIKE prefix built from the same unnormalized base_dir. Also
+            # covers any cf customer indexed between the po_number/V4
+            # migration and the later PO-vs-legacy detection refinements
+            # (same file, no version bump at the time), which now get the
+            # fully-corrected discovery logic too.
+            logger.info("search_index: migrating schema to v5 (normalized paths, force re-index)")
+            conn.executescript(_MIGRATION_V5)
 
     def _dir_mtime(self, path: str) -> float:
         try:
@@ -442,7 +476,7 @@ class SearchIndex:
                     for customer in customers:
                         if _cancelled():
                             return
-                        customer_path = os.path.join(base_dir, customer)
+                        customer_path = _norm_path(os.path.join(base_dir, customer))
 
                         # Cheap precheck using previously indexed container dirs
                         # before calling the expensive find_job_folders.
@@ -624,6 +658,7 @@ class SearchIndex:
                 for prefix, base_dir in bp_dirs:
                     if _cancelled():
                         return
+                    base_dir = _norm_path(base_dir)
                     try:
                         customers = [
                             d for d in os.listdir(base_dir)
@@ -653,7 +688,7 @@ class SearchIndex:
                                 (prefix, 'bp', _like_prefix(base_dir)),
                             )
                         }
-                        valid_paths = {os.path.join(base_dir, c) for c in customer_set}
+                        valid_paths = {_norm_path(os.path.join(base_dir, c)) for c in customer_set}
                         for stale_path in prev_indexed - valid_paths:
                             conn.execute(
                                 "DELETE FROM indexed_dirs WHERE dir_path=? AND prefix=? AND kind=?",
@@ -663,7 +698,7 @@ class SearchIndex:
                     for customer in customers:
                         if _cancelled():
                             return
-                        customer_path = os.path.join(base_dir, customer)
+                        customer_path = _norm_path(os.path.join(base_dir, customer))
 
                         if not self._is_stale(conn, customer_path, prefix, 'bp', recursive=True):
                             continue
@@ -783,7 +818,7 @@ class SearchIndex:
                         except OSError:
                             continue
                         for customer in customers:
-                            customer_path = os.path.join(base_dir, customer)
+                            customer_path = _norm_path(os.path.join(base_dir, customer))
                             if self._is_stale(conn, customer_path, prefix, kind, recursive=(kind == 'bp')):
                                 return False
                             if kind == 'cf':
