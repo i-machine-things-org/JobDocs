@@ -188,16 +188,24 @@ def test_folder_naming_worker_cancel_does_not_block_on_slow_in_flight_customer(q
             worker.wait()
 
 
-def test_clear_search_disconnect_prevents_stale_finished_delivery(qapp, tmp_path):
+def test_stale_naming_worker_deliveries_are_ignored_after_clear_search(qapp, tmp_path):
     """Real-Qt regression test (CodeRabbit, PR #325) for the queued-signal
-    race: finished is a cross-thread queued connection, so the worker can
-    emit it before wait() returns, but Qt only actually delivers it once
-    control returns to the event loop -- which, without the disconnect()
-    clear_search() now does first, would happen *after* clear_search() had
-    already reset the status label, clobbering it with a stale "cancelled"
-    message. This is deterministic, not timing-flaky: QThread.wait() never
-    pumps the event loop, so a queued emission during it is *always*
-    deferred past the caller's return, every run.
+    race: progress_update/finished are cross-thread queued connections, so
+    the worker can emit one before wait() returns, but Qt only actually
+    delivers it once control returns to the event loop -- after
+    clear_search() has already reset the status label. This is
+    deterministic, not timing-flaky: QThread.wait() never pumps the event
+    loop, so a queued emission during it is *always* deferred past the
+    caller's return, every run.
+
+    An earlier fix tried disconnecting the signal before cancel()+wait(),
+    but Qt's own docs say disconnect() only stops *future* emissions from
+    being queued -- it does not un-queue one already posted. The actual fix
+    is the _naming_scan_id guard clear_search() bumps and the connected
+    wrapper slots check; this test wires the worker up exactly the way
+    check_folder_naming() does (scan id + lambda-wrapped connections) rather
+    than connecting the bare slot, so it exercises the real protection
+    mechanism, not a simplified stand-in for it.
     """
     from unittest.mock import MagicMock
 
@@ -220,8 +228,17 @@ def test_clear_search_disconnect_prevents_stale_finished_delivery(qapp, tmp_path
     module._worker = None
 
     slow_ctx = _SlowNamingAppContext(num_items=20, step_delay=0.05)
+    module._naming_scan_id += 1
+    scan_id = module._naming_scan_id
     module._naming_worker = FolderNamingCheckWorker([('', str(cf_root))], slow_ctx)
-    module._naming_worker.finished.connect(module._on_naming_check_finished)
+    module._naming_worker.progress_update.connect(
+        lambda status, sid=scan_id: module._on_naming_progress_update(status, sid)
+    )
+    module._naming_worker.finished.connect(
+        lambda results, cancelled, sid=scan_id: module._on_naming_check_finished_if_current(
+            results, cancelled, sid
+        )
+    )
     module._naming_worker.start()
     try:
         assert slow_ctx.entered.wait(timeout=2), "worker never entered find_job_folders()"
@@ -229,8 +246,9 @@ def test_clear_search_disconnect_prevents_stale_finished_delivery(qapp, tmp_path
         module.clear_search()
         qapp.processEvents()  # let anything still queued get delivered
 
-        # clear_search() itself sets "" last; a stale finished delivery
-        # would have overwritten it with "Folder naming check cancelled".
+        # clear_search() itself sets "" last; a stale progress_update or
+        # finished delivery would have overwritten it (with old "Checking…"
+        # text or "Folder naming check cancelled" respectively).
         module.search_status_label.setText.assert_called_with("")
     finally:
         if module._naming_worker.isRunning():

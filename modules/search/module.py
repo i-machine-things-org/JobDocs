@@ -540,6 +540,13 @@ class SearchModule(BaseModule):
         self._worker = None       # Background search worker
         self._index_worker = None  # Background index builder
         self._naming_worker: Optional[FolderNamingCheckWorker] = None
+        # Bumped whenever a naming scan is cancelled/torn down, so queued
+        # progress_update/finished deliveries already posted to the event
+        # loop before that point (disconnect() does not un-queue them -- Qt
+        # only guarantees it stops *future* emissions from being queued) get
+        # ignored by the slots below instead of overwriting freshly-reset UI
+        # state with stale text.
+        self._naming_scan_id = 0
         self._index: Optional[SearchIndex] = None
         self._index_failures = 0  # consecutive query errors
         self._index_query_failed = False  # True if the most recent query raised
@@ -977,10 +984,35 @@ class SearchModule(BaseModule):
         self.cancel_btn.show()
         self.search_status_label.setText("Checking folder names…")
 
+        self._naming_scan_id += 1
+        scan_id = self._naming_scan_id
         self._naming_worker = FolderNamingCheckWorker(customer_dirs, self.app_context)
-        self._naming_worker.progress_update.connect(self._on_progress_update)
-        self._naming_worker.finished.connect(self._on_naming_check_finished)
+        self._naming_worker.progress_update.connect(
+            lambda status, sid=scan_id: self._on_naming_progress_update(status, sid)
+        )
+        self._naming_worker.finished.connect(
+            lambda results, cancelled, sid=scan_id: self._on_naming_check_finished_if_current(
+                results, cancelled, sid
+            )
+        )
         self._naming_worker.start()
+
+    def _on_naming_progress_update(self, status: str, scan_id: int):
+        """Slot for FolderNamingCheckWorker.progress_update -- ignores a
+        delivery already queued before clear_search()/cleanup() invalidated
+        this scan (see _naming_scan_id)."""
+        if scan_id != self._naming_scan_id:
+            return
+        self.search_status_label.setText(status)
+
+    def _on_naming_check_finished_if_current(self, results: list, was_cancelled: bool, scan_id: int):
+        """Wrapper connected to FolderNamingCheckWorker.finished -- ignores a
+        delivery already queued before clear_search()/cleanup() invalidated
+        this scan (see _naming_scan_id), so it can't run against UI state
+        that's already been reset or torn down."""
+        if scan_id != self._naming_scan_id:
+            return
+        self._on_naming_check_finished(results, was_cancelled)
 
     def _on_naming_check_finished(self, results: list, was_cancelled: bool):
         """Slot called when a folder naming check completes"""
@@ -1058,14 +1090,18 @@ class SearchModule(BaseModule):
             self._worker.cancel()
             self._worker.wait()
         if self._naming_worker and self._naming_worker.isRunning():
-            # finished is a queued cross-thread connection: the worker can
-            # emit it (e.g. right after cancel() takes effect) before wait()
-            # returns, but delivery only happens once this method returns
-            # control to the Qt event loop -- by which point the UI reset
-            # below has already run. Disconnecting first makes Qt drop that
-            # already-queued delivery instead of invoking it afterward and
-            # clobbering the reset state with a stale "cancelled" message.
-            self._naming_worker.finished.disconnect(self._on_naming_check_finished)
+            # progress_update/finished are queued cross-thread connections:
+            # the worker can emit one (e.g. right as cancel() takes effect)
+            # before wait() returns, but Qt only actually delivers it once
+            # this method returns control to the event loop -- by which
+            # point the UI reset below has already run. disconnect() does
+            # NOT un-queue an already-posted delivery (Qt only guarantees it
+            # stops *future* emissions from being queued), so bump the scan
+            # id first -- _on_naming_progress_update()/
+            # _on_naming_check_finished_if_current() check it and drop any
+            # delivery that's now stale, instead of clobbering the reset
+            # state with old text or a "cancelled" message.
+            self._naming_scan_id += 1
             self._naming_worker.cancel()
             self._naming_worker.wait()
 
@@ -1554,10 +1590,10 @@ class SearchModule(BaseModule):
             self._index_worker.cancel()
             self._index_worker.wait()
         if self._naming_worker and self._naming_worker.isRunning():
-            # See clear_search()'s equivalent guard: without disconnecting
-            # first, a finished delivery queued during wait() would run
-            # after teardown, against widgets that may already be deleted.
-            self._naming_worker.finished.disconnect(self._on_naming_check_finished)
+            # See clear_search()'s equivalent guard: a queued delivery could
+            # otherwise run after teardown, against widgets that may already
+            # be deleted.
+            self._naming_scan_id += 1
             self._naming_worker.cancel()
             self._naming_worker.wait()
         self.search_results.clear()
