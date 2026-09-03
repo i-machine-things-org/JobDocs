@@ -101,6 +101,60 @@ class TestIsPopulated:
         assert index.is_populated() is True
 
 
+class TestClearAll:
+    """clear_all() must wipe indexed_dirs too, not just jobs/bp_files/quotes
+    -- otherwise update() would still see fresh mtimes recorded there and
+    skip re-scanning directories on the very rebuild meant to force it."""
+
+    def test_wipes_jobs_and_is_populated_goes_false(self, tmp_path):
+        index = _make_index(tmp_path)
+        _insert_job(index)
+        assert index.is_populated() is True
+
+        index.clear_all()
+
+        assert index.is_populated() is False
+
+    def test_wipes_indexed_dirs_staleness_bookkeeping(self, tmp_path):
+        index = _make_index(tmp_path)
+        with sqlite3.connect(str(index._db_path)) as conn:
+            conn.execute(
+                "INSERT INTO indexed_dirs (dir_path, prefix, kind, mtime, indexed_at)"
+                " VALUES ('C:/Acme', '', 'cf', 1.0, 1.0)"
+            )
+
+        index.clear_all()
+
+        with sqlite3.connect(str(index._db_path)) as conn:
+            row = conn.execute("SELECT COUNT(*) FROM indexed_dirs").fetchone()
+        assert row[0] == 0
+
+    def test_returns_false_when_database_is_locked(self, tmp_path, monkeypatch):
+        # CodeRabbit finding, PR #328: the caller (rebuild_search_index())
+        # must be able to tell "nothing was actually cleared" from success
+        # -- silently returning as if it had would let it proceed straight
+        # to an ordinary incremental update() and call that a rebuild.
+        index = _make_index(tmp_path)
+
+        def _raise_locked():
+            raise sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr(index, '_connect', _raise_locked)
+
+        assert index.clear_all() is False
+
+    def test_reraises_other_operational_errors(self, tmp_path, monkeypatch):
+        index = _make_index(tmp_path)
+
+        def _raise_other():
+            raise sqlite3.OperationalError("disk I/O error")
+
+        monkeypatch.setattr(index, '_connect', _raise_other)
+
+        with pytest.raises(sqlite3.OperationalError):
+            index.clear_all()
+
+
 class TestIsFullyCovered:
     """Regression coverage for #293, finding 2: search_jobs()/search_bp() returning
     zero results shouldn't always trigger a full filesystem walk — only when the
