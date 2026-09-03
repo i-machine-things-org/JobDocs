@@ -762,6 +762,26 @@ class SearchIndex:
                 logger.error("search_index: operational error during update: %s", exc)
                 raise
 
+    def clear_all(self) -> None:
+        """Wipe every indexed row, including indexed_dirs's per-directory
+        mtime bookkeeping, so the next update() treats every directory as
+        never-indexed and does a full re-scan instead of skipping whatever
+        it still believes is unchanged. For a manual "Rebuild Search Index"
+        action, not routine use — update()'s normal incremental skip is what
+        makes startup indexing cheap."""
+        try:
+            with closing(self._connect()) as conn, conn:
+                conn.execute("DELETE FROM jobs")
+                conn.execute("DELETE FROM bp_files")
+                conn.execute("DELETE FROM quotes")
+                conn.execute("DELETE FROM indexed_dirs")
+        except sqlite3.OperationalError as exc:
+            if "database is locked" in str(exc).lower():
+                logger.warning("search_index: could not acquire write lock for clear_all: %s", exc)
+            else:
+                logger.error("search_index: operational error during clear_all: %s", exc)
+                raise
+
     # ------------------------------------------------------------------
     # Querying
     # ------------------------------------------------------------------
