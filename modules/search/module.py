@@ -628,7 +628,6 @@ class SearchModule(BaseModule):
         self.legacy_options_widget = None
         self.search_btn = None
         self.cancel_btn = None
-        self.check_naming_btn = None
         self.folder_tree = None
         self.file_preview: FilePreviewWidget | None = None
 
@@ -669,6 +668,20 @@ class SearchModule(BaseModule):
         self._index_worker.finished.connect(self._on_index_finished)
         self._index_worker.start()
 
+    def rebuild_search_index(self):
+        """Force a full re-scan instead of update()'s normal incremental
+        skip-if-unchanged behavior -- for when the index is suspected stale
+        or wrong. Cancels an indexer already in flight first (same
+        cancel()+wait() pattern as cleanup()) since clearing the tables
+        while it's mid-write would race its own transaction."""
+        if self._index is None:
+            return
+        if self._index_worker and self._index_worker.isRunning():
+            self._index_worker.cancel()
+            self._index_worker.wait()
+        self._index.clear_all()
+        self.start_indexer()
+
     def _on_index_progress(self, msg: str):
         if self.search_status_label and not (self._worker and self._worker.isRunning()):
             self.search_status_label.setText(f"Index: {msg}")
@@ -706,15 +719,6 @@ class SearchModule(BaseModule):
         self.legacy_options_widget = widget.legacy_options_widget
         self.search_btn = widget.search_btn
         self.cancel_btn = widget.cancel_btn
-        self.check_naming_btn = widget.check_naming_btn
-        if self.app_context.is_readonly():
-            # A kiosk user can't act on a naming-convention finding (fixing
-            # one means renaming folders on the actual share, which a
-            # read-only install never permits), and the report dialog's own
-            # reveal-in-Explorer actions are already disabled read-only --
-            # see check_folder_naming()'s own guard for the defense-in-depth
-            # check if this button is somehow still reached.
-            self.check_naming_btn.hide()
 
         # Keep criteria group compact, let results group expand
         widget.layout().setStretchFactor(widget.searchCriteriaGroup, 0)
@@ -773,7 +777,6 @@ class SearchModule(BaseModule):
         # Connect signals
         self.search_btn.clicked.connect(self.perform_search)
         self.cancel_btn.clicked.connect(self.cancel_search)
-        self.check_naming_btn.clicked.connect(self.check_folder_naming)
         self.search_edit.returnPressed.connect(self.perform_search)
         widget.clear_btn.clicked.connect(self.clear_search)
         self.search_all_radio.toggled.connect(self.update_search_field_checkboxes)
@@ -1040,14 +1043,15 @@ class SearchModule(BaseModule):
         """Scan customer directories for folders that don't match the
         configured job/PO naming convention and show them in a report.
 
-        Not offered on a read-only (search-only) kiosk install at all --
-        the button is hidden in _create_widget() -- but guarded here too as
-        defense-in-depth (e.g. a stale/queued signal), matching every other
-        readonly-gated action in this module. A kiosk user can't act on a
-        naming-convention finding anyway (fixing it means renaming folders
-        on the actual share), and the report's own reveal-in-Explorer
-        actions are already disabled read-only, so the whole feature would
-        just be a dead end for that install.
+        Not reachable through the UI at all on a read-only (search-only)
+        kiosk install -- it's a main-menu item (see main.py's setup_menu())
+        and that menu bar is never constructed when readonly_mode is set --
+        but guarded here too as defense-in-depth (e.g. a stale/queued
+        signal), matching every other readonly-gated action in this module.
+        A kiosk user can't act on a naming-convention finding anyway (fixing
+        it means renaming folders on the actual share), and the report's
+        own reveal-in-Explorer actions are already disabled read-only, so
+        the whole feature would just be a dead end for that install.
         """
         if self.app_context.is_readonly():
             return
@@ -1059,7 +1063,6 @@ class SearchModule(BaseModule):
             self.show_error("Error", "No customer directories configured")
             return
 
-        self.check_naming_btn.setEnabled(False)
         self.cancel_btn.show()
         self.search_status_label.setText("Checking folder names…")
 
@@ -1095,7 +1098,6 @@ class SearchModule(BaseModule):
 
     def _on_naming_check_finished(self, results: list, was_cancelled: bool):
         """Slot called when a folder naming check completes"""
-        self.check_naming_btn.setEnabled(True)
         other_worker_active = self._worker and self._worker.isRunning()
         if not other_worker_active:
             self.cancel_btn.hide()
@@ -1193,7 +1195,6 @@ class SearchModule(BaseModule):
         self.search_status_label.setText("")
         self.search_progress.hide()
         self.search_btn.setEnabled(True)
-        self.check_naming_btn.setEnabled(True)
         self.cancel_btn.hide()
 
     # ==================== Helper Methods ====================
@@ -1655,7 +1656,7 @@ class SearchModule(BaseModule):
                 if result == QMessageBox.StandardButton.Ok and dont_show.isChecked():
                     self.app_context.set_setting('suppress_bp_link_notification', True)
                     self.app_context.save_settings()
-            else:                
+            else:
                 self.search_status_label.setText(f"Linked '{filename}' to blueprints and copied path")
         else:
             self.search_status_label.setText("Blueprints path copied to clipboard")

@@ -222,7 +222,6 @@ def test_stale_naming_worker_deliveries_are_ignored_after_clear_search(qapp, tmp
     module.search_status_label = MagicMock()
     module.search_progress = MagicMock()
     module.search_btn = MagicMock()
-    module.check_naming_btn = MagicMock()
     module.cancel_btn = MagicMock()
     module.search_results = []
     module._worker = None
