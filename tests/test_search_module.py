@@ -7,6 +7,7 @@ otherwise a failed query could be reported as "Found 0 result(s)", or (after
 the index is disabled following repeated failures) crash on None.is_fully_covered().
 """
 
+import sqlite3
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -352,6 +353,22 @@ class TestRebuildSearchIndex:
         module._index.clear_all.return_value = False
 
         module.rebuild_search_index()
+
+        module.start_indexer.assert_not_called()
+        module.show_error.assert_called_once()
+
+    def test_clear_all_raising_shows_error_instead_of_crashing(self):
+        # CodeRabbit finding, PR #328 (second round): clear_all() only
+        # returns False for lock contention -- any other sqlite3.Error
+        # (disk full, permission denied, corruption) it re-raises. This runs
+        # synchronously on the GUI thread, so an uncaught exception here is
+        # an unhandled exception in a Qt slot with nothing shown to the
+        # user, the same silent-failure shape the bool-return fix addressed
+        # for the lock case.
+        module = _make_module_for_rebuild_index()
+        module._index.clear_all.side_effect = sqlite3.OperationalError("disk I/O error")
+
+        module.rebuild_search_index()  # must not raise
 
         module.start_indexer.assert_not_called()
         module.show_error.assert_called_once()
