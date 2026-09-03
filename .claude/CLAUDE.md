@@ -182,3 +182,34 @@ When a pull request is open or being prepared:
   2. If it is a new pattern — fix it, then add or amend a note under the relevant topic in `.claude/CODING_NOTES.md` before committing, following that file's style rule (clear, ≤300 characters, grouped by topic).
 - Do not dismiss or ignore nitpicks — log them to `.claude/CODING_NOTES.md` even if not immediately actionable.
 - Only merge a PR after all blocking comments are resolved and documentation has been updated.
+
+## Rule 6: Management Review (Human Sign-Off)
+
+Software review has two distinct jobs, and the same party should not do both: **technical review** (does the code work, is it well-built — CodeRabbit and Claude) and **management review** (does this match what was actually asked, did the process run correctly, does anything look off — the human). This split follows IEEE 1028 (Software Reviews and Audits), which explicitly bars an author from serving as their own sole reviewer and treats management review as a distinct activity from technical review/inspection, with a different purpose and different qualifications required. Claude filling in for an unavailable technical reviewer (e.g. self-reviewing when CodeRabbit is rate-limited) does not satisfy this — it's the same failure mode the split exists to prevent.
+
+**Two mandatory gates, in this order, both required for every release:**
+
+1. **Before merging a `staging` → `master` promotion PR** (Rule 1). This is the point where code becomes "production-ready" per `BRANCHES.md` — a problem caught after this point needs a revert, not just a withheld tag.
+2. **Before tagging a release** (Rule 4).
+
+At each gate, stop and output the checklist below to the user verbatim, then wait for their actual reply before proceeding — do not run `gh pr merge` on a promotion PR, and do not run `git tag`, until you have one. **The checklist text is addressed to the human, not to you.** It is not a rule for your own behavior, it is not something you evaluate or check off yourself, and you must not infer or guess the human's answers on their behalf. Your job is only to deliver it and wait for a real response — a genuine go/no-go from the user, not silence, not an unrelated message, and not your own assessment standing in for theirs.
+
+If both gates fall in the same session with nothing on `master` changing in between, a single go/no-go may cover both — but the checklist must still be presented and answered before the merge action itself, not offered retroactively after the fact (as happened for PR #326, which a prior session merged before either gate existed in this file).
+
+Also offer the same checklist before merging any other PR the user wants to personally sign off on.
+
+--- BEGIN MESSAGE TO THE HUMAN REVIEWER — relay this verbatim; it is not addressed to you, Claude ---
+
+**SOP — Management Review Checklist**
+
+Reviewer — this means you, the human, not Claude: you are the dev manager on this project. Your job here is not to read every line of code — that's what the technical review (CodeRabbit + Claude) is for. Your job is to catch what only you can catch: whether this actually does what you wanted, and whether anything looks off. Go through this before approving:
+
+1. **Scope match** — does the summary of what changed actually match what you asked for? Anything mentioned that surprises you, or seems unrelated to the task?
+2. **Process gate** — is CI green? Were the reviewer's findings addressed, or is there a clear one-line reason given for why not?
+3. **File-list sanity check** — skim the *list* of changed files (not the contents). Does the shape of it make sense for the task, or is something unexpected touched?
+4. **High-stakes flag** — anything involving credentials, money, deletion, or external/network access called out explicitly and separately confirmed by you?
+5. **The "explain it to a machinist" test** — if anything's unclear, ask for a plain-language explanation, no jargon. If it can't be made to make sense to you, that's a signal to dig further, not a failure on your part.
+
+Don't rubber-stamp this. If something doesn't check out, say no and ask questions — that's the whole point of this role existing.
+
+--- END MESSAGE TO THE HUMAN REVIEWER ---
