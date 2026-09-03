@@ -7,6 +7,7 @@ otherwise a failed query could be reported as "Found 0 result(s)", or (after
 the index is disabled following repeated failures) crash on None.is_fully_covered().
 """
 
+import sqlite3
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -25,7 +26,6 @@ def _make_module() -> SearchModule:
 def _make_module_for_naming_check() -> SearchModule:
     module = SearchModule()
     module._widget = MagicMock()
-    module.check_naming_btn = MagicMock()
     module.cancel_btn = MagicMock()
     module.search_status_label = MagicMock()
     module._worker = None
@@ -42,7 +42,6 @@ def _make_module_for_clear_search() -> SearchModule:
     module.search_status_label = MagicMock()
     module.search_progress = MagicMock()
     module.search_btn = MagicMock()
-    module.check_naming_btn = MagicMock()
     module.cancel_btn = MagicMock()
     module._worker = None
     module._naming_worker = None
@@ -120,6 +119,26 @@ def _patched_naming_dialogs(mock_box, mock_dialog):
     )
 
 
+class TestCheckFolderNamingReadonlyGuard:
+    """A read-only (search-only) kiosk install can't act on a naming-
+    convention finding (fixing one means renaming folders on the actual
+    share) and the report dialog's own reveal-in-Explorer actions are
+    already disabled read-only, so the feature isn't reachable through the
+    UI at all -- it's a main-menu item (main.py's setup_menu()) and that
+    menu bar is never constructed on a readonly install. This guard is the
+    defense-in-depth backstop if the method is somehow still reached (e.g.
+    a stale/queued signal)."""
+
+    def test_is_a_noop_when_readonly(self):
+        module = _make_module_for_naming_check()
+        module._app_context = MagicMock(is_readonly=MagicMock(return_value=True))
+
+        module.check_folder_naming()
+
+        module.cancel_btn.show.assert_not_called()
+        assert module._naming_worker is None
+
+
 class TestNamingCheckFinishedDistinguishesCancellation:
     """CodeRabbit finding on PR #325: a cancelled FolderNamingCheckWorker still
     emits whatever results it collected before cancellation -- showing that as
@@ -163,7 +182,7 @@ class TestNamingCheckFinishedDistinguishesCancellation:
             module._on_naming_check_finished(results, False)
 
         mock_box.information.assert_not_called()
-        mock_dialog.assert_called_once_with(module._widget, results)
+        mock_dialog.assert_called_once_with(module._widget, results, module.app_context)
         mock_dialog.return_value.exec.assert_called_once()
 
 
@@ -183,7 +202,6 @@ class TestClearSearchCancelsNamingWorkerToo:
 
         module._naming_worker.cancel.assert_called_once()
         module._naming_worker.wait.assert_called_once()
-        module.check_naming_btn.setEnabled.assert_called_with(True)
 
     def test_no_naming_worker_running_is_a_no_op(self):
         module = _make_module_for_clear_search()
@@ -267,3 +285,90 @@ class TestNamingScanIdInvalidatesStaleQueuedDeliveries:
             module._on_naming_check_finished_if_current([], False, 2)
 
         mock_box.information.assert_called_once()
+
+
+def _make_module_for_rebuild_index() -> SearchModule:
+    module = SearchModule()
+    module._index = MagicMock()
+    module._index.clear_all.return_value = True
+    module._index_worker = None
+    module.start_indexer = MagicMock()
+    module.show_error = MagicMock()
+    return module
+
+
+class TestRebuildSearchIndex:
+    """rebuild_search_index() must force a genuinely full re-scan, not just
+    delegate straight to update()'s normal incremental behavior -- that
+    would silently skip every directory update() still believes is fresh,
+    defeating the entire point of a manual rebuild."""
+
+    def test_noop_when_index_unavailable(self):
+        module = _make_module_for_rebuild_index()
+        module._index = None
+
+        module.rebuild_search_index()
+
+        module.start_indexer.assert_not_called()
+
+    def test_clears_index_then_restarts_indexer(self):
+        module = _make_module_for_rebuild_index()
+
+        module.rebuild_search_index()
+
+        module._index.clear_all.assert_called_once()
+        module.start_indexer.assert_called_once()
+
+    def test_cancels_and_waits_on_an_in_flight_indexer_before_clearing(self):
+        # Truncating jobs/bp_files/indexed_dirs while a background
+        # IndexWorker is mid-transaction would race its own writes -- must
+        # stop it first, same cancel()+wait() pattern used at teardown.
+        module = _make_module_for_rebuild_index()
+        module._index_worker = MagicMock()
+        module._index_worker.isRunning.return_value = True
+
+        module.rebuild_search_index()
+
+        module._index_worker.cancel.assert_called_once()
+        module._index_worker.wait.assert_called_once()
+        module._index.clear_all.assert_called_once()
+
+    def test_idle_indexer_is_left_alone(self):
+        module = _make_module_for_rebuild_index()
+        module._index_worker = MagicMock()
+        module._index_worker.isRunning.return_value = False
+
+        module.rebuild_search_index()
+
+        module._index_worker.cancel.assert_not_called()
+        module._index_worker.wait.assert_not_called()
+
+    def test_failed_clear_shows_error_and_does_not_start_an_incremental_scan(self):
+        # CodeRabbit finding, PR #328: proceeding to start_indexer() after a
+        # failed clear_all() (e.g. the db was locked) would just run
+        # update()'s normal incremental scan -- silently downgrading a
+        # requested full rebuild into a no-op, with nothing telling the user
+        # their rebuild didn't actually happen.
+        module = _make_module_for_rebuild_index()
+        module._index.clear_all.return_value = False
+
+        module.rebuild_search_index()
+
+        module.start_indexer.assert_not_called()
+        module.show_error.assert_called_once()
+
+    def test_clear_all_raising_shows_error_instead_of_crashing(self):
+        # CodeRabbit finding, PR #328 (second round): clear_all() only
+        # returns False for lock contention -- any other sqlite3.Error
+        # (disk full, permission denied, corruption) it re-raises. This runs
+        # synchronously on the GUI thread, so an uncaught exception here is
+        # an unhandled exception in a Qt slot with nothing shown to the
+        # user, the same silent-failure shape the bool-return fix addressed
+        # for the lock case.
+        module = _make_module_for_rebuild_index()
+        module._index.clear_all.side_effect = sqlite3.OperationalError("disk I/O error")
+
+        module.rebuild_search_index()  # must not raise
+
+        module.start_indexer.assert_not_called()
+        module.show_error.assert_called_once()
