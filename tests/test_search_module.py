@@ -7,7 +7,6 @@ otherwise a failed query could be reported as "Found 0 result(s)", or (after
 the index is disabled following repeated failures) crash on None.is_fully_covered().
 """
 
-import sqlite3
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -290,18 +289,24 @@ class TestNamingScanIdInvalidatesStaleQueuedDeliveries:
 def _make_module_for_rebuild_index() -> SearchModule:
     module = SearchModule()
     module._index = MagicMock()
-    module._index.clear_all.return_value = True
     module._index_worker = None
+    module._rebuild_pending = False
     module.start_indexer = MagicMock()
     module.show_error = MagicMock()
     return module
 
 
 class TestRebuildSearchIndex:
-    """rebuild_search_index() must force a genuinely full re-scan, not just
-    delegate straight to update()'s normal incremental behavior -- that
-    would silently skip every directory update() still believes is fresh,
-    defeating the entire point of a manual rebuild."""
+    """rebuild_search_index() must never block the GUI thread on an
+    in-flight indexer (CodeRabbit, PR #329) -- a cancel()+wait() here would
+    freeze the app for as long as the *current* filesystem operation takes
+    to return, which is unbounded on a slow/hung network share. If a worker
+    is running, this only requests cancellation and flags the rebuild as
+    pending; _on_index_worker_stopped() (real-Qt coverage in
+    tests/test_tree_walk_cancellation.py) starts the actual rebuild once
+    the old worker's inherited QThread.finished confirms it stopped.
+    clear_all() itself now runs inside IndexWorker's background thread
+    (also covered there), not here."""
 
     def test_noop_when_index_unavailable(self):
         module = _make_module_for_rebuild_index()
@@ -311,18 +316,15 @@ class TestRebuildSearchIndex:
 
         module.start_indexer.assert_not_called()
 
-    def test_clears_index_then_restarts_indexer(self):
+    def test_starts_a_rebuild_indexer_when_nothing_is_running(self):
         module = _make_module_for_rebuild_index()
 
         module.rebuild_search_index()
 
-        module._index.clear_all.assert_called_once()
-        module.start_indexer.assert_called_once()
+        module.start_indexer.assert_called_once_with(rebuild=True)
+        assert module._rebuild_pending is False
 
-    def test_cancels_and_waits_on_an_in_flight_indexer_before_clearing(self):
-        # Truncating jobs/bp_files/indexed_dirs while a background
-        # IndexWorker is mid-transaction would race its own writes -- must
-        # stop it first, same cancel()+wait() pattern used at teardown.
+    def test_in_flight_indexer_is_cancelled_without_blocking(self):
         module = _make_module_for_rebuild_index()
         module._index_worker = MagicMock()
         module._index_worker.isRunning.return_value = True
@@ -330,10 +332,11 @@ class TestRebuildSearchIndex:
         module.rebuild_search_index()
 
         module._index_worker.cancel.assert_called_once()
-        module._index_worker.wait.assert_called_once()
-        module._index.clear_all.assert_called_once()
+        module._index_worker.wait.assert_not_called()
+        assert module._rebuild_pending is True
+        module.start_indexer.assert_not_called()
 
-    def test_idle_indexer_is_left_alone(self):
+    def test_idle_indexer_is_started_directly(self):
         module = _make_module_for_rebuild_index()
         module._index_worker = MagicMock()
         module._index_worker.isRunning.return_value = False
@@ -341,34 +344,60 @@ class TestRebuildSearchIndex:
         module.rebuild_search_index()
 
         module._index_worker.cancel.assert_not_called()
-        module._index_worker.wait.assert_not_called()
+        module.start_indexer.assert_called_once_with(rebuild=True)
 
-    def test_failed_clear_shows_error_and_does_not_start_an_incremental_scan(self):
-        # CodeRabbit finding, PR #328: proceeding to start_indexer() after a
-        # failed clear_all() (e.g. the db was locked) would just run
-        # update()'s normal incremental scan -- silently downgrading a
-        # requested full rebuild into a no-op, with nothing telling the user
-        # their rebuild didn't actually happen.
+
+class TestIndexWorkerStoppedDeferredRestart:
+    """_on_index_worker_stopped() is wired to the just-finished worker's
+    real QThread.finished -- the deferred-rebuild trigger rebuild_search_index()
+    relies on when it couldn't start immediately."""
+
+    def test_pending_rebuild_starts_on_stop_and_clears_the_flag(self):
         module = _make_module_for_rebuild_index()
-        module._index.clear_all.return_value = False
+        module._rebuild_pending = True
 
-        module.rebuild_search_index()
+        module._on_index_worker_stopped()
+
+        module.start_indexer.assert_called_once_with(rebuild=True)
+        assert module._rebuild_pending is False
+
+    def test_no_pending_rebuild_is_a_noop(self):
+        module = _make_module_for_rebuild_index()
+        module._rebuild_pending = False
+
+        module._on_index_worker_stopped()
 
         module.start_indexer.assert_not_called()
-        module.show_error.assert_called_once()
 
-    def test_clear_all_raising_shows_error_instead_of_crashing(self):
-        # CodeRabbit finding, PR #328 (second round): clear_all() only
-        # returns False for lock contention -- any other sqlite3.Error
-        # (disk full, permission denied, corruption) it re-raises. This runs
-        # synchronously on the GUI thread, so an uncaught exception here is
-        # an unhandled exception in a Qt slot with nothing shown to the
-        # user, the same silent-failure shape the bool-return fix addressed
-        # for the lock case.
+
+class TestIndexResultStatusText:
+    def test_pending_rebuild_suppresses_stale_ready_text(self):
+        # A fresh rebuild worker is about to start (from
+        # _on_index_worker_stopped, wired to this same worker's finished) --
+        # don't flash a "ready" status for the scan being superseded.
         module = _make_module_for_rebuild_index()
-        module._index.clear_all.side_effect = sqlite3.OperationalError("disk I/O error")
+        module._rebuild_pending = True
+        module.search_status_label = MagicMock()
+        module._worker = None
 
-        module.rebuild_search_index()  # must not raise
+        module._on_index_result(42)
 
-        module.start_indexer.assert_not_called()
-        module.show_error.assert_called_once()
+        module.search_status_label.setText.assert_not_called()
+
+    def test_normal_completion_shows_ready_text(self):
+        module = _make_module_for_rebuild_index()
+        module.search_status_label = MagicMock()
+        module._worker = None
+
+        module._on_index_result(42)
+
+        module.search_status_label.setText.assert_called_once_with("Index ready — 42 jobs")
+
+
+class TestIndexClearFailed:
+    def test_shows_error_with_the_given_message(self):
+        module = _make_module_for_rebuild_index()
+
+        module._on_index_clear_failed("some message")
+
+        module.show_error.assert_called_once_with("Rebuild Search Index", "some message")

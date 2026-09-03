@@ -388,22 +388,50 @@ class SearchWorker(QThread):
 
 
 class IndexWorker(QThread):
-    """Background thread that builds/updates the search index at startup."""
+    """Background thread that builds/updates the search index at startup,
+    or (clear_first=True) performs a full rebuild -- both clear_all() and
+    update() run here, off the GUI thread, since clear_all() can block on
+    SQLite write-lock contention just like update()'s filesystem walk can
+    block on a slow network share (CodeRabbit, PR #329).
+    """
     progress = pyqtSignal(str)
-    finished = pyqtSignal(int)   # emits job count when done
+    # Completion is reported via the inherited QThread.finished signal, not
+    # a locally-declared one -- see JobTreeWorker's identical comment in
+    # modules/job/module.py for why a custom signal doesn't give a
+    # deferred-restart caller the same isRunning()-is-accurate guarantee.
+    # The job count is real data, not a completion/timing signal, so it's
+    # fine as its own separate signal (mirrors JobTreeWorker's
+    # customer_loaded) -- just never treat *this* as "safe to restart".
+    result = pyqtSignal(int)  # emits job count when done
+    clear_failed = pyqtSignal(str)  # emits a user-facing message if clear_first's clear_all() didn't succeed
 
-    def __init__(self, index: SearchIndex, cf_dirs, bp_dirs, app_context):
+    def __init__(self, index: SearchIndex, cf_dirs, bp_dirs, app_context, clear_first: bool = False):
         super().__init__()
         self._index = index
         self._cf_dirs = cf_dirs
         self._bp_dirs = bp_dirs
         self._app_context = app_context
+        self._clear_first = clear_first
         self._cancelled = False
 
     def cancel(self):
         self._cancelled = True
 
     def run(self):
+        if self._clear_first:
+            try:
+                cleared = self._index.clear_all()
+            except sqlite3.Error as exc:
+                logger.error("IndexWorker: clear_all failed (%s): %s", type(exc).__name__, exc)
+                self.clear_failed.emit(f"Could not rebuild the index: {exc}")
+                self.result.emit(self._index.job_count())
+                return
+            if not cleared:
+                self.clear_failed.emit(
+                    "Could not rebuild the index right now — the database is busy. Try again shortly."
+                )
+                self.result.emit(self._index.job_count())
+                return
         self._index.update(
             self._cf_dirs,
             self._bp_dirs,
@@ -411,7 +439,7 @@ class IndexWorker(QThread):
             progress=self.progress.emit,
             cancelled=lambda: self._cancelled,
         )
-        self.finished.emit(self._index.job_count())
+        self.result.emit(self._index.job_count())
 
 
 class FolderNamingCheckWorker(QThread):
@@ -599,6 +627,7 @@ class SearchModule(BaseModule):
         self.search_results: List[Dict[str, Any]] = []
         self._worker = None       # Background search worker
         self._index_worker = None  # Background index builder
+        self._rebuild_pending = False  # set by rebuild_search_index() when it must wait for an in-flight worker to stop
         self._naming_worker: Optional[FolderNamingCheckWorker] = None
         # Bumped whenever a naming scan is cancelled/torn down, so queued
         # progress_update/finished deliveries already posted to the event
@@ -651,8 +680,12 @@ class SearchModule(BaseModule):
             logger.warning("search: could not open index DB (%s): %s", type(exc).__name__, exc)
             self._index = None
 
-    def start_indexer(self):
-        """Start the background index update. Called after the UI is shown."""
+    def start_indexer(self, rebuild: bool = False):
+        """Start the background index update, or (rebuild=True) a full
+        clear-then-rescan. Called after the UI is shown, or by
+        rebuild_search_index() (directly, or deferred via
+        _on_index_worker_stopped() once an in-flight worker confirms it
+        actually stopped)."""
         if self._index is None:
             return
         if self._index_worker and self._index_worker.isRunning():
@@ -664,52 +697,68 @@ class SearchModule(BaseModule):
         if not cf_dirs and not bp_dirs:
             return
 
-        self._index_worker = IndexWorker(self._index, cf_dirs, bp_dirs, self.app_context)
+        self._index_worker = IndexWorker(self._index, cf_dirs, bp_dirs, self.app_context, clear_first=rebuild)
         self._index_worker.progress.connect(self._on_index_progress)
-        self._index_worker.finished.connect(self._on_index_finished)
+        self._index_worker.result.connect(self._on_index_result)
+        self._index_worker.clear_failed.connect(self._on_index_clear_failed)
+        # Inherited QThread.finished, not IndexWorker.result -- see
+        # IndexWorker's own comment for why the deferred-restart trigger
+        # specifically needs the real one.
+        self._index_worker.finished.connect(self._on_index_worker_stopped)
         self._index_worker.start()
 
     def rebuild_search_index(self):
         """Force a full re-scan instead of update()'s normal incremental
         skip-if-unchanged behavior -- for when the index is suspected stale
-        or wrong. Cancels an indexer already in flight first (same
-        cancel()+wait() pattern as cleanup()) since clearing the tables
-        while it's mid-write would race its own transaction.
+        or wrong.
 
-        Must not call start_indexer() if clear_all() couldn't actually
-        clear the tables (e.g. lock contention) -- update() would then just
-        run its normal incremental scan, silently downgrading a requested
-        full rebuild with no visible sign to the user that it didn't
-        happen. clear_all() only returns False for lock contention -- any
-        other sqlite3.Error (disk full, permission denied, corruption) it
-        re-raises, so this runs synchronously on the GUI thread and must
-        catch that itself, or it's an unhandled exception in a Qt slot with
-        nothing shown to the user at all, the same silent-failure shape as
-        the lock case this was written to fix."""
+        Never blocks the GUI thread waiting for an in-flight indexer
+        (CodeRabbit, PR #329): a worker.cancel() followed by a synchronous
+        worker.wait() here would freeze the whole app for as long as
+        update()'s *current* filesystem operation takes to return, which is
+        unbounded on a slow/hung network share. clear_all() itself also now
+        runs inside IndexWorker's background thread (its clear_first flag),
+        not here, for the same reason -- it can block on SQLite write-lock
+        contention for up to its connect timeout.
+
+        If a worker is already running, this only requests cancellation and
+        records that a rebuild is wanted; _on_index_worker_stopped() (wired
+        to the real QThread.finished, guaranteed to fire only after run()
+        has truly returned) starts the actual rebuild once that's
+        confirmed, mirroring the "never reassign the worker except from its
+        own finished handler" pattern used for the naming-check worker
+        elsewhere in this module."""
         if self._index is None:
             return
         if self._index_worker and self._index_worker.isRunning():
             self._index_worker.cancel()
-            self._index_worker.wait()
-        try:
-            cleared = self._index.clear_all()
-        except sqlite3.Error as exc:
-            logger.error("rebuild_search_index: clear_all failed (%s): %s", type(exc).__name__, exc)
-            self.show_error("Rebuild Search Index", f"Could not rebuild the index: {exc}")
+            self._rebuild_pending = True
             return
-        if not cleared:
-            self.show_error(
-                "Rebuild Search Index",
-                "Could not rebuild the index right now — the database is busy. Try again shortly."
-            )
-            return
-        self.start_indexer()
+        self.start_indexer(rebuild=True)
+
+    def _on_index_worker_stopped(self):
+        """Connected to the just-finished IndexWorker's inherited
+        QThread.finished. Starts a deferred rebuild request now that
+        isRunning() is guaranteed accurate; otherwise a no-op (the normal
+        end-of-run case, already handled by _on_index_result for status
+        text)."""
+        if self._rebuild_pending:
+            self._rebuild_pending = False
+            self.start_indexer(rebuild=True)
+
+    def _on_index_clear_failed(self, message: str):
+        self.show_error("Rebuild Search Index", message)
 
     def _on_index_progress(self, msg: str):
         if self.search_status_label and not (self._worker and self._worker.isRunning()):
             self.search_status_label.setText(f"Index: {msg}")
 
-    def _on_index_finished(self, job_count: int):
+    def _on_index_result(self, job_count: int):
+        if self._rebuild_pending:
+            # A new rebuild is about to start (from _on_index_worker_stopped,
+            # wired to the same worker's finished signal) -- don't flash a
+            # stale "ready" status for the scan that's being superseded.
+            return
         if self.search_status_label and not (self._worker and self._worker.isRunning()):
             self.search_status_label.setText(f"Index ready — {job_count} jobs")
 
@@ -1690,6 +1739,9 @@ class SearchModule(BaseModule):
             self._worker.cancel()
             self._worker.wait()
         if self._index_worker and self._index_worker.isRunning():
+            # A queued finished delivery could otherwise start a brand-new
+            # IndexWorker against a module that's being torn down.
+            self._rebuild_pending = False
             self._index_worker.cancel()
             self._index_worker.wait()
         if self._naming_worker and self._naming_worker.isRunning():
