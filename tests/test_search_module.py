@@ -289,8 +289,10 @@ class TestNamingScanIdInvalidatesStaleQueuedDeliveries:
 def _make_module_for_rebuild_index() -> SearchModule:
     module = SearchModule()
     module._index = MagicMock()
+    module._index.clear_all.return_value = True
     module._index_worker = None
     module.start_indexer = MagicMock()
+    module.show_error = MagicMock()
     return module
 
 
@@ -339,3 +341,17 @@ class TestRebuildSearchIndex:
 
         module._index_worker.cancel.assert_not_called()
         module._index_worker.wait.assert_not_called()
+
+    def test_failed_clear_shows_error_and_does_not_start_an_incremental_scan(self):
+        # CodeRabbit finding, PR #328: proceeding to start_indexer() after a
+        # failed clear_all() (e.g. the db was locked) would just run
+        # update()'s normal incremental scan -- silently downgrading a
+        # requested full rebuild into a no-op, with nothing telling the user
+        # their rebuild didn't actually happen.
+        module = _make_module_for_rebuild_index()
+        module._index.clear_all.return_value = False
+
+        module.rebuild_search_index()
+
+        module.start_indexer.assert_not_called()
+        module.show_error.assert_called_once()
