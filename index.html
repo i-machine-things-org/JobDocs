@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JobDocs — Job tracking for machine shops</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f6f8fa; color: #1f2328; line-height: 1.6; }
+    header { background: #0d1117; color: #e6edf3; padding: 56px 24px 48px; text-align: center; }
+    .app-name { font-size: 2.8rem; font-weight: 700; letter-spacing: -1px; }
+    .version-badge { display: inline-block; background: #238636; color: #fff; font-size: 0.95rem; font-weight: 500; padding: 3px 12px; border-radius: 20px; margin-left: 12px; vertical-align: middle; letter-spacing: 0; }
+    .tagline { margin-top: 14px; font-size: 1.1rem; color: #8d96a0; }
+    .download-strip { background: #161b22; padding: 28px 24px; display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 22px; border-radius: 8px; font-size: 0.95rem; font-weight: 600; text-decoration: none; }
+    .btn:hover { filter: brightness(1.12); }
+    .btn-windows { background: #0969da; color: #fff; }
+    .btn-flatpak { background: #1a7f37; color: #fff; }
+    main { max-width: 740px; margin: 0 auto; padding: 48px 24px 80px; }
+    section { margin-bottom: 44px; }
+    h2 { font-size: 1.15rem; font-weight: 600; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid #d0d7de; }
+    p { color: #57606a; margin-bottom: 12px; }
+    ol { padding-left: 22px; color: #57606a; }
+    ol li { margin-bottom: 12px; }
+    pre { background: #0d1117; color: #e6edf3; padding: 14px 18px; border-radius: 8px; font-size: 0.875rem; overflow-x: auto; margin: 8px 0 4px; }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    footer { text-align: center; padding: 28px 24px; font-size: 0.875rem; color: #8c959f; border-top: 1px solid #d0d7de; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="app-name">JobDocs <span class="version-badge">v0.11.4</span></div>
+    <p class="tagline">Job tracking and documentation for machine shops</p>
+  </header>
+
+  <div class="download-strip">
+    <a class="btn btn-windows" href="https://github.com/i-machine-things-org/JobDocs/releases/latest">&#11015;&#xFE0E;&nbsp; Windows Installer (.exe)</a>
+    <a class="btn btn-flatpak" href="jobdocs.flatpakrepo">&#128230;&nbsp; Add Flatpak Repository</a>
+  </div>
+
+  <main>
+    <section>
+      <h2>Install on Linux</h2>
+      <ol>
+        <li>Add the JobDocs repository:
+          <pre>flatpak remote-add --user --from jobdocs https://i-machine-things-org.github.io/JobDocs/jobdocs.flatpakrepo</pre>
+        </li>
+        <li>Install the app:
+          <pre>flatpak install jobdocs io.github.i_machine_things.JobDocs</pre>
+        </li>
+        <li>Or click <strong>Add Flatpak Repository</strong> above &mdash; KDE Discover will prompt you to add it and install automatically.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>All Releases</h2>
+      <p>Windows installer, Linux Flatpak bundle, and changelogs for all versions:</p>
+      <p><a href="https://github.com/i-machine-things-org/JobDocs/releases">https://github.com/i-machine-things-org/JobDocs/releases</a></p>
+    </section>
+
+    <section>
+      <h2>Source</h2>
+      <p><a href="https://github.com/i-machine-things-org/JobDocs">github.com/i-machine-things-org/JobDocs</a></p>
+    </section>
+  </main>
+
+  <footer>
+    <p>Open source &middot; <a href="https://github.com/i-machine-things-org/JobDocs">i-machine-things-org/JobDocs</a></p>
+  </footer>
+</body>
+</html>
