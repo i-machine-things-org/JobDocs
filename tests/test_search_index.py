@@ -129,6 +129,31 @@ class TestClearAll:
             row = conn.execute("SELECT COUNT(*) FROM indexed_dirs").fetchone()
         assert row[0] == 0
 
+    def test_returns_false_when_database_is_locked(self, tmp_path, monkeypatch):
+        # CodeRabbit finding, PR #328: the caller (rebuild_search_index())
+        # must be able to tell "nothing was actually cleared" from success
+        # -- silently returning as if it had would let it proceed straight
+        # to an ordinary incremental update() and call that a rebuild.
+        index = _make_index(tmp_path)
+
+        def _raise_locked():
+            raise sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr(index, '_connect', _raise_locked)
+
+        assert index.clear_all() is False
+
+    def test_reraises_other_operational_errors(self, tmp_path, monkeypatch):
+        index = _make_index(tmp_path)
+
+        def _raise_other():
+            raise sqlite3.OperationalError("disk I/O error")
+
+        monkeypatch.setattr(index, '_connect', _raise_other)
+
+        with pytest.raises(sqlite3.OperationalError):
+            index.clear_all()
+
 
 class TestIsFullyCovered:
     """Regression coverage for #293, finding 2: search_jobs()/search_bp() returning

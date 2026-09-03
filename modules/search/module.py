@@ -673,13 +673,24 @@ class SearchModule(BaseModule):
         skip-if-unchanged behavior -- for when the index is suspected stale
         or wrong. Cancels an indexer already in flight first (same
         cancel()+wait() pattern as cleanup()) since clearing the tables
-        while it's mid-write would race its own transaction."""
+        while it's mid-write would race its own transaction.
+
+        Must not call start_indexer() if clear_all() couldn't actually
+        clear the tables (e.g. lock contention) -- update() would then just
+        run its normal incremental scan, silently downgrading a requested
+        full rebuild with no visible sign to the user that it didn't
+        happen."""
         if self._index is None:
             return
         if self._index_worker and self._index_worker.isRunning():
             self._index_worker.cancel()
             self._index_worker.wait()
-        self._index.clear_all()
+        if not self._index.clear_all():
+            self.show_error(
+                "Rebuild Search Index",
+                "Could not rebuild the index right now — the database is busy. Try again shortly."
+            )
+            return
         self.start_indexer()
 
     def _on_index_progress(self, msg: str):
