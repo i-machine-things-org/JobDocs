@@ -428,7 +428,11 @@ def reveal_in_file_manager(path: str) -> Tuple[bool, Optional[str]]:
     if not os.path.exists(path):
         return False, f"Not found: {path}"
     try:
-        norm_path = os.path.normpath(path)
+        # abspath(), not normpath() -- a relative path would leave the
+        # Linux branch's os.path.dirname() unable to find a real parent
+        # (dirname('folder') is '', so xdg-open gets an empty operand and
+        # fails silently since Popen() doesn't wait for the child).
+        norm_path = os.path.abspath(path)
         system = platform.system()
         if system == "Windows":
             # explorer.exe's own exit code is unreliable and not meaningful to

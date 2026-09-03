@@ -59,3 +59,23 @@ def test_linux_falls_back_to_opening_parent_dir(tmp_path):
     assert success is True
     assert error is None
     mock_popen.assert_called_once_with(["xdg-open", str(tmp_path)])
+
+
+def test_linux_resolves_a_relative_path_before_taking_its_dirname(tmp_path, monkeypatch):
+    # CodeRabbit finding, PR #329: a relative path's os.path.dirname() can
+    # be '' (e.g. dirname('folder') == ''), which hands xdg-open an empty
+    # operand -- and since Popen() doesn't wait for the child, that failure
+    # is invisible; the function still reports success.
+    target_name = "some folder"
+    (tmp_path / target_name).mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    with patch("shared.utils.platform.system", return_value="Linux"), \
+         patch("shared.utils.subprocess.Popen") as mock_popen:
+        success, error = reveal_in_file_manager(target_name)
+
+    assert success is True
+    assert error is None
+    # If norm_path stayed relative, dirname(target_name) would be '' --
+    # asserting the real absolute parent proves it was resolved first.
+    mock_popen.assert_called_once_with(["xdg-open", str(tmp_path)])
