@@ -10,6 +10,7 @@ import atexit
 import logging
 import os
 import shutil
+import sqlite3
 import sys
 import re
 import ctypes
@@ -679,13 +680,24 @@ class SearchModule(BaseModule):
         clear the tables (e.g. lock contention) -- update() would then just
         run its normal incremental scan, silently downgrading a requested
         full rebuild with no visible sign to the user that it didn't
-        happen."""
+        happen. clear_all() only returns False for lock contention -- any
+        other sqlite3.Error (disk full, permission denied, corruption) it
+        re-raises, so this runs synchronously on the GUI thread and must
+        catch that itself, or it's an unhandled exception in a Qt slot with
+        nothing shown to the user at all, the same silent-failure shape as
+        the lock case this was written to fix."""
         if self._index is None:
             return
         if self._index_worker and self._index_worker.isRunning():
             self._index_worker.cancel()
             self._index_worker.wait()
-        if not self._index.clear_all():
+        try:
+            cleared = self._index.clear_all()
+        except sqlite3.Error as exc:
+            logger.error("rebuild_search_index: clear_all failed (%s): %s", type(exc).__name__, exc)
+            self.show_error("Rebuild Search Index", f"Could not rebuild the index: {exc}")
+            return
+        if not cleared:
             self.show_error(
                 "Rebuild Search Index",
                 "Could not rebuild the index right now — the database is busy. Try again shortly."
