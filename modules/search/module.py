@@ -10,6 +10,7 @@ import atexit
 import logging
 import os
 import shutil
+import sqlite3
 import sys
 import re
 import ctypes
@@ -31,7 +32,7 @@ from PyQt6 import uic
 
 from core.base_module import BaseModule
 from core.search_index import SearchIndex, _parse_job_folder
-from shared.utils import open_folder, get_config_dir, is_reparse_point
+from shared.utils import open_folder, reveal_in_file_manager, get_config_dir, is_reparse_point
 from shared.widgets import print_files_with_dialog
 
 logger = logging.getLogger(__name__)
@@ -387,22 +388,50 @@ class SearchWorker(QThread):
 
 
 class IndexWorker(QThread):
-    """Background thread that builds/updates the search index at startup."""
+    """Background thread that builds/updates the search index at startup,
+    or (clear_first=True) performs a full rebuild -- both clear_all() and
+    update() run here, off the GUI thread, since clear_all() can block on
+    SQLite write-lock contention just like update()'s filesystem walk can
+    block on a slow network share (CodeRabbit, PR #329).
+    """
     progress = pyqtSignal(str)
-    finished = pyqtSignal(int)   # emits job count when done
+    # Completion is reported via the inherited QThread.finished signal, not
+    # a locally-declared one -- see JobTreeWorker's identical comment in
+    # modules/job/module.py for why a custom signal doesn't give a
+    # deferred-restart caller the same isRunning()-is-accurate guarantee.
+    # The job count is real data, not a completion/timing signal, so it's
+    # fine as its own separate signal (mirrors JobTreeWorker's
+    # customer_loaded) -- just never treat *this* as "safe to restart".
+    result = pyqtSignal(int)  # emits job count when done
+    clear_failed = pyqtSignal(str)  # emits a user-facing message if clear_first's clear_all() didn't succeed
 
-    def __init__(self, index: SearchIndex, cf_dirs, bp_dirs, app_context):
+    def __init__(self, index: SearchIndex, cf_dirs, bp_dirs, app_context, clear_first: bool = False):
         super().__init__()
         self._index = index
         self._cf_dirs = cf_dirs
         self._bp_dirs = bp_dirs
         self._app_context = app_context
+        self._clear_first = clear_first
         self._cancelled = False
 
     def cancel(self):
         self._cancelled = True
 
     def run(self):
+        if self._clear_first:
+            try:
+                cleared = self._index.clear_all()
+            except sqlite3.Error as exc:
+                logger.error("IndexWorker: clear_all failed (%s): %s", type(exc).__name__, exc)
+                self.clear_failed.emit(f"Could not rebuild the index: {exc}")
+                self.result.emit(self._index.job_count())
+                return
+            if not cleared:
+                self.clear_failed.emit(
+                    "Could not rebuild the index right now — the database is busy. Try again shortly."
+                )
+                self.result.emit(self._index.job_count())
+                return
         self._index.update(
             self._cf_dirs,
             self._bp_dirs,
@@ -410,7 +439,7 @@ class IndexWorker(QThread):
             progress=self.progress.emit,
             cancelled=lambda: self._cancelled,
         )
-        self.finished.emit(self._index.job_count())
+        self.result.emit(self._index.job_count())
 
 
 class FolderNamingCheckWorker(QThread):
@@ -485,47 +514,106 @@ class FolderNamingReportDialog(QDialog):
     }
     _SEVERITY_ORDER = {'unrecognized folder': 0, 'near-miss PO folder': 1}
 
-    def __init__(self, parent, results):
+    def __init__(self, parent, results, app_context):
         super().__init__(parent)
+        self.app_context = app_context
         self.setWindowTitle("Folder Naming Check")
         self.resize(750, 400)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(
+        description = QLabel(
             f"Found {len(results)} folder(s) that don't match the configured job/PO "
             "naming convention. \"Unrecognized\" folders are the most likely to need "
             "fixing; \"Near-miss PO folder\" entries look like a typo of the PO "
             "naming convention."
-        ))
+        )
+        # Without word wrap, an unwrapped QLabel's minimumSizeHint equals its
+        # full single-line text width, silently forcing this whole dialog
+        # wider than the resize() call above to fit it on one line -- would
+        # get much worse paired with resizeColumnsToContents() below, which
+        # sizes the Folder column to the single longest path across every
+        # row (a real network path can be huge), ballooning the dialog to
+        # match instead of letting the table scroll internally.
+        description.setWordWrap(True)
+        layout.addWidget(description)
 
-        table = QTableWidget(0, 3, self)
-        table.setHorizontalHeaderLabels(["Customer", "Folder", "Issue"])
-        table.horizontalHeader().setStretchLastSection(True)
-        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        table.setAlternatingRowColors(True)
+        self.table = QTableWidget(0, 3, self)
+        self.table.setHorizontalHeaderLabels(["Customer", "Folder", "Issue"])
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setAlternatingRowColors(True)
 
         ordered = sorted(
             results, key=lambda r: (self._SEVERITY_ORDER.get(r[2], 2), r[0], r[1])
         )
         for customer, path, reason in ordered:
-            row = table.rowCount()
-            table.insertRow(row)
-            table.setItem(row, 0, QTableWidgetItem(customer))
-            table.setItem(row, 1, QTableWidgetItem(path))
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(customer))
+            self.table.setItem(row, 1, QTableWidgetItem(path))
             issue_item = QTableWidgetItem(self._REASON_LABELS.get(reason, reason))
             if reason == 'unrecognized folder':
                 issue_item.setForeground(QColor('#c0392b'))
                 font = issue_item.font()
                 font.setBold(True)
                 issue_item.setFont(font)
-            table.setItem(row, 2, issue_item)
+            self.table.setItem(row, 2, issue_item)
 
-        layout.addWidget(table)
+        self.table.resizeColumnsToContents()
+
+        if not self.app_context.is_readonly():
+            self.table.doubleClicked.connect(self._on_row_double_clicked)
+            self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            self.table.customContextMenuRequested.connect(self._show_context_menu)
+
+        layout.addWidget(self.table)
 
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         button_box.rejected.connect(self.accept)
         layout.addWidget(button_box)
+
+    def _row_path(self, row: int) -> Optional[str]:
+        path_item = self.table.item(row, 1)
+        return path_item.text() if path_item is not None else None
+
+    def _reveal_row(self, row: int):
+        path = self._row_path(row)
+        if path is None:
+            return
+        success, error = reveal_in_file_manager(path)
+        if not success:
+            QMessageBox.warning(self, "Not Found", error)
+
+    def _on_row_double_clicked(self, index):
+        """Reveal the double-clicked row's folder in the OS file browser,
+        highlighted in its containing directory.
+
+        Not connected at all on a read-only (search-only) install -- see
+        _open_item_externally()'s own docstring for why a kiosk build must
+        never launch Explorer on a directory.
+        """
+        self._reveal_row(index.row())
+
+    def _show_context_menu(self, pos):
+        """Right-click menu mirroring the double-click reveal action, plus
+        Copy Path -- same two actions and same readonly gate (never
+        connected at all on a read-only install) as show_search_context_menu().
+        """
+        row = self.table.rowAt(pos.y())
+        if row < 0:
+            return
+        self.table.selectRow(row)
+        path = self._row_path(row)
+        if path is None:
+            return
+
+        menu = QMenu(self)
+        open_action = menu.addAction("Open")
+        open_action.triggered.connect(lambda: self._reveal_row(row))
+        copy_action = menu.addAction("Copy Path")
+        copy_action.triggered.connect(lambda: QApplication.clipboard().setText(path))
+        menu.exec(self.table.viewport().mapToGlobal(pos))
 
 
 class SearchModule(BaseModule):
@@ -539,6 +627,7 @@ class SearchModule(BaseModule):
         self.search_results: List[Dict[str, Any]] = []
         self._worker = None       # Background search worker
         self._index_worker = None  # Background index builder
+        self._rebuild_pending = False  # set by rebuild_search_index() when it must wait for an in-flight worker to stop
         self._naming_worker: Optional[FolderNamingCheckWorker] = None
         # Bumped whenever a naming scan is cancelled/torn down, so queued
         # progress_update/finished deliveries already posted to the event
@@ -569,7 +658,6 @@ class SearchModule(BaseModule):
         self.legacy_options_widget = None
         self.search_btn = None
         self.cancel_btn = None
-        self.check_naming_btn = None
         self.folder_tree = None
         self.file_preview: FilePreviewWidget | None = None
 
@@ -592,8 +680,12 @@ class SearchModule(BaseModule):
             logger.warning("search: could not open index DB (%s): %s", type(exc).__name__, exc)
             self._index = None
 
-    def start_indexer(self):
-        """Start the background index update. Called after the UI is shown."""
+    def start_indexer(self, rebuild: bool = False):
+        """Start the background index update, or (rebuild=True) a full
+        clear-then-rescan. Called after the UI is shown, or by
+        rebuild_search_index() (directly, or deferred via
+        _on_index_worker_stopped() once an in-flight worker confirms it
+        actually stopped)."""
         if self._index is None:
             return
         if self._index_worker and self._index_worker.isRunning():
@@ -605,16 +697,68 @@ class SearchModule(BaseModule):
         if not cf_dirs and not bp_dirs:
             return
 
-        self._index_worker = IndexWorker(self._index, cf_dirs, bp_dirs, self.app_context)
+        self._index_worker = IndexWorker(self._index, cf_dirs, bp_dirs, self.app_context, clear_first=rebuild)
         self._index_worker.progress.connect(self._on_index_progress)
-        self._index_worker.finished.connect(self._on_index_finished)
+        self._index_worker.result.connect(self._on_index_result)
+        self._index_worker.clear_failed.connect(self._on_index_clear_failed)
+        # Inherited QThread.finished, not IndexWorker.result -- see
+        # IndexWorker's own comment for why the deferred-restart trigger
+        # specifically needs the real one.
+        self._index_worker.finished.connect(self._on_index_worker_stopped)
         self._index_worker.start()
+
+    def rebuild_search_index(self):
+        """Force a full re-scan instead of update()'s normal incremental
+        skip-if-unchanged behavior -- for when the index is suspected stale
+        or wrong.
+
+        Never blocks the GUI thread waiting for an in-flight indexer
+        (CodeRabbit, PR #329): a worker.cancel() followed by a synchronous
+        worker.wait() here would freeze the whole app for as long as
+        update()'s *current* filesystem operation takes to return, which is
+        unbounded on a slow/hung network share. clear_all() itself also now
+        runs inside IndexWorker's background thread (its clear_first flag),
+        not here, for the same reason -- it can block on SQLite write-lock
+        contention for up to its connect timeout.
+
+        If a worker is already running, this only requests cancellation and
+        records that a rebuild is wanted; _on_index_worker_stopped() (wired
+        to the real QThread.finished, guaranteed to fire only after run()
+        has truly returned) starts the actual rebuild once that's
+        confirmed, mirroring the "never reassign the worker except from its
+        own finished handler" pattern used for the naming-check worker
+        elsewhere in this module."""
+        if self._index is None:
+            return
+        if self._index_worker and self._index_worker.isRunning():
+            self._index_worker.cancel()
+            self._rebuild_pending = True
+            return
+        self.start_indexer(rebuild=True)
+
+    def _on_index_worker_stopped(self):
+        """Connected to the just-finished IndexWorker's inherited
+        QThread.finished. Starts a deferred rebuild request now that
+        isRunning() is guaranteed accurate; otherwise a no-op (the normal
+        end-of-run case, already handled by _on_index_result for status
+        text)."""
+        if self._rebuild_pending:
+            self._rebuild_pending = False
+            self.start_indexer(rebuild=True)
+
+    def _on_index_clear_failed(self, message: str):
+        self.show_error("Rebuild Search Index", message)
 
     def _on_index_progress(self, msg: str):
         if self.search_status_label and not (self._worker and self._worker.isRunning()):
             self.search_status_label.setText(f"Index: {msg}")
 
-    def _on_index_finished(self, job_count: int):
+    def _on_index_result(self, job_count: int):
+        if self._rebuild_pending:
+            # A new rebuild is about to start (from _on_index_worker_stopped,
+            # wired to the same worker's finished signal) -- don't flash a
+            # stale "ready" status for the scan that's being superseded.
+            return
         if self.search_status_label and not (self._worker and self._worker.isRunning()):
             self.search_status_label.setText(f"Index ready — {job_count} jobs")
 
@@ -647,7 +791,6 @@ class SearchModule(BaseModule):
         self.legacy_options_widget = widget.legacy_options_widget
         self.search_btn = widget.search_btn
         self.cancel_btn = widget.cancel_btn
-        self.check_naming_btn = widget.check_naming_btn
 
         # Keep criteria group compact, let results group expand
         widget.layout().setStretchFactor(widget.searchCriteriaGroup, 0)
@@ -706,7 +849,6 @@ class SearchModule(BaseModule):
         # Connect signals
         self.search_btn.clicked.connect(self.perform_search)
         self.cancel_btn.clicked.connect(self.cancel_search)
-        self.check_naming_btn.clicked.connect(self.check_folder_naming)
         self.search_edit.returnPressed.connect(self.perform_search)
         widget.clear_btn.clicked.connect(self.clear_search)
         self.search_all_radio.toggled.connect(self.update_search_field_checkboxes)
@@ -971,7 +1113,20 @@ class SearchModule(BaseModule):
 
     def check_folder_naming(self):
         """Scan customer directories for folders that don't match the
-        configured job/PO naming convention and show them in a report."""
+        configured job/PO naming convention and show them in a report.
+
+        Not reachable through the UI at all on a read-only (search-only)
+        kiosk install -- it's a main-menu item (see main.py's setup_menu())
+        and that menu bar is never constructed when readonly_mode is set --
+        but guarded here too as defense-in-depth (e.g. a stale/queued
+        signal), matching every other readonly-gated action in this module.
+        A kiosk user can't act on a naming-convention finding anyway (fixing
+        it means renaming folders on the actual share), and the report's
+        own reveal-in-Explorer actions are already disabled read-only, so
+        the whole feature would just be a dead end for that install.
+        """
+        if self.app_context.is_readonly():
+            return
         if self._naming_worker and self._naming_worker.isRunning():
             return
 
@@ -980,7 +1135,6 @@ class SearchModule(BaseModule):
             self.show_error("Error", "No customer directories configured")
             return
 
-        self.check_naming_btn.setEnabled(False)
         self.cancel_btn.show()
         self.search_status_label.setText("Checking folder names…")
 
@@ -1016,7 +1170,6 @@ class SearchModule(BaseModule):
 
     def _on_naming_check_finished(self, results: list, was_cancelled: bool):
         """Slot called when a folder naming check completes"""
-        self.check_naming_btn.setEnabled(True)
         other_worker_active = self._worker and self._worker.isRunning()
         if not other_worker_active:
             self.cancel_btn.hide()
@@ -1038,7 +1191,7 @@ class SearchModule(BaseModule):
             )
             return
 
-        dialog = FolderNamingReportDialog(self._widget, results)
+        dialog = FolderNamingReportDialog(self._widget, results, self.app_context)
         dialog.exec()
 
     def _on_result_found(self, result: dict):
@@ -1114,7 +1267,6 @@ class SearchModule(BaseModule):
         self.search_status_label.setText("")
         self.search_progress.hide()
         self.search_btn.setEnabled(True)
-        self.check_naming_btn.setEnabled(True)
         self.cancel_btn.hide()
 
     # ==================== Helper Methods ====================
@@ -1576,7 +1728,7 @@ class SearchModule(BaseModule):
                 if result == QMessageBox.StandardButton.Ok and dont_show.isChecked():
                     self.app_context.set_setting('suppress_bp_link_notification', True)
                     self.app_context.save_settings()
-            else:                
+            else:
                 self.search_status_label.setText(f"Linked '{filename}' to blueprints and copied path")
         else:
             self.search_status_label.setText("Blueprints path copied to clipboard")
@@ -1587,6 +1739,9 @@ class SearchModule(BaseModule):
             self._worker.cancel()
             self._worker.wait()
         if self._index_worker and self._index_worker.isRunning():
+            # A queued finished delivery could otherwise start a brand-new
+            # IndexWorker against a module that's being torn down.
+            self._rebuild_pending = False
             self._index_worker.cancel()
             self._index_worker.wait()
         if self._naming_worker and self._naming_worker.isRunning():
