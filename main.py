@@ -1128,6 +1128,33 @@ class JobDocsMainWindow(QMainWindow):
         exit_action = file_menu.addAction("E&xit")  # pyright: ignore[reportOptionalMemberAccess]
         exit_action.triggered.connect(self.close)  # pyright: ignore[reportOptionalMemberAccess]
 
+        # Tools menu -- only added, and only populated with entries whose
+        # capability a loaded module actually provides, so it's never a
+        # dead dropdown (or a dead item within it) with nothing behind it.
+        has_naming_check = any(hasattr(module, 'check_folder_naming') for module in self.modules)
+        has_rebuild_index = any(hasattr(module, 'rebuild_search_index') for module in self.modules)
+        if has_naming_check or has_rebuild_index:
+            tools_menu = menubar.addMenu("&Tools")  # pyright: ignore[reportOptionalMemberAccess]
+
+            if has_naming_check:
+                check_naming_action = tools_menu.addAction(  # pyright: ignore[reportOptionalMemberAccess]
+                    "Check &Folder Naming…")
+                check_naming_action.setToolTip(  # pyright: ignore[reportOptionalMemberAccess]
+                    "Scan customer folders for names that don't match the configured job/PO folder convention"
+                )
+                check_naming_action.triggered.connect(  # pyright: ignore[reportOptionalMemberAccess]
+                    self._run_check_folder_naming)
+
+            if has_rebuild_index:
+                rebuild_index_action = tools_menu.addAction(  # pyright: ignore[reportOptionalMemberAccess]
+                    "&Rebuild Search Index")
+                rebuild_index_action.setToolTip(  # pyright: ignore[reportOptionalMemberAccess]
+                    "Force a full re-scan of customer and blueprint directories, "
+                    "instead of only the ones the index thinks changed"
+                )
+                rebuild_index_action.triggered.connect(  # pyright: ignore[reportOptionalMemberAccess]
+                    self._run_rebuild_search_index)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")  # pyright: ignore[reportOptionalMemberAccess]
 
@@ -1146,6 +1173,28 @@ class JobDocsMainWindow(QMainWindow):
 
         about_action = help_menu.addAction("&About")  # pyright: ignore[reportOptionalMemberAccess]
         about_action.triggered.connect(self.show_about)  # pyright: ignore[reportOptionalMemberAccess]
+
+    def _run_check_folder_naming(self):
+        """Find the loaded module providing Check Folder Naming (currently
+        only Search) and run it. Tab widgets are built lazily on first
+        activation (see _on_tab_activated) -- get_widget() here builds it
+        early if the user reaches this from the menu before ever opening
+        that tab, matching what activating the tab would have done."""
+        for module in self.modules:
+            if hasattr(module, 'check_folder_naming'):
+                module.get_widget()
+                module.check_folder_naming()
+                return
+
+    def _run_rebuild_search_index(self):
+        """Find the loaded module providing search indexing (currently only
+        Search) and force a full re-scan. See _run_check_folder_naming's
+        docstring for why get_widget() is called first."""
+        for module in self.modules:
+            if hasattr(module, 'rebuild_search_index'):
+                module.get_widget()
+                module.rebuild_search_index()
+                return
 
     def open_settings(self):
         """Open settings dialog"""

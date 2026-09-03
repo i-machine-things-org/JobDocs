@@ -36,7 +36,7 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from modules.job.module import JobTreeWorker  # noqa: E402
 from modules.quote.module import QuoteTreeWorker  # noqa: E402
-from modules.search.module import FolderNamingCheckWorker  # noqa: E402
+from modules.search.module import FolderNamingCheckWorker, IndexWorker  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -222,7 +222,6 @@ def test_stale_naming_worker_deliveries_are_ignored_after_clear_search(qapp, tmp
     module.search_status_label = MagicMock()
     module.search_progress = MagicMock()
     module.search_btn = MagicMock()
-    module.check_naming_btn = MagicMock()
     module.cancel_btn = MagicMock()
     module.search_results = []
     module._worker = None
@@ -357,3 +356,190 @@ def test_find_quote_folders_honors_is_cancelled_mid_scan(tmp_path):
     quotes = ctx.find_quote_folders(str(cf_root / 'Acme'), is_cancelled=is_cancelled)
 
     assert len(quotes) < 25
+
+
+class _SlowIndex:
+    """Stands in for SearchIndex when update() needs to still be "in
+    flight" (mirrors _SlowJobAppContext/_SlowNamingAppContext above) --
+    IndexWorker.run() calls this exactly like the real SearchIndex.update()."""
+
+    def __init__(self, num_items=40, step_delay=0.05):
+        self.num_items = num_items
+        self.step_delay = step_delay
+        self.entered = threading.Event()
+        self.cleared = threading.Event()
+        self.clear_all_calls = 0
+
+    def clear_all(self):
+        self.clear_all_calls += 1
+        self.cleared.set()
+        return True
+
+    def update(self, cf_dirs, bp_dirs, app_context, progress=None, cancelled=None):
+        self.entered.set()
+        is_cancelled = cancelled or (lambda: False)
+        for _ in range(self.num_items):
+            if is_cancelled():
+                return
+            time.sleep(self.step_delay)
+
+    def job_count(self):
+        return 0
+
+
+def test_index_worker_cancel_does_not_block_on_slow_update(qapp):
+    """Real-Qt regression test (CodeRabbit, PR #329): rebuild_search_index()
+    used to call worker.cancel() followed by a blocking worker.wait() on
+    the GUI thread, freezing the app for as long as update()'s current
+    filesystem operation took to return. Proves cancellation actually takes
+    effect promptly inside update()'s scan loop, the same way the other
+    workers in this file are proven."""
+    slow_index = _SlowIndex(num_items=40, step_delay=0.05)  # ~2s if uninterrupted
+    worker = IndexWorker(slow_index, [], [], app_context=None)
+    worker.start()
+    try:
+        assert slow_index.entered.wait(timeout=2), "worker never entered update()"
+        start = time.monotonic()
+        worker.cancel()
+        finished = worker.wait(2000)
+        elapsed = time.monotonic() - start
+        assert finished, "worker did not finish within the wait timeout"
+        assert elapsed < 1.0, (
+            f"cancel()+wait() took {elapsed:.2f}s -- cancellation is not "
+            "taking effect inside update()'s scan loop"
+        )
+    finally:
+        if worker.isRunning():
+            worker.cancel()
+            worker.wait()
+
+
+def test_index_worker_uses_inherited_finished_signal_not_a_shadowing_one(qapp):
+    """Regression test (CodeRabbit, PR #329): IndexWorker used to declare
+    its own `finished = pyqtSignal(int)` and emit it manually as the last
+    statement in run() -- the same shadowing bug already fixed for
+    JobTreeWorker/QuoteTreeWorker (see their identical tests above). The
+    job count moved to a separate `result` signal so the deferred-restart
+    trigger (_on_index_worker_stopped(), wired to `.finished`) gets Qt's
+    real guarantee that it fires only after run() has truly returned."""
+    assert 'finished' not in IndexWorker.__dict__
+    assert IndexWorker.finished is QThread.finished
+
+
+class TestIndexWorkerClearFirst:
+    """IndexWorker.run()'s clear_first branch (used by rebuild_search_index())
+    must not run update() at all if clear_all() didn't actually succeed --
+    proceeding would silently downgrade a requested full rebuild into an
+    ordinary incremental scan. Calls run() directly (not start()) since
+    there's no slow/threaded behavior to prove here, just the branching
+    logic -- these run synchronously on the test's own thread."""
+
+    def _make_worker(self, index, clear_first=True):
+        return IndexWorker(index, [], [], app_context=None, clear_first=clear_first)
+
+    def test_successful_clear_runs_update(self, qapp):
+        index = _SlowIndex(num_items=0)
+        worker = self._make_worker(index)
+        results = []
+        worker.result.connect(results.append)
+        failures = []
+        worker.clear_failed.connect(failures.append)
+
+        worker.run()
+
+        assert index.clear_all_calls == 1
+        assert index.entered.is_set(), "update() was never called"
+        assert results == [0]
+        assert failures == []
+
+    def test_clear_returning_false_skips_update(self, qapp):
+        class _LockedIndex(_SlowIndex):
+            def clear_all(self):
+                self.clear_all_calls += 1
+                return False
+
+        index = _LockedIndex(num_items=0)
+        worker = self._make_worker(index)
+        results = []
+        worker.result.connect(results.append)
+        failures = []
+        worker.clear_failed.connect(failures.append)
+
+        worker.run()
+
+        assert index.clear_all_calls == 1
+        assert not index.entered.is_set(), "update() ran despite a failed clear_all()"
+        assert results == [0]
+        assert len(failures) == 1 and "busy" in failures[0]
+
+    def test_clear_raising_skips_update(self, qapp):
+        import sqlite3
+
+        class _ErroringIndex(_SlowIndex):
+            def clear_all(self):
+                self.clear_all_calls += 1
+                raise sqlite3.OperationalError("disk I/O error")
+
+        index = _ErroringIndex(num_items=0)
+        worker = self._make_worker(index)
+        results = []
+        worker.result.connect(results.append)
+        failures = []
+        worker.clear_failed.connect(failures.append)
+
+        worker.run()  # must not raise -- the error must be reported via the signal instead
+
+        assert index.clear_all_calls == 1
+        assert not index.entered.is_set(), "update() ran despite clear_all() raising"
+        assert results == [0]
+        assert len(failures) == 1 and "disk I/O error" in failures[0]
+
+
+def test_rebuild_search_index_defers_to_a_fresh_worker_once_the_old_one_stops(qapp, tmp_path):
+    """Real-Qt end-to-end regression test (CodeRabbit, PR #329):
+    rebuild_search_index() must return immediately (never block on an
+    in-flight indexer) and only actually start the rebuild once the old
+    worker's real QThread.finished confirms it has stopped -- proving the
+    full cancel -> defer -> restart path wired up in SearchModule, not just
+    the individual pieces in isolation."""
+    from unittest.mock import MagicMock
+
+    from modules.search.module import SearchModule
+
+    module = SearchModule()
+    module.search_status_label = MagicMock()
+    module._worker = None
+    module.show_error = MagicMock()
+    module._app_context = MagicMock()
+
+    slow_index = _SlowIndex(num_items=40, step_delay=0.05)  # ~2s if uninterrupted
+    module._index = slow_index
+    module._get_customer_files_dirs = MagicMock(return_value=[('', str(tmp_path))])
+    module._get_blueprint_dirs = MagicMock(return_value=[])
+
+    module.start_indexer()
+    try:
+        assert slow_index.entered.wait(timeout=2), "initial indexer never entered update()"
+
+        start = time.monotonic()
+        module.rebuild_search_index()
+        elapsed = time.monotonic() - start
+        assert elapsed < 0.5, (
+            f"rebuild_search_index() took {elapsed:.2f}s to return -- it must "
+            "never block the GUI thread on an in-flight indexer"
+        )
+        assert module._rebuild_pending is True
+
+        old_worker = module._index_worker
+        assert old_worker.wait(2000), "in-flight indexer did not stop promptly after cancel()"
+        qapp.processEvents()  # deliver the queued finished signal
+
+        assert module._rebuild_pending is False
+        assert module._index_worker is not None
+        assert module._index_worker is not old_worker, "deferred rebuild never actually started"
+        assert slow_index.cleared.wait(timeout=2), "deferred rebuild's clear_all() was never called"
+        assert slow_index.clear_all_calls == 1
+    finally:
+        if module._index_worker and module._index_worker.isRunning():
+            module._index_worker.cancel()
+            module._index_worker.wait()
