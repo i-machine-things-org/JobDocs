@@ -492,12 +492,21 @@ class FolderNamingReportDialog(QDialog):
         self.resize(750, 400)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(
+        description = QLabel(
             f"Found {len(results)} folder(s) that don't match the configured job/PO "
             "naming convention. \"Unrecognized\" folders are the most likely to need "
             "fixing; \"Near-miss PO folder\" entries look like a typo of the PO "
             "naming convention."
-        ))
+        )
+        # Without word wrap, an unwrapped QLabel's minimumSizeHint equals its
+        # full single-line text width, silently forcing this whole dialog
+        # wider than the resize() call above to fit it on one line -- would
+        # get much worse paired with resizeColumnsToContents() below, which
+        # sizes the Folder column to the single longest path across every
+        # row (a real network path can be huge), ballooning the dialog to
+        # match instead of letting the table scroll internally.
+        description.setWordWrap(True)
+        layout.addWidget(description)
 
         self.table = QTableWidget(0, 3, self)
         self.table.setHorizontalHeaderLabels(["Customer", "Folder", "Issue"])
@@ -521,6 +530,8 @@ class FolderNamingReportDialog(QDialog):
                 font.setBold(True)
                 issue_item.setFont(font)
             self.table.setItem(row, 2, issue_item)
+
+        self.table.resizeColumnsToContents()
 
         if not self.app_context.is_readonly():
             self.table.doubleClicked.connect(self._on_row_double_clicked)

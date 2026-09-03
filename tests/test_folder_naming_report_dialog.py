@@ -19,7 +19,7 @@ pytest.importorskip("PyQt6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt, QPoint  # noqa: E402
-from PyQt6.QtWidgets import QApplication  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from modules.search.module import FolderNamingReportDialog  # noqa: E402
 
@@ -156,3 +156,28 @@ def test_context_menu_does_nothing_off_row(qapp, tmp_path):
         dialog._show_context_menu(QPoint(5, 5000))
 
     mock_menu_cls.assert_not_called()
+
+
+def test_description_label_wraps_instead_of_forcing_dialog_wide(qapp, tmp_path):
+    # An unwrapped QLabel's minimumSizeHint equals its full single-line text
+    # width, which silently forces the whole dialog wider than its resize()
+    # call to fit the sentence on one line -- regardless of column sizing.
+    target = tmp_path / "New folder"
+    target.mkdir()
+    app_context = MagicMock(is_readonly=MagicMock(return_value=False))
+    dialog = FolderNamingReportDialog(None, _make_results(str(target)), app_context)
+
+    labels = [w for w in dialog.findChildren(QLabel)]
+    assert labels and all(label.wordWrap() for label in labels)
+
+
+def test_folder_column_widens_to_fit_a_long_path_instead_of_truncating(qapp, tmp_path):
+    long_name = "a-very-long-unrecognized-folder-name-that-does-not-fit-in-a-narrow-column"
+    target = tmp_path / long_name
+    target.mkdir()
+    app_context = MagicMock(is_readonly=MagicMock(return_value=False))
+    dialog = FolderNamingReportDialog(None, _make_results(str(target)), app_context)
+
+    font_metrics = dialog.table.fontMetrics()
+    text_width = font_metrics.horizontalAdvance(str(target))
+    assert dialog.table.columnWidth(1) >= text_width
