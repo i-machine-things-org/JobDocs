@@ -1079,16 +1079,14 @@ class JobModule(BaseModule):
                 itar_cf = self.app_context.get_setting('itar_customer_files_dir', '')
                 is_itar = itar_cf and job_path.startswith(itar_cf)
 
-            bp_dir, _ = self.app_context.get_directories(is_itar)
-            if not bp_dir:
-                self.log_message(f"Skipping {job_name}: blueprints directory not configured")
-                total_skipped += len(self.add_files)
-                continue
-
-            customer_bp = Path(bp_dir) / customer
-
-            # Ensure blueprint directory exists if needed
+            customer_bp = None
             if dest in ('blueprints', 'both'):
+                bp_dir, _ = self.app_context.get_directories(is_itar)
+                if not bp_dir:
+                    self.log_message(f"Skipping {job_name}: blueprints directory not configured")
+                    total_skipped += len(self.add_files)
+                    continue
+                customer_bp = Path(bp_dir) / customer
                 customer_bp.mkdir(parents=True, exist_ok=True)
 
             for file_path in self.add_files:

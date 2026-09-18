@@ -125,3 +125,38 @@ class TestJobTreeMultiSelect:
             assert m.add_status_label.text() == "Added: 2, Skipped: 0"
         finally:
             _cleanup_worker(m)
+
+    def test_job_only_dest_succeeds_without_blueprints_dir_configured(self, qapp, tmp_path):
+        """dest == 'job' never touches the blueprints dir, so a job-only add
+        must not be skipped just because blueprint storage isn't configured
+        (CodeRabbit, PR #331)."""
+        cf_root = tmp_path / 'customer_files'
+        job1 = cf_root / 'Acme' / '111_Bracket'
+        job1.mkdir(parents=True)
+        ctx = _make_app_context(tmp_path, cf_root, tmp_path / 'blueprints')
+        ctx.settings['blueprints_dir'] = ''
+
+        src_file = tmp_path / 'drawing.pdf'
+        src_file.write_text('fake pdf content')
+
+        m = JobModule()
+        try:
+            m.initialize(ctx)
+            m.get_widget()
+
+            m._job_tab_widget.setCurrentWidget(m._add_to_job_tab)
+            _load_tree_synchronously(m, qapp)
+
+            customer_item = m.job_tree.topLevelItem(0)
+            job_item_1 = customer_item.child(0)
+            job_item_1.setSelected(True)
+
+            m.dest_job_radio.setChecked(True)
+            m.add_files = [str(src_file)]
+
+            m.add_files_to_job()
+
+            assert (job1 / 'drawing.pdf').exists()
+            assert m.add_status_label.text() == "Added: 1, Skipped: 0"
+        finally:
+            _cleanup_worker(m)
