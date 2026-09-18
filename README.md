@@ -274,6 +274,7 @@ Or import from a CSV file using the **Import CSV** button.
 
 Use the **Job** tab → **Add to Existing** to:
 - Browse existing job folders
+- Select multiple jobs (Ctrl+click or Shift+click) to add files to all of them at once
 - Add files to existing jobs
 - Filter by customer or ITAR status
 - Choose destination (blueprints only, job folder only, or both)
