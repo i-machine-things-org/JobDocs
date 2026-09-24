@@ -29,6 +29,19 @@ def _make_app_context(structure='{customer}/{job_folder}'):
     )
 
 
+def _insert_bp_file(
+    index, *, prefix='BP', customer='Acme', filename='10-0315-G r9.pdf',
+    dir_path=None, rel_path='.', mtime=1.0,
+):
+    dir_path = dir_path or f'C:/{prefix}/{customer}'
+    with sqlite3.connect(str(index._db_path)) as conn:
+        conn.execute(
+            """INSERT INTO bp_files (prefix, customer, filename, name_no_ext, dir_path, rel_path, mtime)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (prefix, customer, filename, os.path.splitext(filename)[0], dir_path, rel_path, mtime),
+        )
+
+
 def _insert_job(
     index, *, prefix='', customer='Acme', job_number='12345',
     description='Bracket', drawings='DWG-A', path=None, mtime=1.0, po_number='',
@@ -742,6 +755,129 @@ class TestUpdateNormalizesBlueprintCleanupPaths:
         with sqlite3.connect(str(index._db_path)) as conn:
             count = conn.execute("SELECT COUNT(*) FROM indexed_dirs WHERE kind='bp'").fetchone()[0]
         assert count == 0
+
+
+class TestSearchBpPrefixFilter:
+    """bp_files holds Blueprints and Related Files rows side by side (same
+    table, indexed identically -- just under different configured
+    directories/prefixes), so the two independent "Also search" checkboxes
+    in the Search tab need search_bp() to filter to one set of prefixes
+    without seeing the other's rows.
+    """
+
+    def test_no_prefixes_searches_everything(self, tmp_path):
+        index = _make_index(tmp_path)
+        _insert_bp_file(index, prefix='BP', filename='10-0315-G.pdf')
+        _insert_bp_file(index, prefix='RF', filename='10-0315-G_insp.pdf')
+
+        results = index.search_bp('10-0315')
+
+        assert len(results) == 2
+
+    def test_prefixes_restricts_to_blueprints_only(self, tmp_path):
+        index = _make_index(tmp_path)
+        _insert_bp_file(index, prefix='BP', filename='10-0315-G.pdf')
+        _insert_bp_file(index, prefix='RF', filename='10-0315-G_insp.pdf')
+
+        results = index.search_bp('10-0315', prefixes=('BP', 'ITAR-BP'))
+
+        assert [r['job_number'] for r in results] == ['10-0315-G']
+
+    def test_prefixes_restricts_to_related_files_only(self, tmp_path):
+        index = _make_index(tmp_path)
+        _insert_bp_file(index, prefix='BP', filename='10-0315-G.pdf')
+        _insert_bp_file(index, prefix='RF', filename='10-0315-G_insp.pdf')
+
+        results = index.search_bp('10-0315', prefixes=('RF', 'ITAR-RF'))
+
+        assert [r['job_number'] for r in results] == ['10-0315-G_insp']
+
+    def test_empty_prefixes_iterable_still_searches_everything(self, tmp_path):
+        # An empty tuple, not None, must behave the same as "no filter" --
+        # not "match nothing" (an empty SQL IN () clause).
+        index = _make_index(tmp_path)
+        _insert_bp_file(index, prefix='BP', filename='10-0315-G.pdf')
+
+        results = index.search_bp('10-0315', prefixes=())
+
+        assert len(results) == 1
+
+
+class TestFindFilesForDrawings:
+    """Backs the Search tab's Folder Contents enrichment: a selected job's
+    drawing/part numbers are matched against filenames in a separately
+    indexed directory (e.g. Related Files) for the same customer, so files
+    that live outside the job folder entirely can still be shown alongside
+    its actual folder contents.
+    """
+
+    def test_matches_filename_containing_drawing_number(self, tmp_path):
+        index = _make_index(tmp_path)
+        _insert_bp_file(
+            index, prefix='RF', customer='Acme', filename='10-0315-G r9.pdf',
+            dir_path='C:/RelatedFiles/Acme',
+        )
+
+        results = index.find_files_for_drawings('Acme', ['10-0315-G'], ('RF',))
+
+        assert len(results) == 1
+        assert results[0]['filename'] == '10-0315-G r9.pdf'
+        assert results[0]['dir_path'] == 'C:/RelatedFiles/Acme'
+
+    def test_matches_any_of_multiple_drawings(self, tmp_path):
+        index = _make_index(tmp_path)
+        _insert_bp_file(index, prefix='RF', customer='Acme', filename='26-0003-101.step')
+        _insert_bp_file(index, prefix='RF', customer='Acme', filename='unrelated.pdf')
+
+        results = index.find_files_for_drawings('Acme', ['10-0315-G', '26-0003-101'], ('RF',))
+
+        assert [r['filename'] for r in results] == ['26-0003-101.step']
+
+    def test_scoped_to_the_given_customer(self, tmp_path):
+        index = _make_index(tmp_path)
+        _insert_bp_file(index, prefix='RF', customer='Acme', filename='10-0315-G.pdf')
+        _insert_bp_file(index, prefix='RF', customer='OtherCo', filename='10-0315-G.pdf')
+
+        results = index.find_files_for_drawings('Acme', ['10-0315-G'], ('RF',))
+
+        assert len(results) == 1
+
+    def test_scoped_to_the_given_prefixes(self, tmp_path):
+        # A non-ITAR job must not pull in an ITAR-RF row for the same
+        # customer/drawing, and vice versa.
+        index = _make_index(tmp_path)
+        _insert_bp_file(index, prefix='RF', customer='Acme', filename='10-0315-G.pdf')
+        _insert_bp_file(index, prefix='ITAR-RF', customer='Acme', filename='10-0315-G.pdf')
+
+        results = index.find_files_for_drawings('Acme', ['10-0315-G'], ('RF',))
+
+        assert len(results) == 1
+        assert results[0]['prefix'] == 'RF'
+
+    def test_no_drawings_returns_empty(self, tmp_path):
+        index = _make_index(tmp_path)
+        _insert_bp_file(index, prefix='RF', customer='Acme', filename='10-0315-G.pdf')
+
+        assert index.find_files_for_drawings('Acme', [], ('RF',)) == []
+
+    def test_no_prefixes_returns_empty(self, tmp_path):
+        index = _make_index(tmp_path)
+        _insert_bp_file(index, prefix='RF', customer='Acme', filename='10-0315-G.pdf')
+
+        assert index.find_files_for_drawings('Acme', ['10-0315-G'], ()) == []
+
+    def test_no_match_returns_empty(self, tmp_path):
+        index = _make_index(tmp_path)
+        _insert_bp_file(index, prefix='RF', customer='Acme', filename='10-0315-G.pdf')
+
+        assert index.find_files_for_drawings('Acme', ['99999-Z'], ('RF',)) == []
+
+    def test_query_failure_raises(self, tmp_path):
+        index = _make_index(tmp_path)
+        with sqlite3.connect(str(index._db_path)) as conn:
+            conn.execute("DROP TABLE bp_files")
+        with pytest.raises(sqlite3.Error):
+            index.find_files_for_drawings('Acme', ['10-0315-G'], ('RF',))
 
 
 class TestMigrationToV5NormalizesPaths:
