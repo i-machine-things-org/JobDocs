@@ -176,7 +176,14 @@ class ModuleLoader:
             # alone since dev cwd masked it).
             if "plugins" not in sys.modules:
                 plugins_pkg = types.ModuleType("plugins")
-                plugins_pkg.__path__ = []
+                # Real search path, not empty: without this, Python can find
+                # already-registered plugins.<name> entries (looked up
+                # directly in sys.modules) but not an as-yet-unregistered
+                # sibling plugin.<other_name> that genuinely exists in
+                # plugins_dir (CodeRabbit, PR #333) -- matching what the
+                # accidental dev-cwd namespace-package discovery this fix
+                # replaces would have found too.
+                plugins_pkg.__path__ = [str(plugin_dir)]
                 plugins_pkg.__package__ = "plugins"
                 sys.modules["plugins"] = plugins_pkg
 

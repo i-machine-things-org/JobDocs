@@ -96,9 +96,10 @@ class TestLoadModuleRegistersBarePluginsPackage:
         assert cls.HELPERS_VALUE == 'loaded via relative import'
 
     def test_bare_plugins_package_is_explicitly_registered(self, tmp_path, monkeypatch):
-        # Distinguishes "the loader explicitly created it" from "Python
-        # happened to discover a real plugins/ directory on its own" --
-        # only the loader's own registration has an empty __path__.
+        # Distinguishes "the loader explicitly created it, pointed at the
+        # configured plugins_dir" from "Python happened to discover some
+        # other plugins/ directory on its own" -- checking against the
+        # specific plugin_root this test configured, not just non-empty.
         cwd_without_plugins = tmp_path / 'cwd_without_plugins'
         cwd_without_plugins.mkdir()
         monkeypatch.chdir(cwd_without_plugins)
@@ -112,7 +113,11 @@ class TestLoadModuleRegistersBarePluginsPackage:
         loader.load_module('fake-plugin-2')
 
         assert 'plugins' in sys.modules
-        assert list(sys.modules['plugins'].__path__) == []
+        # A real search path (not empty) so Python can also discover an
+        # as-yet-unregistered sibling plugin.<other_name> that genuinely
+        # exists in plugins_dir, not just already-registered ones looked up
+        # directly in sys.modules (CodeRabbit, PR #333).
+        assert list(sys.modules['plugins'].__path__) == [str(plugin_root)]
 
     def test_does_not_clobber_an_already_registered_plugins_module(self, tmp_path, monkeypatch):
         # If something else already registered "plugins" first, the loader
@@ -138,3 +143,30 @@ class TestLoadModuleRegistersBarePluginsPackage:
             assert sys.modules['plugins'] is sentinel
         finally:
             del sys.modules['plugins']
+
+    def test_an_unregistered_sibling_plugin_is_still_discoverable(self, tmp_path, monkeypatch):
+        # CodeRabbit, PR #333: an empty __path__ on the synthetic "plugins"
+        # package would let Python find an already-registered
+        # plugins.<name> (looked up directly in sys.modules), but not a
+        # *different*, as-yet-unregistered sibling plugin that genuinely
+        # exists on disk in the same plugins_dir -- that lookup needs a real
+        # search path to find via normal package-finder discovery.
+        cwd_without_plugins = tmp_path / 'cwd_without_plugins'
+        cwd_without_plugins.mkdir()
+        monkeypatch.chdir(cwd_without_plugins)
+
+        plugin_root = tmp_path / 'plugins'
+        _write_plugin_with_relative_import(plugin_root, 'fake-plugin-4')
+        _write_plugin_with_relative_import(plugin_root, 'fake-plugin-5')
+        _reset_plugin_sys_modules('fake-plugin-4')
+        _reset_plugin_sys_modules('fake-plugin-5')
+
+        loader = ModuleLoader(Path('modules'), plugins_dir=plugin_root)
+        loader.discover_modules()
+        loader.load_module('fake-plugin-4')  # registers "plugins" as a side effect
+
+        # fake-plugin-5 was never passed to load_module() -- only genuine
+        # package-finder discovery via plugins.__path__ can resolve it now.
+        import importlib
+        sibling_helpers = importlib.import_module('plugins.fake-plugin-5.helpers')
+        assert sibling_helpers.VALUE == 'loaded via relative import'
