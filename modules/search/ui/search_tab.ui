@@ -272,6 +272,16 @@
           </widget>
          </item>
          <item>
+          <widget class="QCheckBox" name="search_related_files_check">
+           <property name="text">
+            <string>Related files directories</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
           <spacer name="horizontalSpacer_4">
            <property name="orientation">
             <enum>Qt::Horizontal</enum>
