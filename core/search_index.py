@@ -14,7 +14,7 @@ import time
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from shared.utils import is_reparse_point
 
@@ -998,16 +998,32 @@ class SearchIndex:
             })
         return results
 
-    def search_bp(self, term: str) -> List[Dict]:
-        """Search blueprint files by filename; returns up to _MAX_RESULTS results."""
+    def search_bp(self, term: str, prefixes: Optional[Iterable[str]] = None) -> List[Dict]:
+        """Search blueprint/related-files entries by filename; returns up to
+        _MAX_RESULTS results.
+
+        prefixes optionally restricts the search to specific prefixes (e.g.
+        ('BP', 'ITAR-BP') vs ('RF', 'ITAR-RF')) — the bp_files table holds
+        both Blueprints and Related Files rows side by side (they're indexed
+        identically, just under different configured directories/prefixes),
+        so the two "Also search" checkboxes need to query independently of
+        each other. None (the default) searches every indexed prefix.
+        """
         escaped = _escape_like(term)
         like = f'%{escaped}%'
+        conditions = ["filename LIKE ? ESCAPE '\\' COLLATE NOCASE"]
+        params: List[str] = [like]
+        prefixes = list(prefixes) if prefixes is not None else []
+        if prefixes:
+            placeholders = ','.join('?' * len(prefixes))
+            conditions.append(f"prefix IN ({placeholders})")
+            params.extend(prefixes)
         sql = (
-            f"SELECT * FROM bp_files WHERE filename LIKE ? ESCAPE '\\' COLLATE NOCASE "  # nosec B608  # noqa: S608
+            f"SELECT * FROM bp_files WHERE {' AND '.join(conditions)} "  # nosec B608  # noqa: S608
             f"ORDER BY mtime DESC LIMIT {_MAX_RESULTS}"
         )
         with closing(self._connect(timeout=5.0)) as conn:
-            rows = conn.execute(sql, (like,)).fetchall()
+            rows = conn.execute(sql, params).fetchall()
 
         results = []
         for row in rows:
@@ -1029,6 +1045,40 @@ class SearchIndex:
                 'path': row['dir_path'],
             })
         return results
+
+    def find_files_for_drawings(
+        self, customer: str, drawings: List[str], prefixes: Iterable[str],
+    ) -> List[Dict]:
+        """Return bp_files rows for this customer/prefix set whose filename
+        contains any of the given drawing/part numbers as a substring.
+
+        Used to surface files that live in a separately-configured, separately
+        indexed directory (e.g. Related Files) but belong to a job by shared
+        part number, so the Folder Contents panel can show them alongside a
+        selected job's actual folder contents even though they were never
+        physically inside that job folder. Raises sqlite3.Error on query
+        failure so callers can fall back to a live filesystem walk, matching
+        every other query method in this class.
+        """
+        prefixes = list(prefixes)
+        drawings = [d for d in drawings if d]
+        if not drawings or not prefixes:
+            return []
+        prefix_ph = ','.join('?' * len(prefixes))
+        like_conditions = []
+        like_params: List[str] = []
+        for d in drawings:
+            like_conditions.append("filename LIKE ? ESCAPE '\\' COLLATE NOCASE")
+            like_params.append(f'%{_escape_like(d)}%')
+        sql = (
+            "SELECT * FROM bp_files WHERE customer = ? COLLATE NOCASE "  # nosec B608  # noqa: S608
+            f"AND prefix IN ({prefix_ph}) AND ({' OR '.join(like_conditions)}) "
+            f"ORDER BY filename LIMIT {_MAX_RESULTS}"
+        )
+        params = [customer, *prefixes, *like_params]
+        with closing(self._connect(timeout=5.0)) as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
 
     def search_quotes(self, term: str, search_customer: bool = True) -> List[Dict]:
         """Search quotes table; returns up to _MAX_RESULTS results ordered by mtime."""

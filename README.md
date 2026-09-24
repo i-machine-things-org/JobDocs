@@ -23,6 +23,7 @@ A modular tool for managing blueprint files and customer job directories with su
 - **Blueprint File Management** - Centralized blueprint storage with hard linking to save disk space
 - **ITAR Support** - Separate directories and workflows for ITAR-controlled projects
 - **Advanced Search** - Find jobs by customer, job number, description, or drawing number
+- **Related Files Search** - Surface files kept outside the job folder (e.g. inspection reports, CAM files) in search and in a matching job's Folder Contents, matched by shared part number/revision
 - **File Organization** - Automatic folder structure creation and file management
 - **Import Tools** - Direct import of files to blueprint folders
 - **History Tracking** - Keep track of recent jobs and customer information
@@ -130,6 +131,10 @@ On first launch a setup wizard walks you through configuration. You can re-run i
 2. Configure your directories:
    - **Blueprints Directory** — central storage for all blueprint files
    - **Customer Files Directory** — where job folders will be created
+   - **Related Files Directory** — optional, for files that live outside any job
+     folder (e.g. inspection reports, CAM files) but are still named with a part
+     number and revision, so Search can still find and show them — see
+     [Searching](#searching)
    - **ITAR Directories** — optional separate directories for ITAR-controlled projects
 3. Choose your link type (Hard Link recommended to save disk space)
 4. Set blueprint file extensions (default: `.pdf`, `.dwg`, `.dxf`)
@@ -297,6 +302,13 @@ The **Search** tab provides powerful search capabilities:
 - Click column headers to sort results
 - Double-click a result to open the job folder
 - Right-click for context menu (copy path, open location, print)
+- **Also search: Related files directories** — when checked, also searches the configured
+  Related Files Directory (and its ITAR counterpart) by filename, the same way Blueprints
+  directories are searched. Selecting a job result also shows any matching related files
+  under a **Related Files** node in the Folder Contents panel — even though they're not
+  physically inside the job folder — matched by the job's drawing/part numbers against
+  filenames in that customer's Related Files subfolder. This match comes from the search
+  index, so it only appears once the background indexer has caught up for that directory.
 - **Check Folder Naming…** — on-demand diagnostic for PO-container layouts (where `job_folder_structure`
   puts the PO number in a shared directory-name segment, e.g. `PO-{po_number}`): flags folders that
   don't match either the PO naming convention or the job-folder digit-first convention — a mistyped
@@ -327,6 +339,12 @@ Blueprints Directory/
 └── Customer Name/
     ├── blueprint1.pdf  (original)
     ├── blueprint2.dwg
+    └── ...
+
+Related Files Directory/  (optional — not managed by JobDocs, just indexed for search)
+└── Customer Name/
+    ├── 10-0315-G r9.pdf
+    ├── 26-0003-101.step
     └── ...
 ```
 
