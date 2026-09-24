@@ -52,7 +52,7 @@ def test_query_failure_sets_failed_flag_and_returns_false():
     module._index = MagicMock()
     module._index.search_jobs.side_effect = RuntimeError("boom")
 
-    result = module._search_from_index('term', True, True, True, True, False)
+    result = module._search_from_index('term', True, True, True, True, False, False)
 
     assert result is False
     assert module._index_query_failed is True
@@ -66,7 +66,7 @@ def test_third_consecutive_failure_disables_index():
     module._index.search_jobs.side_effect = RuntimeError("boom")
 
     for _ in range(3):
-        result = module._search_from_index('term', True, True, True, True, False)
+        result = module._search_from_index('term', True, True, True, True, False, False)
         assert result is False
 
     assert module._index_failures == 3
@@ -85,7 +85,7 @@ def test_successful_query_clears_failed_flag():
     }]
     module._index.search_quotes.return_value = []
 
-    result = module._search_from_index('term', True, True, True, True, False)
+    result = module._search_from_index('term', True, True, True, True, False, False)
 
     assert result is True
     assert module._index_query_failed is False
@@ -98,7 +98,7 @@ def test_zero_results_leaves_failed_flag_false():
     module._index.search_jobs.return_value = []
     module._index.search_quotes.return_value = []
 
-    result = module._search_from_index('term', True, True, True, True, False)
+    result = module._search_from_index('term', True, True, True, True, False, False)
 
     assert result is False
 
