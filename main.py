@@ -649,6 +649,8 @@ class JobDocsMainWindow(QMainWindow):
         'customer_files_dir': '',
         'itar_blueprints_dir': '',
         'itar_customer_files_dir': '',
+        'related_files_dir': '',
+        'itar_related_files_dir': '',
         'link_type': 'hard',
         'blueprint_extensions': ['.pdf', '.dwg', '.dxf'],
         'allow_duplicate_jobs': False,
@@ -767,10 +769,11 @@ class JobDocsMainWindow(QMainWindow):
     _KIOSK_DIR_SETTING_KEYS = (
         'customer_files_dir', 'itar_customer_files_dir',
         'blueprints_dir', 'itar_blueprints_dir',
+        'related_files_dir', 'itar_related_files_dir',
     )
 
     def _apply_kiosk_dirs_override(self, settings: Dict[str, Any]) -> Dict[str, Any]:
-        """Override the four directory settings from {app}/kiosk_dirs.json
+        """Override these directory settings from {app}/kiosk_dirs.json
         on a Kiosk install.
 
         JobDocs Kiosk has no Settings UI and doesn't ship the OOBE wizard
@@ -778,10 +781,14 @@ class JobDocsMainWindow(QMainWindow):
         [Files] selection) — its search directories are configured once at
         install time instead (build_scripts/JobDocs.iss's custom wizard
         pages write this file). Always wins over settings.json for these
-        four keys on a Kiosk install: kiosk_dirs.json is the actual source
+        keys on a Kiosk install: kiosk_dirs.json is the actual source
         of truth here, and a Kiosk install never writes settings.json
         itself (see save_settings()'s readonly_mode guard) so there would
         be no other way to reconfigure them short of reinstalling anyway.
+        related_files_dir/itar_related_files_dir aren't written by the
+        installer's wizard pages yet (build_scripts/JobDocs.iss only
+        prompts for the original four) — listed here so a manually-edited
+        kiosk_dirs.json can still set them, but they default to unset.
         """
         if not self.readonly_mode:
             return settings
