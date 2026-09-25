@@ -160,6 +160,33 @@ class ModuleLoader:
             if not module_path.exists():
                 raise ImportError(f"Plugin module file not found: {module_path}")
 
+            # Register the bare "plugins" package too, not just "plugins.<name>":
+            # a relative import inside the plugin (e.g. `from . import helpers`)
+            # needs every level of its dotted package name resolvable via
+            # sys.modules, and Python does not implicitly create intermediate
+            # packages just because a deeper one was registered. Without this,
+            # the relative import "worked" only by accident, when the process's
+            # current working directory happened to have a real plugins/
+            # directory Python could discover as an implicit namespace package
+            # (e.g. running `python main.py` from the dev repo root) -- it
+            # fails with "No module named 'plugins'" from any other cwd, such
+            # as an embedded install launched with cwd set to its app/ folder,
+            # where plugins/ is a sibling, not a child (CodeRabbit-equivalent
+            # finding from real-world testing, not caught by dev-mode testing
+            # alone since dev cwd masked it).
+            if "plugins" not in sys.modules:
+                plugins_pkg = types.ModuleType("plugins")
+                # Real search path, not empty: without this, Python can find
+                # already-registered plugins.<name> entries (looked up
+                # directly in sys.modules) but not an as-yet-unregistered
+                # sibling plugin.<other_name> that genuinely exists in
+                # plugins_dir (CodeRabbit, PR #333) -- matching what the
+                # accidental dev-cwd namespace-package discovery this fix
+                # replaces would have found too.
+                plugins_pkg.__path__ = [str(plugin_dir)]
+                plugins_pkg.__package__ = "plugins"
+                sys.modules["plugins"] = plugins_pkg
+
             # Register a parent package entry so relative imports (e.g. `from .helpers`)
             # inside the plugin resolve correctly.
             package_name = f"plugins.{module_name}"
