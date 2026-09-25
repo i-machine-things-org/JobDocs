@@ -20,6 +20,8 @@ import sys
 from pathlib import Path
 from textwrap import dedent
 
+import pytest
+
 from core.module_loader import ModuleLoader
 
 
@@ -53,14 +55,26 @@ def _write_plugin_with_relative_import(plugin_root: Path, plugin_name: str) -> N
     '''))
 
 
-def _reset_plugin_sys_modules(plugin_name: str):
-    """Remove any sys.modules entries a previous test run (or the accidental
-    namespace-package discovery this test guards against) may have left
-    behind, so each test starts from a clean slate regardless of pytest's
-    own cwd."""
+@pytest.fixture(autouse=True)
+def _isolate_plugin_sys_modules():
+    """Snapshot and restore any plugins/plugins.* sys.modules entries around
+    each test. ModuleLoader.load_module() registers these as a side effect;
+    a one-way deletion (the previous approach) left process-global state
+    behind that could mask regressions in later or repeated test runs."""
+    def _affected(key):
+        return key == 'plugins' or key.startswith('plugins.')
+
+    saved = {key: value for key, value in sys.modules.items() if _affected(key)}
     for key in list(sys.modules):
-        if key == 'plugins' or key.startswith(f'plugins.{plugin_name}'):
+        if _affected(key):
             del sys.modules[key]
+    try:
+        yield
+    finally:
+        for key in list(sys.modules):
+            if _affected(key):
+                del sys.modules[key]
+        sys.modules.update(saved)
 
 
 class TestLoadModuleRegistersBarePluginsPackage:
@@ -86,7 +100,6 @@ class TestLoadModuleRegistersBarePluginsPackage:
 
         plugin_root = tmp_path / 'plugins'
         _write_plugin_with_relative_import(plugin_root, 'fake-plugin')
-        _reset_plugin_sys_modules('fake-plugin')
 
         loader = ModuleLoader(Path('modules'), plugins_dir=plugin_root)
         loader.discover_modules()
@@ -106,7 +119,6 @@ class TestLoadModuleRegistersBarePluginsPackage:
 
         plugin_root = tmp_path / 'plugins'
         _write_plugin_with_relative_import(plugin_root, 'fake-plugin-2')
-        _reset_plugin_sys_modules('fake-plugin-2')
 
         loader = ModuleLoader(Path('modules'), plugins_dir=plugin_root)
         loader.discover_modules()
@@ -128,7 +140,6 @@ class TestLoadModuleRegistersBarePluginsPackage:
 
         plugin_root = tmp_path / 'plugins'
         _write_plugin_with_relative_import(plugin_root, 'fake-plugin-3')
-        _reset_plugin_sys_modules('fake-plugin-3')
 
         import types
         sentinel = types.ModuleType('plugins')
@@ -158,8 +169,6 @@ class TestLoadModuleRegistersBarePluginsPackage:
         plugin_root = tmp_path / 'plugins'
         _write_plugin_with_relative_import(plugin_root, 'fake-plugin-4')
         _write_plugin_with_relative_import(plugin_root, 'fake-plugin-5')
-        _reset_plugin_sys_modules('fake-plugin-4')
-        _reset_plugin_sys_modules('fake-plugin-5')
 
         loader = ModuleLoader(Path('modules'), plugins_dir=plugin_root)
         loader.discover_modules()
