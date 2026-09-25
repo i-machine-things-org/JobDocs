@@ -152,6 +152,46 @@ class TestLoadModuleRegistersBarePluginsPackage:
             loader.load_module('fake-plugin-3')
 
             assert sys.modules['plugins'] is sentinel
+            # The pre-existing path is kept, but plugin_root is appended so
+            # sibling discovery through this object still works (CodeRabbit,
+            # PR #334) -- not just left as-is.
+            assert sentinel.__path__ == ['/some/preexisting/path', str(plugin_root)]
+        finally:
+            del sys.modules['plugins']
+
+    def test_extends_an_existing_plugins_packages_search_path(self, tmp_path, monkeypatch):
+        # CodeRabbit, PR #334: if "plugins" is already registered (e.g. a
+        # real namespace package Python discovered via cwd) with a path that
+        # excludes plugin_root, an unregistered sibling plugin living in
+        # plugin_root couldn't be found through it -- the loader must extend
+        # the existing package's search path, not just leave it untouched.
+        cwd_without_plugins = tmp_path / 'cwd_without_plugins'
+        cwd_without_plugins.mkdir()
+        monkeypatch.chdir(cwd_without_plugins)
+
+        plugin_root = tmp_path / 'plugins'
+        _write_plugin_with_relative_import(plugin_root, 'fake-plugin-6')
+        _write_plugin_with_relative_import(plugin_root, 'fake-plugin-7')
+
+        import types
+        existing = types.ModuleType('plugins')
+        existing.__path__ = ['/some/unrelated/path']
+        sys.modules['plugins'] = existing
+
+        try:
+            loader = ModuleLoader(Path('modules'), plugins_dir=plugin_root)
+            loader.discover_modules()
+            loader.load_module('fake-plugin-6')
+
+            assert sys.modules['plugins'] is existing
+            assert str(plugin_root) in existing.__path__
+
+            # fake-plugin-7 was never passed to load_module() -- only genuine
+            # package-finder discovery via the now-extended __path__ can
+            # resolve it.
+            import importlib
+            sibling_helpers = importlib.import_module('plugins.fake-plugin-7.helpers')
+            assert sibling_helpers.VALUE == 'loaded via relative import'
         finally:
             del sys.modules['plugins']
 
