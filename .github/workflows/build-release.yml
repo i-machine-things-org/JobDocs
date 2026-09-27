@@ -289,10 +289,13 @@ jobs:
           path: flatpak-repo/
 
   # ---------------------------------------------------------------------------
-  # Flatpak repo — publish OSTree repo to gh-pages so Discover can update
+  # Flatpak repo — publish OSTree repo to gh-pages so Discover can update.
+  # Skipped on workflow_dispatch (rehearsal / manual test builds), same as
+  # create-release: gh-pages is the live update feed users' Discover reads.
   # ---------------------------------------------------------------------------
   publish-flatpak-repo:
     needs: build-flatpak
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
