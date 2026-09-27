@@ -142,6 +142,18 @@ Never tag speculatively to "test" CI — use `workflow_dispatch` instead.
 
 **SignPath:** Apply at https://signpath.io/product/open-source. Once approved, uncomment the signing step in `build-release.yml` and add `SIGNPATH_API_TOKEN` and `SIGNPATH_ORG_ID` to GitHub Actions secrets.
 
+### Rehearse before releasing
+
+Any workflow that publishes something (a release, a package, a deploy) must have a **rehearsal mode** that does everything except the final publish step. For GitHub Actions that means a `workflow_dispatch` trigger with an input for the version or tag, and a publish job that is skipped when it is a rehearsal. A rehearsal needs no tag. GitHub only lets you dispatch a workflow when the copy on the default branch already has a `workflow_dispatch` trigger, but the run uses the workflow file from the `--ref` you pick, so a change to a publish workflow that already has that trigger can be rehearsed from its own branch before it merges (`gh workflow run build-release.yml --ref <branch> -f version=vX.Y.Z`). A brand-new publish workflow, or a change that adds `workflow_dispatch` to one, has to merge first and is then rehearsed from the default branch before the first tag. Before that merge, make sure its publish job runs only for the real release event (for example a `v*` tag push) and is skipped on dispatch, so neither the merge nor the rehearsal publishes anything.
+
+Rehearse before the first real tag, and again after any change to the release pipeline:
+
+1. Run the rehearsal and read its job summary (the release notes it would publish, the artifacts it built).
+2. **Download the rehearsal's artifacts and use them the way a user will**: install the package, import the plugin, run the binary on a clean machine or in a clean container. A green rehearsal proves the pipeline ran. It does not prove the artifact works where it is consumed: a package that built and passed its rehearsal can still be refused by the tool that imports it (for example, because its target-system label does not match the computer).
+3. Only then tag. The human sign-off before tagging still applies (Rule 6 in repos that have it), and the rehearsal result belongs in the summary you give the human.
+
+Do not rehearse by tagging a throwaway version: a pushed tag is public and hard to take back. If a repo has no publish workflow yet, this rule waits until one exists.
+
 ### Automatic Version Bump Triggers
 
 After every merge to `master`, count commits since the last `v*` tag:
