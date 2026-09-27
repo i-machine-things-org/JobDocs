@@ -144,7 +144,9 @@ Never tag speculatively to "test" CI — use `workflow_dispatch` instead.
 
 ### Rehearse before releasing
 
-Any workflow that publishes something (a release, a package, a deploy) must have a **rehearsal mode** that does everything except the final publish step. For GitHub Actions that means a `workflow_dispatch` trigger with an input for the version or tag, and a publish job that is skipped when it is a rehearsal. A rehearsal needs no tag, and it can be dispatched from the branch that changes the pipeline (`gh workflow run release.yml --ref <branch> -f tag=vX.Y.Z`), so a change to the release pipeline is exercised before it merges.
+Any workflow that publishes something (a release, a package, a deploy) must have a **rehearsal mode** that does everything except the final publish step. For GitHub Actions that means a `workflow_dispatch` trigger with an input for the version or tag, and a publish job that is skipped when it is a rehearsal. A rehearsal needs no tag. GitHub only lets you dispatch a workflow whose file is already on the default branch, but the run uses the workflow file from the `--ref` you pick, so a change to an existing publish workflow can be rehearsed from its own branch before it merges (`gh workflow run build-release.yml --ref <branch> -f version=vX.Y.Z`). A brand-new publish workflow has to merge first, with its publish job already skipped on dispatch so that merging publishes nothing, and is then rehearsed from the default branch before the first tag.
+
+**Not safe to rehearse yet:** in `build-release.yml`, `publish-flatpak-repo` is not skipped on dispatch (only `create-release` is), so a rehearsal would publish the Flatpak repo to `gh-pages`. Gate it with `if: github.event_name != 'workflow_dispatch'` before dispatching.
 
 Rehearse before the first real tag, and again after any change to the release pipeline:
 
