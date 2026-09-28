@@ -1099,7 +1099,7 @@ class JobModule(BaseModule):
                 if not bp_dir:
                     self.log_message(f"Skipping {job_name}: blueprints directory not configured")
                     total_skipped += len(self.add_files)
-                    skipped_jobs.append(job_name)
+                    skipped_jobs.append((job_name, 'not_configured'))
                     continue
                 customer_bp = Path(bp_dir) / customer
                 try:
@@ -1111,7 +1111,11 @@ class JobModule(BaseModule):
                     # crash of the whole multi-select batch (CodeRabbit, PR #334).
                     self.log_message(f"Skipping {job_name}: could not create blueprints folder ({e})")
                     total_skipped += len(self.add_files)
-                    skipped_jobs.append(job_name)
+                    # Tracked separately from 'not_configured' below -- the
+                    # directory *is* configured here, it just couldn't be
+                    # created, and the skipped-jobs dialog must say which
+                    # (CodeRabbit, PR #340).
+                    skipped_jobs.append((job_name, 'mkdir_failed'))
                     continue
 
             for file_path in self.add_files:
@@ -1185,10 +1189,18 @@ class JobModule(BaseModule):
             # a mixed selection (e.g. one standard + one ITAR job with no
             # blueprints dir configured) would otherwise silently drop the
             # skipped job's files with only a log line (CodeRabbit, PR #334).
-            self.show_error(
-                "Jobs Skipped",
-                "Blueprints directory not configured for: " + ", ".join(skipped_jobs),
-            )
+            not_configured = [name for name, reason in skipped_jobs if reason == 'not_configured']
+            mkdir_failed = [name for name, reason in skipped_jobs if reason == 'mkdir_failed']
+            lines = []
+            if not_configured:
+                lines.append("Blueprints directory not configured for: " + ", ".join(not_configured))
+            if mkdir_failed:
+                # A distinct reason from the one above -- the directory *is*
+                # configured here, it just couldn't be created (permissions,
+                # disk full, etc.), and conflating the two would misreport a
+                # configuration problem that doesn't exist (CodeRabbit, PR #340).
+                lines.append("Could not create blueprints folder for: " + ", ".join(mkdir_failed))
+            self.show_error("Jobs Skipped", "\n".join(lines))
 
     # ==================== Folder Operations ====================
 

@@ -273,13 +273,17 @@ class TestJobTreeMultiSelect:
     def test_mkdir_failure_skips_job_without_crashing_or_dropping_files(self, qapp, tmp_path, monkeypatch):
         """A failure creating the customer's blueprints subfolder (e.g.
         PermissionError) must skip only that job, not crash the whole
-        multi-select batch or drop the pending add_files list
-        (CodeRabbit, PR #334)."""
+        multi-select batch or drop the pending add_files list -- and must be
+        reported with a distinct message from "not configured", since the
+        directory *is* configured here (CodeRabbit, PR #334 and #340)."""
         cf_root = tmp_path / 'customer_files'
         bp_root = tmp_path / 'blueprints'
         job1 = cf_root / 'Acme' / '111_Bracket'
         job1.mkdir(parents=True)
         ctx = _make_app_context(tmp_path, cf_root, bp_root)
+
+        errors = []
+        ctx._show_error = lambda title, message: errors.append((title, message))
 
         src_file = tmp_path / 'drawing.pdf'
         src_file.write_text('fake pdf content')
@@ -313,5 +317,11 @@ class TestJobTreeMultiSelect:
 
             assert m.add_status_label.text() == "Added: 0, Skipped: 1"
             assert m.add_files == [str(src_file)]
+
+            assert len(errors) == 1
+            title, message = errors[0]
+            assert title == "Jobs Skipped"
+            assert "Could not create blueprints folder for: 111_Bracket" in message
+            assert "not configured" not in message
         finally:
             _cleanup_worker(m)
