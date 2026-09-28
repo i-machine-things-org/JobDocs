@@ -186,6 +186,19 @@ class ModuleLoader:
                 plugins_pkg.__path__ = [str(plugin_dir)]
                 plugins_pkg.__package__ = "plugins"
                 sys.modules["plugins"] = plugins_pkg
+            else:
+                # Something else already registered "plugins" (e.g. a real
+                # namespace package Python discovered via cwd). Don't replace
+                # the existing object, but make sure plugin_dir is still on
+                # its search path -- otherwise an unregistered sibling plugin
+                # living in plugin_dir can't be found through it (CodeRabbit,
+                # PR #334). Reassigning __path__ to a plain list works
+                # whether the existing value was a list or an importlib
+                # _NamespacePath, and preserves the module object's identity.
+                existing = sys.modules["plugins"]
+                existing_path = list(getattr(existing, "__path__", None) or [])
+                if str(plugin_dir) not in existing_path:
+                    existing.__path__ = existing_path + [str(plugin_dir)]
 
             # Register a parent package entry so relative imports (e.g. `from .helpers`)
             # inside the plugin resolve correctly.

@@ -160,3 +160,68 @@ class TestJobTreeMultiSelect:
             assert m.add_status_label.text() == "Added: 1, Skipped: 0"
         finally:
             _cleanup_worker(m)
+
+    def test_mixed_selection_skips_job_without_blueprints_dir_but_keeps_files(self, qapp, tmp_path):
+        """A mixed selection (e.g. a standard job plus one that resolves as
+        ITAR) where one job's blueprints directory isn't configured must not
+        silently drop that job's files, and must not clear the pending
+        add_files list -- the user needs to be able to retry the skipped job
+        without re-adding every file (CodeRabbit, PR #334)."""
+        cf_root = tmp_path / 'customer_files'
+        bp_root = tmp_path / 'blueprints'
+        job1 = cf_root / 'Acme' / '111_Bracket'
+        itar_cf_root = cf_root / 'ItarCo'
+        job2 = itar_cf_root / '222_Widget'
+        job1.mkdir(parents=True)
+        job2.mkdir(parents=True)
+
+        ctx = _make_app_context(tmp_path, cf_root, bp_root)
+        ctx._settings['itar_customer_files_dir'] = str(itar_cf_root)
+        # itar_blueprints_dir intentionally left unset: job2's bp_dir resolves empty
+
+        errors = []
+        ctx._show_error = lambda title, message: errors.append((title, message))
+
+        src_file = tmp_path / 'drawing.pdf'
+        src_file.write_text('fake pdf content')
+
+        m = JobModule()
+        try:
+            m.initialize(ctx)
+            m.get_widget()
+
+            m._job_tab_widget.setCurrentWidget(m._add_to_job_tab)
+            _load_tree_synchronously(m, qapp)
+
+            job_item_1 = None
+            job_item_2 = None
+            for i in range(m.job_tree.topLevelItemCount()):
+                customer_item = m.job_tree.topLevelItem(i)
+                if customer_item.text(0) == 'Acme':
+                    job_item_1 = customer_item.child(0)
+                elif customer_item.text(0) == 'ItarCo':
+                    job_item_2 = customer_item.child(0)
+            assert job_item_1 is not None and job_item_2 is not None
+
+            job_item_1.setSelected(True)
+            job_item_2.setSelected(True)
+
+            m.dest_blueprints_radio.setChecked(True)
+            m.add_files = [str(src_file)]
+
+            m.add_files_to_job()
+
+            assert (bp_root / 'Acme' / 'drawing.pdf').exists()
+            assert not (bp_root / 'ItarCo' / 'drawing.pdf').exists()
+            assert m.add_status_label.text() == "Added: 1, Skipped: 1"
+
+            # The skipped job's files must not be dropped from the pending
+            # list -- clear_add_files() must not have run.
+            assert m.add_files == [str(src_file)]
+
+            assert len(errors) == 1
+            title, message = errors[0]
+            assert title == "Jobs Skipped"
+            assert "222_Widget" in message
+        finally:
+            _cleanup_worker(m)

@@ -1064,6 +1064,7 @@ class JobModule(BaseModule):
         total_added = 0
         total_skipped = 0
         job_names = []
+        skipped_jobs = []
 
         for item in items:
             job_path = item.data(0, Qt.ItemDataRole.UserRole)
@@ -1085,6 +1086,7 @@ class JobModule(BaseModule):
                 if not bp_dir:
                     self.log_message(f"Skipping {job_name}: blueprints directory not configured")
                     total_skipped += len(self.add_files)
+                    skipped_jobs.append(job_name)
                     continue
                 customer_bp = Path(bp_dir) / customer
                 customer_bp.mkdir(parents=True, exist_ok=True)
@@ -1151,7 +1153,19 @@ class JobModule(BaseModule):
                     "Files Added",
                     f"Added {total_added} file(s) across {len(job_names)} jobs"
                 )
-            self.clear_add_files()
+            if not skipped_jobs:
+                self.clear_add_files()
+
+        if skipped_jobs:
+            # Keep self.add_files intact (don't clear_add_files() above) so
+            # the user can retry these jobs without re-adding every file --
+            # a mixed selection (e.g. one standard + one ITAR job with no
+            # blueprints dir configured) would otherwise silently drop the
+            # skipped job's files with only a log line (CodeRabbit, PR #334).
+            self.show_error(
+                "Jobs Skipped",
+                "Blueprints directory not configured for: " + ", ".join(skipped_jobs),
+            )
 
     # ==================== Folder Operations ====================
 
