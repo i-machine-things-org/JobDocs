@@ -1078,7 +1078,20 @@ class JobModule(BaseModule):
             else:
                 customer = customer_text
                 itar_cf = self.app_context.get_setting('itar_customer_files_dir', '')
-                is_itar = itar_cf and job_path.startswith(itar_cf)
+                is_itar = False
+                if itar_cf:
+                    # os.path.commonpath(), not a string-prefix check: a bare
+                    # startswith() misclassifies a sibling like
+                    # "/share/ITAR-jobs" as being under "/share/ITAR".
+                    # normcase() both sides for Windows case-insensitivity
+                    # (mirrors modules/search/module.py's
+                    # _is_within_permitted_roots(), CodeRabbit PR #315/#334).
+                    job_norm = os.path.normcase(job_path)
+                    itar_norm = os.path.normcase(itar_cf)
+                    try:
+                        is_itar = os.path.commonpath([job_norm, itar_norm]) == itar_norm
+                    except ValueError:
+                        is_itar = False  # different drive/mount -- not a match
 
             customer_bp = None
             if dest in ('blueprints', 'both'):
@@ -1086,10 +1099,24 @@ class JobModule(BaseModule):
                 if not bp_dir:
                     self.log_message(f"Skipping {job_name}: blueprints directory not configured")
                     total_skipped += len(self.add_files)
-                    skipped_jobs.append(job_name)
+                    skipped_jobs.append((job_name, 'not_configured'))
                     continue
                 customer_bp = Path(bp_dir) / customer
-                customer_bp.mkdir(parents=True, exist_ok=True)
+                try:
+                    customer_bp.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    # Catch OSError, not just PermissionError -- disk-full and
+                    # path-too-long failures deserve the same "skip this job,
+                    # keep processing the rest" treatment, not an uncaught
+                    # crash of the whole multi-select batch (CodeRabbit, PR #334).
+                    self.log_message(f"Skipping {job_name}: could not create blueprints folder ({e})")
+                    total_skipped += len(self.add_files)
+                    # Tracked separately from 'not_configured' below -- the
+                    # directory *is* configured here, it just couldn't be
+                    # created, and the skipped-jobs dialog must say which
+                    # (CodeRabbit, PR #340).
+                    skipped_jobs.append((job_name, 'mkdir_failed'))
+                    continue
 
             for file_path in self.add_files:
                 file_name = os.path.basename(file_path)
@@ -1162,10 +1189,18 @@ class JobModule(BaseModule):
             # a mixed selection (e.g. one standard + one ITAR job with no
             # blueprints dir configured) would otherwise silently drop the
             # skipped job's files with only a log line (CodeRabbit, PR #334).
-            self.show_error(
-                "Jobs Skipped",
-                "Blueprints directory not configured for: " + ", ".join(skipped_jobs),
-            )
+            not_configured = [name for name, reason in skipped_jobs if reason == 'not_configured']
+            mkdir_failed = [name for name, reason in skipped_jobs if reason == 'mkdir_failed']
+            lines = []
+            if not_configured:
+                lines.append("Blueprints directory not configured for: " + ", ".join(not_configured))
+            if mkdir_failed:
+                # A distinct reason from the one above -- the directory *is*
+                # configured here, it just couldn't be created (permissions,
+                # disk full, etc.), and conflating the two would misreport a
+                # configuration problem that doesn't exist (CodeRabbit, PR #340).
+                lines.append("Could not create blueprints folder for: " + ", ".join(mkdir_failed))
+            self.show_error("Jobs Skipped", "\n".join(lines))
 
     # ==================== Folder Operations ====================
 
