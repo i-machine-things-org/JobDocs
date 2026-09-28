@@ -1078,7 +1078,20 @@ class JobModule(BaseModule):
             else:
                 customer = customer_text
                 itar_cf = self.app_context.get_setting('itar_customer_files_dir', '')
-                is_itar = itar_cf and job_path.startswith(itar_cf)
+                is_itar = False
+                if itar_cf:
+                    # os.path.commonpath(), not a string-prefix check: a bare
+                    # startswith() misclassifies a sibling like
+                    # "/share/ITAR-jobs" as being under "/share/ITAR".
+                    # normcase() both sides for Windows case-insensitivity
+                    # (mirrors modules/search/module.py's
+                    # _is_within_permitted_roots(), CodeRabbit PR #315/#334).
+                    job_norm = os.path.normcase(job_path)
+                    itar_norm = os.path.normcase(itar_cf)
+                    try:
+                        is_itar = os.path.commonpath([job_norm, itar_norm]) == itar_norm
+                    except ValueError:
+                        is_itar = False  # different drive/mount -- not a match
 
             customer_bp = None
             if dest in ('blueprints', 'both'):
@@ -1089,7 +1102,17 @@ class JobModule(BaseModule):
                     skipped_jobs.append(job_name)
                     continue
                 customer_bp = Path(bp_dir) / customer
-                customer_bp.mkdir(parents=True, exist_ok=True)
+                try:
+                    customer_bp.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    # Catch OSError, not just PermissionError -- disk-full and
+                    # path-too-long failures deserve the same "skip this job,
+                    # keep processing the rest" treatment, not an uncaught
+                    # crash of the whole multi-select batch (CodeRabbit, PR #334).
+                    self.log_message(f"Skipping {job_name}: could not create blueprints folder ({e})")
+                    total_skipped += len(self.add_files)
+                    skipped_jobs.append(job_name)
+                    continue
 
             for file_path in self.add_files:
                 file_name = os.path.basename(file_path)
