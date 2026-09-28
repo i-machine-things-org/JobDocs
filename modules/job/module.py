@@ -249,6 +249,7 @@ class JobModule(BaseModule):
         self.add_customer_combo = widget.add_customer_combo
         self.add_search_edit = widget.add_search_edit
         self.job_tree = widget.job_tree
+        self.job_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.selected_job_label = widget.selected_job_label
         self.add_files_list = widget.add_files_list
         self.add_files_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -981,13 +982,17 @@ class JobModule(BaseModule):
             self.selected_job_label.setText("No job selected")
             return
 
-        item = items[0]
-        if item.parent():
-            self.selected_job_label.setText(f"Selected: {item.text(0)}")
-            self.selected_job_label.setStyleSheet("color: green;")
-        else:
+        job_items = [item for item in items if item.parent()]
+        if not job_items:
             self.selected_job_label.setText("Select a job, not customer")
             self.selected_job_label.setStyleSheet("color: orange;")
+            return
+
+        if len(job_items) == 1:
+            self.selected_job_label.setText(f"Selected: {job_items[0].text(0)}")
+        else:
+            self.selected_job_label.setText(f"Selected: {len(job_items)} jobs")
+        self.selected_job_label.setStyleSheet("color: green;")
 
     def _get_customer_files_dirs(self):
         """Get list of (prefix, path) tuples for customer file directories"""
@@ -1037,39 +1042,15 @@ class JobModule(BaseModule):
     # ==================== Add to Existing Tab: Add Files to Job ====================
 
     def add_files_to_job(self):
-        """Add files to the selected job"""
-        items = self.job_tree.selectedItems()
+        """Add files to the selected job(s)"""
+        items = [item for item in self.job_tree.selectedItems() if item.parent()]
         if not items:
-            self.show_error("No Selection", "Please select a job folder")
-            return
-
-        item = items[0]
-        if not item.parent():
-            self.show_error("Invalid Selection", "Please select a job, not a customer")
+            self.show_error("No Selection", "Please select one or more job folders")
             return
 
         if not self.add_files:
             self.show_error("No Files", "Please add files")
             return
-
-        job_path = item.data(0, Qt.ItemDataRole.UserRole)
-        job_name = item.text(0)
-
-        customer_text = item.parent().text(0)
-        if customer_text.startswith('[ITAR] '):
-            customer = customer_text[7:]
-            is_itar = True
-        else:
-            customer = customer_text
-            itar_cf = self.app_context.get_setting('itar_customer_files_dir', '')
-            is_itar = itar_cf and job_path.startswith(itar_cf)
-
-        bp_dir, _ = self.app_context.get_directories(is_itar)
-        if not bp_dir:
-            self.show_error("Error", "Blueprints directory not configured")
-            return
-
-        customer_bp = Path(bp_dir) / customer
 
         if self.dest_blueprints_radio.isChecked():
             dest = 'blueprints'
@@ -1078,72 +1059,148 @@ class JobModule(BaseModule):
         else:
             dest = 'both'
 
-        added = 0
-        skipped = 0
-
-        # Ensure blueprint directory exists if needed
-        if dest in ('blueprints', 'both'):
-            customer_bp.mkdir(parents=True, exist_ok=True)
-
         link_type = self.app_context.get_setting('link_type', 'hard')
 
-        for file_path in self.add_files:
-            file_name = os.path.basename(file_path)
+        total_added = 0
+        total_skipped = 0
+        job_names = []
+        skipped_jobs = []
 
-            try:
-                if dest == 'blueprints':
-                    bp_dest = customer_bp / file_name
-                    if not bp_dest.exists():
-                        try:
-                            shutil.copy2(file_path, bp_dest)
-                            added += 1
-                        except PermissionError:
-                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
-                            skipped += 1
-                    else:
-                        skipped += 1
+        for item in items:
+            job_path = item.data(0, Qt.ItemDataRole.UserRole)
+            job_name = item.text(0)
+            job_names.append(job_name)
 
-                elif dest == 'job':
-                    job_dest = Path(job_path) / file_name
-                    if not job_dest.exists():
-                        try:
-                            shutil.copy2(file_path, job_dest)
-                            added += 1
-                        except PermissionError:
-                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
-                            skipped += 1
-                    else:
-                        skipped += 1
+            customer_text = item.parent().text(0)
+            if customer_text.startswith('[ITAR] '):
+                customer = customer_text[7:]
+                is_itar = True
+            else:
+                customer = customer_text
+                itar_cf = self.app_context.get_setting('itar_customer_files_dir', '')
+                is_itar = False
+                if itar_cf:
+                    # os.path.commonpath(), not a string-prefix check: a bare
+                    # startswith() misclassifies a sibling like
+                    # "/share/ITAR-jobs" as being under "/share/ITAR".
+                    # normcase() both sides for Windows case-insensitivity
+                    # (mirrors modules/search/module.py's
+                    # _is_within_permitted_roots(), CodeRabbit PR #315/#334).
+                    job_norm = os.path.normcase(job_path)
+                    itar_norm = os.path.normcase(itar_cf)
+                    try:
+                        is_itar = os.path.commonpath([job_norm, itar_norm]) == itar_norm
+                    except ValueError:
+                        is_itar = False  # different drive/mount -- not a match
 
-                else:  # both
-                    bp_dest = customer_bp / file_name
-                    bp_ready = bp_dest.exists()
-                    if not bp_ready:
-                        try:
-                            shutil.copy2(file_path, bp_dest)
-                            bp_ready = True
-                        except PermissionError:
-                            self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+            customer_bp = None
+            if dest in ('blueprints', 'both'):
+                bp_dir, _ = self.app_context.get_directories(is_itar)
+                if not bp_dir:
+                    self.log_message(f"Skipping {job_name}: blueprints directory not configured")
+                    total_skipped += len(self.add_files)
+                    skipped_jobs.append((job_name, 'not_configured'))
+                    continue
+                customer_bp = Path(bp_dir) / customer
+                try:
+                    customer_bp.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    # Catch OSError, not just PermissionError -- disk-full and
+                    # path-too-long failures deserve the same "skip this job,
+                    # keep processing the rest" treatment, not an uncaught
+                    # crash of the whole multi-select batch (CodeRabbit, PR #334).
+                    self.log_message(f"Skipping {job_name}: could not create blueprints folder ({e})")
+                    total_skipped += len(self.add_files)
+                    # Tracked separately from 'not_configured' below -- the
+                    # directory *is* configured here, it just couldn't be
+                    # created, and the skipped-jobs dialog must say which
+                    # (CodeRabbit, PR #340).
+                    skipped_jobs.append((job_name, 'mkdir_failed'))
+                    continue
 
-                    job_dest = Path(job_path) / file_name
-                    if bp_ready and not job_dest.exists():
-                        if create_file_link(bp_dest, job_dest, link_type):
-                            added += 1
+            for file_path in self.add_files:
+                file_name = os.path.basename(file_path)
+
+                try:
+                    if dest == 'blueprints':
+                        bp_dest = customer_bp / file_name
+                        if not bp_dest.exists():
+                            try:
+                                shutil.copy2(file_path, bp_dest)
+                                total_added += 1
+                            except PermissionError:
+                                self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                                total_skipped += 1
                         else:
-                            skipped += 1
-                            self.log_message(f"Warning: Could not link {file_name} to job")
-                    else:
-                        skipped += 1
+                            total_skipped += 1
 
-            except Exception as e:
-                self.log_message(f"Error adding {file_name}: {e}")
-                skipped += 1
+                    elif dest == 'job':
+                        job_dest = Path(job_path) / file_name
+                        if not job_dest.exists():
+                            try:
+                                shutil.copy2(file_path, job_dest)
+                                total_added += 1
+                            except PermissionError:
+                                self.log_message(f"Warning: Could not copy {file_name} (file in use)")
+                                total_skipped += 1
+                        else:
+                            total_skipped += 1
 
-        self.add_status_label.setText(f"Added: {added}, Skipped: {skipped}")
+                    else:  # both
+                        bp_dest = customer_bp / file_name
+                        bp_ready = bp_dest.exists()
+                        if not bp_ready:
+                            try:
+                                shutil.copy2(file_path, bp_dest)
+                                bp_ready = True
+                            except PermissionError:
+                                self.log_message(f"Warning: Could not copy {file_name} (file in use)")
 
-        if added > 0:
-            self.show_info("Files Added", f"Added {added} file(s) to {job_name}")
-            self.clear_add_files()
+                        job_dest = Path(job_path) / file_name
+                        if bp_ready and not job_dest.exists():
+                            if create_file_link(bp_dest, job_dest, link_type):
+                                total_added += 1
+                            else:
+                                total_skipped += 1
+                                self.log_message(f"Warning: Could not link {file_name} to job")
+                        else:
+                            total_skipped += 1
+
+                except Exception as e:
+                    self.log_message(f"Error adding {file_name} to {job_name}: {e}")
+                    total_skipped += 1
+
+        self.add_status_label.setText(f"Added: {total_added}, Skipped: {total_skipped}")
+
+        if total_added > 0:
+            if len(job_names) == 1:
+                self.show_info("Files Added", f"Added {total_added} file(s) to {job_names[0]}")
+            else:
+                self.show_info(
+                    "Files Added",
+                    f"Added {total_added} file(s) across {len(job_names)} jobs"
+                )
+            if not skipped_jobs:
+                self.clear_add_files()
+
+        if skipped_jobs:
+            # Keep self.add_files intact (don't clear_add_files() above) so
+            # the user can retry these jobs without re-adding every file --
+            # a mixed selection (e.g. one standard + one ITAR job with no
+            # blueprints dir configured) would otherwise silently drop the
+            # skipped job's files with only a log line (CodeRabbit, PR #334).
+            not_configured = [name for name, reason in skipped_jobs if reason == 'not_configured']
+            mkdir_failed = [name for name, reason in skipped_jobs if reason == 'mkdir_failed']
+            lines = []
+            if not_configured:
+                lines.append("Blueprints directory not configured for: " + ", ".join(not_configured))
+            if mkdir_failed:
+                # A distinct reason from the one above -- the directory *is*
+                # configured here, it just couldn't be created (permissions,
+                # disk full, etc.), and conflating the two would misreport a
+                # configuration problem that doesn't exist (CodeRabbit, PR #340).
+                lines.append("Could not create blueprints folder for: " + ", ".join(mkdir_failed))
+            self.show_error("Jobs Skipped", "\n".join(lines))
 
     # ==================== Folder Operations ====================
 
