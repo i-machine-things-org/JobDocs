@@ -219,10 +219,11 @@ class TestIsWithinPermittedRootsEdgeCases:
     tmp_path directories so they mean the same thing on either OS.
     """
 
-    def _module(self, customer_dirs=(), blueprint_dirs=()):
+    def _module(self, customer_dirs=(), blueprint_dirs=(), related_files_dirs=()):
         module = _make_bare_module(MagicMock())
         module._get_customer_files_dirs = MagicMock(return_value=list(customer_dirs))
         module._get_blueprint_dirs = MagicMock(return_value=list(blueprint_dirs))
+        module._get_related_files_dirs = MagicMock(return_value=list(related_files_dirs))
         return module
 
     @pytest.mark.skipif(os.name != 'nt', reason="case-insensitive paths are a Windows-only concept")
@@ -395,13 +396,17 @@ class TestItarExclusionFromSearchDirs:
         itar_cf_dir = tmp_path / 'itar_customers'
         bp_dir = tmp_path / 'blueprints'
         itar_bp_dir = tmp_path / 'itar_blueprints'
-        for d in (cf_dir, itar_cf_dir, bp_dir, itar_bp_dir):
+        rf_dir = tmp_path / 'related_files'
+        itar_rf_dir = tmp_path / 'itar_related_files'
+        for d in (cf_dir, itar_cf_dir, bp_dir, itar_bp_dir, rf_dir, itar_rf_dir):
             d.mkdir()
         return {
             'customer_files_dir': str(cf_dir),
             'itar_customer_files_dir': str(itar_cf_dir),
             'blueprints_dir': str(bp_dir),
             'itar_blueprints_dir': str(itar_bp_dir),
+            'related_files_dir': str(rf_dir),
+            'itar_related_files_dir': str(itar_rf_dir),
         }
 
     def _context(self, tmp_path: Path, settings: dict, *, readonly_mode: bool) -> AppContext:
@@ -458,6 +463,25 @@ class TestItarExclusionFromSearchDirs:
 
         assert sorted(p for p, _ in dirs) == ['BP', 'ITAR-BP']
 
+    def test_readonly_excludes_itar_related_files_dir(self, tmp_path):
+        settings = self._settings(tmp_path)
+        app_context = self._context(tmp_path, settings, readonly_mode=True)
+        module = _make_bare_module(app_context)
+
+        dirs = module._get_related_files_dirs()
+
+        prefixes = [p for p, _ in dirs]
+        assert prefixes == ['RF']
+
+    def test_non_readonly_includes_itar_related_files_dir(self, tmp_path):
+        settings = self._settings(tmp_path)
+        app_context = self._context(tmp_path, settings, readonly_mode=False)
+        module = _make_bare_module(app_context)
+
+        dirs = module._get_related_files_dirs()
+
+        assert sorted(p for p, _ in dirs) == ['ITAR-RF', 'RF']
+
     def test_readonly_search_from_index_drops_stale_itar_results(self, tmp_path):
         """Defense in depth: even if the local index still has ITAR rows
         (e.g. this machine was reconfigured from Full to Read-Only and
@@ -479,10 +503,41 @@ class TestItarExclusionFromSearchDirs:
         module.search_results = []
         module._apply_sort = MagicMock()
 
-        found = module._search_from_index('acme', True, True, True, True, include_blueprints=False)
+        found = module._search_from_index(
+            'acme', True, True, True, True, include_blueprints=False, include_related_files=False,
+        )
 
         assert found is True
         assert [r['customer'] for r in module.search_results] == ['Acme']
+
+    def test_readonly_search_from_index_drops_stale_itar_related_files_results(self, tmp_path):
+        """Same defense-in-depth as the ITAR job/quote test above, for
+        Related Files: a stale [ITAR-RF] row left over from before this
+        machine was reconfigured to Read-Only must not be displayed, even
+        though the live directory-discovery side (_get_related_files_dirs())
+        already excludes the ITAR directory going forward."""
+        settings = self._settings(tmp_path)
+        app_context = self._context(tmp_path, settings, readonly_mode=True)
+        module = _make_bare_module(app_context)
+        module._index = MagicMock()
+        module._index.search_jobs.return_value = []
+        module._index.search_quotes.return_value = []
+        module._index.search_bp.return_value = [
+            {'customer': '[RF] Acme', 'job_number': 'DWG-A'},
+            {'customer': '[ITAR-RF] Defense Co', 'job_number': 'DWG-B'},
+        ]
+        module._index_failures = 0
+        module._index_query_failed = False
+        module.search_status_label = MagicMock()
+        module.search_results = []
+        module._apply_sort = MagicMock()
+
+        found = module._search_from_index(
+            'dwg', True, True, True, True, include_blueprints=False, include_related_files=True,
+        )
+
+        assert found is True
+        assert [r['customer'] for r in module.search_results] == ['[RF] Acme']
 
 
 class TestNoFilesystemEscapeOnReadonly:

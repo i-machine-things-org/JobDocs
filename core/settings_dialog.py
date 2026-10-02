@@ -74,8 +74,10 @@ class SettingsDialog(QDialog):
         dir_vbox = QVBoxLayout(dir_group)
         self._dir_row(dir_vbox, "Blueprints Directory:", 'blueprints_edit', 'blueprints_dir')
         self._dir_row(dir_vbox, "Customer Files Directory:", 'customer_files_edit', 'customer_files_dir')
+        self._dir_row(dir_vbox, "Related Files Directory:", 'related_files_edit', 'related_files_dir')
         dir_group.setVisible(
             self._active('blueprints_dir') or self._active('customer_files_dir')
+            or self._active('related_files_dir')
         )
         scroll_layout.addWidget(dir_group)
 
@@ -84,8 +86,10 @@ class SettingsDialog(QDialog):
         itar_vbox = QVBoxLayout(itar_group)
         self._dir_row(itar_vbox, "ITAR Blueprints:", 'itar_blueprints_edit', 'itar_blueprints_dir')
         self._dir_row(itar_vbox, "ITAR Customer Files:", 'itar_customer_files_edit', 'itar_customer_files_dir')
+        self._dir_row(itar_vbox, "ITAR Related Files:", 'itar_related_files_edit', 'itar_related_files_dir')
         itar_group.setVisible(
             self._active('itar_blueprints_dir') or self._active('itar_customer_files_dir')
+            or self._active('itar_related_files_dir')
         )
         scroll_layout.addWidget(itar_group)
 
@@ -308,6 +312,10 @@ class SettingsDialog(QDialog):
             self.settings['itar_blueprints_dir'] = self.itar_blueprints_edit.text()
         if self._active('itar_customer_files_dir'):
             self.settings['itar_customer_files_dir'] = self.itar_customer_files_edit.text()
+        if self._active('related_files_dir'):
+            self.settings['related_files_dir'] = self.related_files_edit.text()
+        if self._active('itar_related_files_dir'):
+            self.settings['itar_related_files_dir'] = self.itar_related_files_edit.text()
 
         if self._active('link_type'):
             if self.hard_radio.isChecked():
