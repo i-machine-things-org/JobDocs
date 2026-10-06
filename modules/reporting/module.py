@@ -10,9 +10,10 @@ import sys
 import csv
 from datetime import datetime
 from pathlib import Path
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal, QObject, QEvent, Qt
 from PyQt6.QtWidgets import (
-    QWidget, QTableWidgetItem, QFileDialog, QHeaderView, QAbstractItemView
+    QWidget, QTableWidgetItem, QFileDialog, QHeaderView, QAbstractItemView,
+    QDateEdit, QCalendarWidget
 )
 from PyQt6 import uic
 
@@ -20,6 +21,35 @@ from core.base_module import BaseModule
 from experimental.db_integration import is_configured, test_connection, fetch_report, fetch_customers
 
 _REPORT_COLUMNS = ('date', 'customer', 'job', 'description', 'status')
+
+
+class _DateCalendarPopupFilter(QObject):
+    """Double-click a QDateEdit to drop down a small calendar for picking a
+    date, in addition to Qt's built-in dropdown-arrow click (calendarPopup).
+    Built on public QCalendarWidget/QWidget APIs rather than QDateEdit's
+    private popup internals, which aren't safe to trigger programmatically.
+    """
+
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() == QEvent.Type.MouseButtonDblClick and isinstance(obj, QDateEdit):
+            self._show_popup(obj)
+            return True
+        return False
+
+    def _show_popup(self, date_edit: QDateEdit):
+        calendar = QCalendarWidget()
+        calendar.setWindowFlags(Qt.WindowType.Popup)
+        calendar.setSelectedDate(date_edit.date())
+
+        def pick(qdate):
+            date_edit.setDate(qdate)
+            calendar.close()
+
+        calendar.clicked.connect(pick)
+        calendar.activated.connect(pick)
+        calendar.move(date_edit.mapToGlobal(date_edit.rect().bottomLeft()))
+        calendar.show()
+        self._popup = calendar  # keep alive while shown; see CODING_NOTES.md on non-modal dialogs
 
 
 class _ConnectWorker(QThread):
@@ -139,6 +169,10 @@ class ReportingModule(BaseModule):
         self.report_start_date = widget.report_start_date
         self.report_end_date = widget.report_end_date
 
+        self._date_popup_filter = _DateCalendarPopupFilter(widget)
+        self.report_start_date.installEventFilter(self._date_popup_filter)
+        self.report_end_date.installEventFilter(self._date_popup_filter)
+
         # Setup table properties
         self.report_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.report_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -169,11 +203,6 @@ class ReportingModule(BaseModule):
         uses_dates = report_type in ("Jobs by Date Range", "Top Customers")
         self.report_start_date.setEnabled(uses_dates)
         self.report_end_date.setEnabled(uses_dates)
-        # Date range is required for "Jobs by Date Range", optional for "Top
-        # Customers" (blank = all time there) -- say so in the placeholder.
-        placeholder = "YYYY-MM-DD" if report_type == "Jobs by Date Range" else "YYYY-MM-DD (optional)"
-        self.report_start_date.setPlaceholderText(placeholder)
-        self.report_end_date.setPlaceholderText(placeholder)
 
     def _update_table_headers(self, report_type: str):
         """Relabel the fixed Date/Customer/Job #/Description/Status columns
@@ -272,6 +301,15 @@ class ReportingModule(BaseModule):
         else:
             self.report_customer_combo.setCurrentText(current)
 
+    @staticmethod
+    def _picked_date(date_edit: QDateEdit):
+        """The QDate as a Python date, or None if still at the "(No Filter)"
+        sentinel (date_edit's minimumDate, set in reporting_tab.ui).
+        """
+        if date_edit.date() == date_edit.minimumDate():
+            return None
+        return date_edit.date().toPyDate()
+
     # ==================== Report Generation ====================
 
     def generate_report(self):
@@ -288,27 +326,29 @@ class ReportingModule(BaseModule):
             if customer and customer != "All Customers":
                 filters['customer'] = customer
         elif report_type == "Jobs by Date Range":
-            try:
-                filters['start_date'] = datetime.strptime(
-                    self.report_start_date.text().strip(), '%Y-%m-%d').date()
-                filters['end_date'] = datetime.strptime(
-                    self.report_end_date.text().strip(), '%Y-%m-%d').date()
-            except ValueError:
-                self.show_error("Invalid Date", "Enter Start Date and End Date as YYYY-MM-DD.")
+            start = self._picked_date(self.report_start_date)
+            end = self._picked_date(self.report_end_date)
+            if start is None or end is None:
+                self.show_error(
+                    "Invalid Date",
+                    "Pick both a Start Date and End Date (double-click a field, or use its "
+                    "dropdown arrow, to open the calendar)."
+                )
                 return
+            filters['start_date'] = start
+            filters['end_date'] = end
         elif report_type == "Top Customers":
-            start_text = self.report_start_date.text().strip()
-            end_text = self.report_end_date.text().strip()
-            if start_text or end_text:
-                try:
-                    filters['start_date'] = datetime.strptime(start_text, '%Y-%m-%d').date()
-                    filters['end_date'] = datetime.strptime(end_text, '%Y-%m-%d').date()
-                except ValueError:
-                    self.show_error(
-                        "Invalid Date",
-                        "Enter both Start Date and End Date as YYYY-MM-DD, or leave both blank for all time."
-                    )
-                    return
+            start = self._picked_date(self.report_start_date)
+            end = self._picked_date(self.report_end_date)
+            if (start is None) != (end is None):
+                self.show_error(
+                    "Invalid Date",
+                    "Pick both Start Date and End Date, or leave both as \"(No Filter)\" for all time."
+                )
+                return
+            if start is not None and end is not None:
+                filters['start_date'] = start
+                filters['end_date'] = end
 
         self.generate_report_btn.setEnabled(False)
         self.report_status_label.setText(f"Running '{report_type}'...")
