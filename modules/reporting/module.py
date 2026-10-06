@@ -142,6 +142,13 @@ class ReportingModule(BaseModule):
         self._report_worker = None
         self._customer_worker = None
 
+        # Metadata for whatever report is currently in report_table, captured
+        # at generate time so Export reflects what was actually run even if
+        # the combo/filters have changed since (not whatever they show now).
+        self._last_report_type = None
+        self._last_filters = {}
+        self._last_generated_at = None
+
     def get_name(self) -> str:
         return "Reports (Beta)"
 
@@ -364,6 +371,9 @@ class ReportingModule(BaseModule):
         self.generate_report_btn.setEnabled(False)
         self.report_status_label.setText(f"Running '{report_type}'...")
 
+        self._last_report_type = report_type
+        self._last_filters = filters
+
         self._report_worker = _ReportWorker(self._jobboss_settings(), report_type, filters)
         self._report_worker.success.connect(self._on_report_rows)
         self._report_worker.error.connect(self._on_report_error)
@@ -379,6 +389,7 @@ class ReportingModule(BaseModule):
             for col, key in enumerate(_REPORT_COLUMNS):
                 self.report_table.setItem(r, col, QTableWidgetItem(row.get(key, '')))
 
+        self._last_generated_at = datetime.now()
         report_type = self.report_type_combo.currentText()
         self.report_status_label.setText(f"Showing {len(rows)} record(s) for '{report_type}'")
         self.log_message(f"Generated report: {report_type} ({len(rows)} rows)")
@@ -387,6 +398,15 @@ class ReportingModule(BaseModule):
         self.generate_report_btn.setEnabled(True)
         self.report_status_label.setText("Report failed.")
         self.show_error("Report Failed", message)
+
+    def _date_range_label(self) -> str:
+        start = self._last_filters.get('start_date')
+        end = self._last_filters.get('end_date')
+        if start and end:
+            return f"{start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')}"
+        if self._last_report_type == "Top Customers":
+            return "All Time"
+        return "N/A"
 
     def export_report(self):
         """Export report to CSV"""
@@ -405,6 +425,14 @@ class ReportingModule(BaseModule):
             try:
                 with open(file_path, 'w', newline='') as f:
                     writer = csv.writer(f)
+
+                    # Title block
+                    writer.writerow(["JobDocs - JobBOSS Reporting"])
+                    writer.writerow(["Report:", self._last_report_type or ""])
+                    writer.writerow(["Date Range:", self._date_range_label()])
+                    generated = self._last_generated_at
+                    writer.writerow(["Generated:", generated.strftime('%Y-%m-%d %H:%M:%S') if generated else ""])
+                    writer.writerow([])
 
                     # Write headers
                     headers = []
