@@ -74,6 +74,13 @@ ORDER BY Job_Count DESC
 _JOB_COUNT_QUERY = "SELECT COUNT(*) AS Job_Count FROM Job WHERE Released_Date >= %s"
 _JOB_COUNT_ALL_QUERY = "SELECT COUNT(*) AS Job_Count FROM Job WHERE Released_Date IS NOT NULL"
 
+_DISTINCT_CUSTOMERS_QUERY = """
+SELECT DISTINCT Customer
+FROM Job
+WHERE Customer IS NOT NULL AND Customer <> ''
+ORDER BY Customer
+"""
+
 
 def _keyring_key(username: str) -> str:
     return f"jobboss_db:{username}"
@@ -153,6 +160,17 @@ def _rows_from_jobs(raw_rows: List[dict]) -> List[Dict[str, str]]:
             'status': r.get('Status') or '',
         })
     return rows
+
+
+def fetch_customers(settings: Dict[str, Any]) -> List[str]:
+    """Distinct customer names from Job, for populating the Customer filter combo."""
+    if not is_configured(settings):
+        raise RuntimeError("JobBOSS DB is not configured")
+    dsn, connect_kwargs = _connect_kwargs(settings)
+    with pytds.connect(dsn, **connect_kwargs) as conn:
+        with conn.cursor() as cur:
+            cur.execute(_DISTINCT_CUSTOMERS_QUERY)
+            return [r['Customer'] for r in cur.fetchall() if r.get('Customer')]
 
 
 def fetch_report(settings: Dict[str, Any], report_type: str,

@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 from PyQt6 import uic
 
 from core.base_module import BaseModule
-from experimental.db_integration import is_configured, test_connection, fetch_report
+from experimental.db_integration import is_configured, test_connection, fetch_report, fetch_customers
 
 _REPORT_COLUMNS = ('date', 'customer', 'job', 'description', 'status')
 
@@ -34,6 +34,25 @@ class _ConnectWorker(QThread):
     def run(self):
         ok, message = test_connection(self._settings)
         self.finished_ok.emit(ok, message)
+
+
+class _CustomerListWorker(QThread):
+    """Fetches the distinct customer list to populate the Customer filter combo."""
+
+    success = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def __init__(self, settings: dict):
+        super().__init__()
+        self._settings = settings
+
+    def run(self):
+        try:
+            customers = fetch_customers(self._settings)
+        except Exception as exc:
+            self.error.emit(f"Customer list query failed ({type(exc).__name__})")
+        else:
+            self.success.emit(customers)
 
 
 class _ReportWorker(QThread):
@@ -80,6 +99,7 @@ class ReportingModule(BaseModule):
         self._db_ready = False
         self._connect_worker = None
         self._report_worker = None
+        self._customer_worker = None
 
     def get_name(self) -> str:
         return "Reports (Beta)"
@@ -192,6 +212,7 @@ class ReportingModule(BaseModule):
             self.db_status_label.setText("Status: Connected")
             self.db_status_label.setStyleSheet("color: green;")
             self.log_message("Connected to JobBOSS DB")
+            self._load_customer_list()
         else:
             self.db_status_label.setText(f"Status: {message}")
             self.db_status_label.setStyleSheet("color: #999;")
@@ -202,6 +223,26 @@ class ReportingModule(BaseModule):
         self.disconnect_db_btn.setEnabled(False)
         self.db_status_label.setText("Status: Not connected")
         self.db_status_label.setStyleSheet("color: #999;")
+
+    def _load_customer_list(self):
+        """Populate the Customer filter combo from JobBOSS after a successful connect."""
+        self._customer_worker = _CustomerListWorker(self._jobboss_settings())
+        self._customer_worker.success.connect(self._on_customers_loaded)
+        self._customer_worker.error.connect(
+            lambda msg: self.log_message(f"Reporting: {msg}")
+        )
+        self._customer_worker.start()
+
+    def _on_customers_loaded(self, customers: list):
+        current = self.report_customer_combo.currentText()
+        self.report_customer_combo.clear()
+        self.report_customer_combo.addItem("All Customers")
+        self.report_customer_combo.addItems(customers)
+        idx = self.report_customer_combo.findText(current)
+        if idx >= 0:
+            self.report_customer_combo.setCurrentIndex(idx)
+        else:
+            self.report_customer_combo.setCurrentText(current)
 
     # ==================== Report Generation ====================
 
@@ -294,6 +335,6 @@ class ReportingModule(BaseModule):
 
     def cleanup(self):
         """Cleanup resources"""
-        for worker in (self._connect_worker, self._report_worker):
+        for worker in (self._connect_worker, self._report_worker, self._customer_worker):
             if worker is not None and worker.isRunning():
                 worker.wait(2000)
