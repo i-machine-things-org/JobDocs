@@ -95,6 +95,7 @@ class ReportingModule(BaseModule):
         self.report_customer_combo = None
         self.report_start_date = None
         self.report_end_date = None
+        self._default_table_headers = []
 
         self._db_ready = False
         self._connect_worker = None
@@ -147,19 +148,46 @@ class ReportingModule(BaseModule):
         self.disconnect_db_btn.clicked.connect(self.disconnect_from_db)
         self.generate_report_btn.clicked.connect(self.generate_report)
         widget.export_report_btn.clicked.connect(self.export_report)
-        self.report_type_combo.currentTextChanged.connect(self._update_filter_enabled_state)
-        self._update_filter_enabled_state(self.report_type_combo.currentText())
+        self._default_table_headers = [
+            self.report_table.horizontalHeaderItem(col).text()
+            for col in range(self.report_table.columnCount())
+        ]
+        self.report_type_combo.currentTextChanged.connect(self._on_report_type_changed)
+        self._on_report_type_changed(self.report_type_combo.currentText())
 
         return widget
+
+    def _on_report_type_changed(self, report_type: str):
+        self._update_filter_enabled_state(report_type)
+        self._update_table_headers(report_type)
 
     def _update_filter_enabled_state(self, report_type: str):
         """Grey out the Customer/Date filters when the selected report type
         doesn't use them, instead of silently ignoring whatever's typed in.
         """
         self.report_customer_combo.setEnabled(report_type == "Jobs by Customer")
-        is_date_range = report_type == "Jobs by Date Range"
-        self.report_start_date.setEnabled(is_date_range)
-        self.report_end_date.setEnabled(is_date_range)
+        uses_dates = report_type in ("Jobs by Date Range", "Top Customers")
+        self.report_start_date.setEnabled(uses_dates)
+        self.report_end_date.setEnabled(uses_dates)
+        # Date range is required for "Jobs by Date Range", optional for "Top
+        # Customers" (blank = all time there) -- say so in the placeholder.
+        placeholder = "YYYY-MM-DD" if report_type == "Jobs by Date Range" else "YYYY-MM-DD (optional)"
+        self.report_start_date.setPlaceholderText(placeholder)
+        self.report_end_date.setPlaceholderText(placeholder)
+
+    def _update_table_headers(self, report_type: str):
+        """Relabel the fixed Date/Customer/Job #/Description/Status columns
+        for aggregate reports that repurpose them for different data, instead
+        of showing misleading headers for what's actually in each cell.
+        """
+        if report_type == "Top Customers":
+            headers = ['', 'Customer', 'Job Count', '', 'Gross Revenue']
+        elif report_type == "Job Statistics":
+            headers = ['', '', '', 'Metric', 'Value']
+        else:
+            headers = self._default_table_headers
+        for col, label in enumerate(headers):
+            self.report_table.setHorizontalHeaderItem(col, QTableWidgetItem(label))
 
     def _get_ui_path(self, relative_path: str) -> Path:
         """Get path to UI file"""
@@ -268,6 +296,19 @@ class ReportingModule(BaseModule):
             except ValueError:
                 self.show_error("Invalid Date", "Enter Start Date and End Date as YYYY-MM-DD.")
                 return
+        elif report_type == "Top Customers":
+            start_text = self.report_start_date.text().strip()
+            end_text = self.report_end_date.text().strip()
+            if start_text or end_text:
+                try:
+                    filters['start_date'] = datetime.strptime(start_text, '%Y-%m-%d').date()
+                    filters['end_date'] = datetime.strptime(end_text, '%Y-%m-%d').date()
+                except ValueError:
+                    self.show_error(
+                        "Invalid Date",
+                        "Enter both Start Date and End Date as YYYY-MM-DD, or leave both blank for all time."
+                    )
+                    return
 
         self.generate_report_btn.setEnabled(False)
         self.report_status_label.setText(f"Running '{report_type}'...")

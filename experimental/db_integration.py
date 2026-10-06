@@ -64,11 +64,19 @@ ORDER BY Released_Date DESC
 """
 
 _TOP_CUSTOMERS_QUERY = """
-SELECT TOP 10 Customer, COUNT(*) AS Job_Count
+SELECT TOP 10 Customer, COUNT(*) AS Job_Count, SUM(Total_Price) AS Gross_Revenue
 FROM Job
 WHERE Released_Date IS NOT NULL
 GROUP BY Customer
-ORDER BY Job_Count DESC
+ORDER BY Gross_Revenue DESC
+"""
+
+_TOP_CUSTOMERS_QUERY_RANGED = """
+SELECT TOP 10 Customer, COUNT(*) AS Job_Count, SUM(Total_Price) AS Gross_Revenue
+FROM Job
+WHERE Released_Date BETWEEN %s AND %s
+GROUP BY Customer
+ORDER BY Gross_Revenue DESC
 """
 
 _JOB_COUNT_QUERY = "SELECT COUNT(*) AS Job_Count FROM Job WHERE Released_Date >= %s"
@@ -203,10 +211,16 @@ def fetch_report(settings: Dict[str, Any], report_type: str,
                 return _rows_from_jobs(cur.fetchall())
 
             if report_type == "Top Customers":
-                cur.execute(_TOP_CUSTOMERS_QUERY)
+                start = filters.get('start_date')
+                end = filters.get('end_date')
+                if start and end:
+                    cur.execute(_TOP_CUSTOMERS_QUERY_RANGED, (start, end))
+                else:
+                    cur.execute(_TOP_CUSTOMERS_QUERY)
                 return [
-                    {'date': '', 'customer': r['Customer'] or '', 'job': '',
-                     'description': 'Job Count', 'status': str(r['Job_Count'])}
+                    {'date': '', 'customer': r['Customer'] or '',
+                     'job': str(r['Job_Count']), 'description': '',
+                     'status': f"${r['Gross_Revenue']:,.2f}" if r['Gross_Revenue'] is not None else '$0.00'}
                     for r in cur.fetchall()
                 ]
 
