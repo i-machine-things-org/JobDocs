@@ -40,33 +40,36 @@ REPORT_TYPES = (
 
 # Row-per-job reports all select the same columns, matching the report_table's
 # fixed Date/Customer/Job #/Description/Status layout (reporting_tab.ui).
-_JOB_COLUMNS = "Job, Customer, Description, Status, Released_Date"
+# Order_Date, not Released_Date -- found by manual testing that Released_Date
+# has only been populated for roughly the last year on this schema, so any
+# filter/sort built on it silently went empty for older data.
+_JOB_COLUMNS = "Job, Customer, Description, Status, Order_Date"
 
 _RECENT_JOBS_QUERY = f"""
 SELECT TOP 50 {_JOB_COLUMNS}
 FROM Job
-WHERE Released_Date IS NOT NULL
-ORDER BY Released_Date DESC
+WHERE Order_Date IS NOT NULL
+ORDER BY Order_Date DESC
 """
 
 _JOBS_BY_CUSTOMER_QUERY = f"""
 SELECT TOP 200 {_JOB_COLUMNS}
 FROM Job
-WHERE Released_Date IS NOT NULL AND Customer LIKE %s
-ORDER BY Released_Date DESC
+WHERE Order_Date IS NOT NULL AND Customer LIKE %s
+ORDER BY Order_Date DESC
 """
 
 _JOBS_BY_DATE_RANGE_QUERY = f"""
 SELECT TOP 500 {_JOB_COLUMNS}
 FROM Job
-WHERE Released_Date BETWEEN %s AND %s
-ORDER BY Released_Date DESC
+WHERE Order_Date BETWEEN %s AND %s
+ORDER BY Order_Date DESC
 """
 
 _TOP_CUSTOMERS_QUERY = """
 SELECT TOP 10 Customer, COUNT(*) AS Job_Count, SUM(Total_Price) AS Gross_Revenue
 FROM Job
-WHERE Released_Date IS NOT NULL
+WHERE Order_Date IS NOT NULL
 GROUP BY Customer
 ORDER BY Gross_Revenue DESC
 """
@@ -74,13 +77,13 @@ ORDER BY Gross_Revenue DESC
 _TOP_CUSTOMERS_QUERY_RANGED = """
 SELECT TOP 10 Customer, COUNT(*) AS Job_Count, SUM(Total_Price) AS Gross_Revenue
 FROM Job
-WHERE Released_Date BETWEEN %s AND %s
+WHERE Order_Date BETWEEN %s AND %s
 GROUP BY Customer
 ORDER BY Gross_Revenue DESC
 """
 
-_JOB_COUNT_QUERY = "SELECT COUNT(*) AS Job_Count FROM Job WHERE Released_Date >= %s"
-_JOB_COUNT_ALL_QUERY = "SELECT COUNT(*) AS Job_Count FROM Job WHERE Released_Date IS NOT NULL"
+_JOB_COUNT_QUERY = "SELECT COUNT(*) AS Job_Count FROM Job WHERE Order_Date >= %s"
+_JOB_COUNT_ALL_QUERY = "SELECT COUNT(*) AS Job_Count FROM Job WHERE Order_Date IS NOT NULL"
 
 _DISTINCT_CUSTOMERS_QUERY = """
 SELECT DISTINCT Customer
@@ -159,9 +162,9 @@ def test_connection(settings: Dict[str, Any]) -> tuple[bool, str]:
 def _rows_from_jobs(raw_rows: List[dict]) -> List[Dict[str, str]]:
     rows = []
     for r in raw_rows:
-        released = r.get('Released_Date')
+        order_date = r.get('Order_Date')
         rows.append({
-            'date': released.strftime('%Y-%m-%d') if released else '',
+            'date': order_date.strftime('%Y-%m-%d') if order_date else '',
             'customer': r.get('Customer') or '',
             'job': r.get('Job') or '',
             'description': r.get('Description') or '',

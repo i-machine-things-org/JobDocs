@@ -25,6 +25,8 @@ This directory contains experimental and work-in-progress features that are **no
 3. The password is **not** written to `settings.json`. It's stored in your OS credential store (Windows Credential Manager, macOS Keychain, or Linux Secret Service) via the `keyring` package, under service name `JobDocs`.
 4. On the Reporting tab, click **Connect to Database**, then pick a report type and **Generate Report**.
 
+**Date field**: every report filters/sorts on `Job.Order_Date`, not `Released_Date` -- found by manual testing that `Released_Date` is only populated for roughly the last year on this schema, which made every date-based report silently come back empty for anything older. If your schema's history lives on yet another field, swap `_JOB_COLUMNS` and the query constants in `db_integration.py` (all in one place).
+
 **Known gap**: the `Status` column assumed by every report (`Job.Status`, same single-char convention as `Job_Operation.Status`), and `Total_Price` (summed per customer for Top Customers' "Gross Revenue") have not been verified against a real schema from this codebase alone -- confirm both match your JobBOSS version the first time you connect. Report results currently only cover the `Job` table (no join to operations/work centers).
 
 **Gross Revenue grants**: Top Customers sums `Total_Price`, so the read-only login above also needs to be able to read that column -- `GRANT SELECT ON dbo.Job` already covers it (SQL Server grants apply to the whole table), but if your DBA prefers column-level grants instead, include `Total_Price` explicitly. This is the one report that exposes dollar figures; the rest only show job/customer/schedule metadata.
