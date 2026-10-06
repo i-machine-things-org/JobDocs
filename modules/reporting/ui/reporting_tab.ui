@@ -315,7 +315,7 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
         <item>
          <widget class="QPushButton" name="export_report_btn">
           <property name="text">
-           <string>Export to CSV</string>
+           <string>Export Report...</string>
           </property>
          </widget>
         </item>
