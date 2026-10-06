@@ -408,50 +408,94 @@ class ReportingModule(BaseModule):
             return "All Time"
         return "N/A"
 
+    def _export_title_block(self) -> list:
+        generated = self._last_generated_at
+        return [
+            ["JobDocs - JobBOSS Reporting"],
+            ["Report:", self._last_report_type or ""],
+            ["Date Range:", self._date_range_label()],
+            ["Generated:", generated.strftime('%Y-%m-%d %H:%M:%S') if generated else ""],
+            [],
+        ]
+
+    def _export_table_rows(self) -> tuple:
+        """(headers, data_rows) from report_table, as plain strings."""
+        headers = [
+            self.report_table.horizontalHeaderItem(col).text()
+            for col in range(self.report_table.columnCount())
+        ]
+        data_rows = []
+        for row in range(self.report_table.rowCount()):
+            data_rows.append([
+                self.report_table.item(row, col).text() if self.report_table.item(row, col) else ""
+                for col in range(self.report_table.columnCount())
+            ])
+        return headers, data_rows
+
     def export_report(self):
-        """Export report to CSV"""
+        """Export report to CSV or Excel (.xlsx)"""
         if self.report_table.rowCount() == 0:
             self.show_error("No Data", "Generate a report first before exporting")
             return
 
-        file_path, _ = QFileDialog.getSaveFileName(
+        file_path, selected_filter = QFileDialog.getSaveFileName(
             self._widget,
             "Export Report",
             f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            "CSV Files (*.csv)"
+            "CSV Files (*.csv);;Excel Files (*.xlsx)"
         )
+        if not file_path:
+            return
 
-        if file_path:
-            try:
-                with open(file_path, 'w', newline='') as f:
-                    writer = csv.writer(f)
+        is_excel = 'xlsx' in selected_filter.lower() or file_path.lower().endswith('.xlsx')
+        if is_excel and not file_path.lower().endswith('.xlsx'):
+            file_path += '.xlsx'
+        elif not is_excel and not file_path.lower().endswith('.csv'):
+            file_path += '.csv'
 
-                    # Title block
-                    writer.writerow(["JobDocs - JobBOSS Reporting"])
-                    writer.writerow(["Report:", self._last_report_type or ""])
-                    writer.writerow(["Date Range:", self._date_range_label()])
-                    generated = self._last_generated_at
-                    writer.writerow(["Generated:", generated.strftime('%Y-%m-%d %H:%M:%S') if generated else ""])
-                    writer.writerow([])
+        try:
+            if is_excel:
+                self._export_xlsx(file_path)
+            else:
+                self._export_csv(file_path)
+            self.show_info("Export Successful", f"Report exported to:\n{file_path}")
+            self.log_message(f"Exported report to: {file_path}")
+        except Exception as e:
+            self.show_error("Export Failed", f"Failed to export report:\n{str(e)}")
 
-                    # Write headers
-                    headers = []
-                    for col in range(self.report_table.columnCount()):
-                        headers.append(self.report_table.horizontalHeaderItem(col).text())
-                    writer.writerow(headers)
+    def _export_csv(self, file_path: str):
+        headers, data_rows = self._export_table_rows()
+        with open(file_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(self._export_title_block())
+            writer.writerow(headers)
+            writer.writerows(data_rows)
 
-                    # Write data
-                    for row in range(self.report_table.rowCount()):
-                        row_data = []
-                        for col in range(self.report_table.columnCount()):
-                            item = self.report_table.item(row, col)
-                            row_data.append(item.text() if item else "")
-                        writer.writerow(row_data)
+    def _export_xlsx(self, file_path: str):
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
 
-                self.show_info("Export Successful", f"Report exported to:\n{file_path}")
-                self.log_message(f"Exported report to: {file_path}")
-            except Exception as e:
-                self.show_error("Export Failed", f"Failed to export report:\n{str(e)}")
+        title_block = self._export_title_block()
+        headers, data_rows = self._export_table_rows()
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Report"
+        for row in title_block:
+            ws.append(row)
+        header_row_idx = len(title_block) + 1
+        ws.append(headers)
+        for row in data_rows:
+            ws.append(row)
+
+        ws['A1'].font = Font(bold=True, size=12)
+        for cell in ws[header_row_idx]:
+            cell.font = Font(bold=True)
+        for col_cells in ws.columns:
+            width = max((len(str(c.value)) for c in col_cells if c.value is not None), default=0)
+            ws.column_dimensions[col_cells[0].column_letter].width = max(10, min(40, width + 2))
+
+        wb.save(file_path)
 
     def cleanup(self):
         """Cleanup resources"""

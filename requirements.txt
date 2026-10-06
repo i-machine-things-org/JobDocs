@@ -12,6 +12,8 @@ python-tds==1.13.0
 # OS credential store for the JobBOSS DB password (Windows Credential Manager /
 # macOS Keychain / Linux Secret Service) -- never store it in settings.json
 keyring>=24.0.0
+# .xlsx export (Reporting module) -- same pin as the Report Fixer plugins
+openpyxl>=3.1
 
 # For building executables (optional)
 # pyinstaller>=6.0.0
