@@ -28,15 +28,25 @@ class _DateCalendarPopupFilter(QObject):
     date, in addition to Qt's built-in dropdown-arrow click (calendarPopup).
     Built on public QCalendarWidget/QWidget APIs rather than QDateEdit's
     private popup internals, which aren't safe to trigger programmatically.
+
+    QAbstractSpinBox (QDateEdit's base) routes mouse events for the visible
+    text to its internal child QLineEdit, not to the QDateEdit itself -- so
+    this must be installed on date_edit.lineEdit(), not date_edit directly,
+    or a real double-click never reaches eventFilter() at all.
     """
 
+    def __init__(self, date_edit: QDateEdit, parent=None):
+        super().__init__(parent)
+        self._date_edit = date_edit
+
     def eventFilter(self, obj, event) -> bool:
-        if event.type() == QEvent.Type.MouseButtonDblClick and isinstance(obj, QDateEdit):
-            self._show_popup(obj)
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            self._show_popup()
             return True
         return False
 
-    def _show_popup(self, date_edit: QDateEdit):
+    def _show_popup(self):
+        date_edit = self._date_edit
         calendar = QCalendarWidget()
         calendar.setWindowFlags(Qt.WindowType.Popup)
         calendar.setSelectedDate(date_edit.date())
@@ -169,9 +179,10 @@ class ReportingModule(BaseModule):
         self.report_start_date = widget.report_start_date
         self.report_end_date = widget.report_end_date
 
-        self._date_popup_filter = _DateCalendarPopupFilter(widget)
-        self.report_start_date.installEventFilter(self._date_popup_filter)
-        self.report_end_date.installEventFilter(self._date_popup_filter)
+        self._start_date_popup_filter = _DateCalendarPopupFilter(self.report_start_date, widget)
+        self.report_start_date.lineEdit().installEventFilter(self._start_date_popup_filter)
+        self._end_date_popup_filter = _DateCalendarPopupFilter(self.report_end_date, widget)
+        self.report_end_date.lineEdit().installEventFilter(self._end_date_popup_filter)
 
         # Setup table properties
         self.report_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
