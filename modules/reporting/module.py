@@ -127,8 +127,19 @@ class ReportingModule(BaseModule):
         self.disconnect_db_btn.clicked.connect(self.disconnect_from_db)
         self.generate_report_btn.clicked.connect(self.generate_report)
         widget.export_report_btn.clicked.connect(self.export_report)
+        self.report_type_combo.currentTextChanged.connect(self._update_filter_enabled_state)
+        self._update_filter_enabled_state(self.report_type_combo.currentText())
 
         return widget
+
+    def _update_filter_enabled_state(self, report_type: str):
+        """Grey out the Customer/Date filters when the selected report type
+        doesn't use them, instead of silently ignoring whatever's typed in.
+        """
+        self.report_customer_combo.setEnabled(report_type == "Jobs by Customer")
+        is_date_range = report_type == "Jobs by Date Range"
+        self.report_start_date.setEnabled(is_date_range)
+        self.report_end_date.setEnabled(is_date_range)
 
     def _get_ui_path(self, relative_path: str) -> Path:
         """Get path to UI file"""
