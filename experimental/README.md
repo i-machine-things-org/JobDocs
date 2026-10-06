@@ -25,7 +25,9 @@ This directory contains experimental and work-in-progress features that are **no
 3. The password is **not** written to `settings.json`. It's stored in your OS credential store (Windows Credential Manager, macOS Keychain, or Linux Secret Service) via the `keyring` package, under service name `JobDocs`.
 4. On the Reporting tab, click **Connect to Database**, then pick a report type and **Generate Report**.
 
-**Known gap**: the `Status` column assumed by every report (`Job.Status`, same single-char convention as `Job_Operation.Status`) hasn't been verified against a real schema from this codebase alone -- confirm it matches your JobBOSS version the first time you connect. Report results currently only cover the `Job` table (no join to operations/work centers, no pricing/cost fields).
+**Known gap**: the `Status` column assumed by every report (`Job.Status`, same single-char convention as `Job_Operation.Status`), and `Total_Price` (summed per customer for Top Customers' "Gross Revenue") have not been verified against a real schema from this codebase alone -- confirm both match your JobBOSS version the first time you connect. Report results currently only cover the `Job` table (no join to operations/work centers).
+
+**Gross Revenue grants**: Top Customers sums `Total_Price`, so the read-only login above also needs to be able to read that column -- `GRANT SELECT ON dbo.Job` already covers it (SQL Server grants apply to the whole table), but if your DBA prefers column-level grants instead, include `Total_Price` explicitly. This is the one report that exposes dollar figures; the rest only show job/customer/schedule metadata.
 
 **Known limitation -- unencrypted transport by default**: like `shop-schedule`, `pytds` doesn't encrypt the connection unless given a CA certificate, which isn't wired up here yet. This matches the same trust model as existing ODBC/Excel access to the same server; not a new exposure, but worth closing later if someone wants to add `JOBBOSS_DB_CAFILE`-style TLS support (see `shop-schedule/README.md` for the pattern).
 
