@@ -6,5 +6,14 @@ PyQt6>=6.5.0
 # PDF preview in file list (Quote module)
 pymupdf>=1.26.0,<1.28.0  # Pin to tested range; verify compatibility before upgrading
 
+# JobBOSS SQL Server access (Reporting module, experimental) -- pure-Python
+# TDS client, pinned to match shop-schedule's proven setup (see jobboss_db.py there)
+python-tds==1.13.0
+# OS credential store for the JobBOSS DB password (Windows Credential Manager /
+# macOS Keychain / Linux Secret Service) -- never store it in settings.json
+keyring>=24.0.0
+# .xlsx export (Reporting module) -- same pin as the Report Fixer plugins
+openpyxl>=3.1
+
 # For building executables (optional)
 # pyinstaller>=6.0.0
