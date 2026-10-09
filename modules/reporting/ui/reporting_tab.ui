@@ -224,15 +224,10 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
          </widget>
         </item>
         <item row="0" column="1">
-         <widget class="QComboBox" name="report_customer_combo">
-          <property name="editable">
-           <bool>true</bool>
+         <widget class="QPushButton" name="customer_filter_btn">
+          <property name="text">
+           <string>Customers: All</string>
           </property>
-          <item>
-           <property name="text">
-            <string>All Customers</string>
-           </property>
-          </item>
          </widget>
         </item>
         <item row="1" column="0">
@@ -300,6 +295,13 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
             <month>1</month>
             <day>1</day>
            </date>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="0" colspan="2">
+         <widget class="QCheckBox" name="exclude_assemblies_check">
+          <property name="text">
+           <string>Exclude assembly sub-jobs</string>
           </property>
          </widget>
         </item>

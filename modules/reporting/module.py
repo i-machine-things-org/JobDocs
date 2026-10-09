@@ -13,7 +13,8 @@ from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal, QObject, QEvent, Qt
 from PyQt6.QtWidgets import (
     QWidget, QTableWidgetItem, QFileDialog, QHeaderView, QAbstractItemView,
-    QDateEdit, QCalendarWidget
+    QDateEdit, QCalendarWidget, QDialog, QDialogButtonBox, QListWidget,
+    QListWidgetItem, QPushButton, QVBoxLayout, QHBoxLayout
 )
 from PyQt6 import uic
 
@@ -41,6 +42,55 @@ _JOB_REPORT_HEADERS = [
 def _report_columns(report_type: str) -> tuple:
     """The row-dict keys to pull into report_table, in column order, for report_type."""
     return _JOB_REPORT_COLUMNS if report_type == "Job Report" else _REPORT_COLUMNS
+
+
+class _CustomerPickerDialog(QDialog):
+    """Pick zero, one, or several customers for a report filter.
+
+    Zero checked means "All Customers", not "no customers" -- Clear really
+    clears back to All, it doesn't produce an empty/no-match report.
+    """
+
+    def __init__(self, customers: list, selected: list, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Customers")
+        self.resize(320, 420)
+        layout = QVBoxLayout(self)
+
+        self.list_widget = QListWidget()
+        selected_set = set(selected)
+        for name in customers:
+            item = QListWidgetItem(name)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if name in selected_set else Qt.CheckState.Unchecked)
+            self.list_widget.addItem(item)
+        layout.addWidget(self.list_widget)
+
+        btn_row = QHBoxLayout()
+        select_all_btn = QPushButton("Select All")
+        select_all_btn.clicked.connect(lambda: self._set_all(Qt.CheckState.Checked))
+        clear_btn = QPushButton("Clear (All Customers)")
+        clear_btn.clicked.connect(lambda: self._set_all(Qt.CheckState.Unchecked))
+        btn_row.addWidget(select_all_btn)
+        btn_row.addWidget(clear_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _set_all(self, state: Qt.CheckState):
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(state)
+
+    def selected_customers(self) -> list:
+        return [
+            self.list_widget.item(i).text()
+            for i in range(self.list_widget.count())
+            if self.list_widget.item(i).checkState() == Qt.CheckState.Checked
+        ]
 
 
 class _DateCalendarPopupFilter(QObject):
@@ -152,10 +202,13 @@ class ReportingModule(BaseModule):
         self.connect_db_btn = None
         self.disconnect_db_btn = None
         self.db_status_label = None
-        self.report_customer_combo = None
+        self.customer_filter_btn = None
+        self.exclude_assemblies_check = None
         self.report_start_date = None
         self.report_end_date = None
         self._default_table_headers = []
+        self._available_customers = []
+        self._selected_customers = []
 
         self._db_ready = False
         self._connect_worker = None
@@ -202,7 +255,8 @@ class ReportingModule(BaseModule):
         self.connect_db_btn = widget.connect_db_btn
         self.disconnect_db_btn = widget.disconnect_db_btn
         self.db_status_label = widget.db_status_label
-        self.report_customer_combo = widget.report_customer_combo
+        self.customer_filter_btn = widget.customer_filter_btn
+        self.exclude_assemblies_check = widget.exclude_assemblies_check
         self.report_start_date = widget.report_start_date
         self.report_end_date = widget.report_end_date
 
@@ -219,6 +273,7 @@ class ReportingModule(BaseModule):
         self.connect_db_btn.clicked.connect(self.connect_to_db)
         self.disconnect_db_btn.clicked.connect(self.disconnect_from_db)
         self.generate_report_btn.clicked.connect(self.generate_report)
+        self.customer_filter_btn.clicked.connect(self._open_customer_picker)
         widget.export_report_btn.clicked.connect(self.export_report)
         self._default_table_headers = [
             self.report_table.horizontalHeaderItem(col).text()
@@ -237,7 +292,8 @@ class ReportingModule(BaseModule):
         """Grey out the Customer/Date filters when the selected report type
         doesn't use them, instead of silently ignoring whatever's typed in.
         """
-        self.report_customer_combo.setEnabled(report_type in ("Jobs by Customer", "Job Report"))
+        self.customer_filter_btn.setEnabled(report_type in ("Jobs by Customer", "Job Report"))
+        self.exclude_assemblies_check.setEnabled(report_type == "Job Report")
         uses_dates = report_type in ("Jobs by Date Range", "Top Customers")
         self.report_start_date.setEnabled(uses_dates)
         self.report_end_date.setEnabled(uses_dates)
@@ -344,15 +400,29 @@ class ReportingModule(BaseModule):
         self._customer_worker.start()
 
     def _on_customers_loaded(self, customers: list):
-        current = self.report_customer_combo.currentText()
-        self.report_customer_combo.clear()
-        self.report_customer_combo.addItem("All Customers")
-        self.report_customer_combo.addItems(customers)
-        idx = self.report_customer_combo.findText(current)
-        if idx >= 0:
-            self.report_customer_combo.setCurrentIndex(idx)
+        self._available_customers = customers
+        # Drop any previously-selected customer that's no longer in the list
+        # (e.g. reconnected to a different JobBOSS DB) rather than silently
+        # filtering on a name that can never match again.
+        customer_set = set(customers)
+        self._selected_customers = [c for c in self._selected_customers if c in customer_set]
+        self._update_customer_filter_button_text()
+
+    def _open_customer_picker(self):
+        dialog = _CustomerPickerDialog(self._available_customers, self._selected_customers, self._widget)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._selected_customers = dialog.selected_customers()
+            self._update_customer_filter_button_text()
+
+    def _update_customer_filter_button_text(self):
+        n = len(self._selected_customers)
+        if n == 0:
+            text = "Customers: All"
+        elif n == 1:
+            text = f"Customer: {self._selected_customers[0]}"
         else:
-            self.report_customer_combo.setCurrentText(current)
+            text = f"Customers: {n} selected"
+        self.customer_filter_btn.setText(text)
 
     @staticmethod
     def _picked_date(date_edit: QDateEdit):
@@ -375,9 +445,10 @@ class ReportingModule(BaseModule):
         filters = {}
 
         if report_type in ("Jobs by Customer", "Job Report"):
-            customer = self.report_customer_combo.currentText().strip()
-            if customer and customer != "All Customers":
-                filters['customer'] = customer
+            if self._selected_customers:
+                filters['customers'] = list(self._selected_customers)
+            if report_type == "Job Report" and self.exclude_assemblies_check.isChecked():
+                filters['exclude_assemblies'] = True
         elif report_type == "Jobs by Date Range":
             start = self._picked_date(self.report_start_date)
             end = self._picked_date(self.report_end_date)
@@ -447,13 +518,16 @@ class ReportingModule(BaseModule):
 
     def _export_title_block(self) -> list:
         generated = self._last_generated_at
-        return [
+        customers = self._last_filters.get('customers')
+        rows = [
             ["JobDocs - JobBOSS Reporting"],
             ["Report:", self._last_report_type or ""],
             ["Date Range:", self._date_range_label()],
+            ["Customers:", ", ".join(customers) if customers else "All"],
             ["Generated:", generated.strftime('%Y-%m-%d %H:%M:%S') if generated else ""],
             [],
         ]
+        return rows
 
     def _export_table_rows(self) -> tuple:
         """(headers, data_rows) from report_table, as plain strings."""
@@ -511,6 +585,8 @@ class ReportingModule(BaseModule):
     def _export_xlsx(self, file_path: str):
         from openpyxl import Workbook
         from openpyxl.styles import Font
+        from openpyxl.utils import get_column_letter
+        from openpyxl.worksheet.table import Table, TableStyleInfo
 
         title_block = self._export_title_block()
         headers, data_rows = self._export_table_rows()
@@ -521,7 +597,21 @@ class ReportingModule(BaseModule):
         for row in title_block:
             ws.append(row)
         header_row_idx = len(title_block) + 1
-        ws.append(headers)
+
+        # openpyxl's Table requires non-empty, unique headers -- some report
+        # types repurpose blank columns for aggregate data (e.g. Top
+        # Customers), so blanks get a placeholder name here; the on-screen
+        # report_table is unaffected, this only changes what lands in the file.
+        safe_headers = []
+        seen = set()
+        for i, h in enumerate(headers, start=1):
+            name = h.strip() if h and h.strip() else f"Column{i}"
+            if name in seen:
+                name = f"{name}_{i}"
+            seen.add(name)
+            safe_headers.append(name)
+
+        ws.append(safe_headers)
         for row in data_rows:
             ws.append(row)
 
@@ -531,6 +621,21 @@ class ReportingModule(BaseModule):
         for col_cells in ws.columns:
             width = max((len(str(c.value)) for c in col_cells if c.value is not None), default=0)
             ws.column_dimensions[col_cells[0].column_letter].width = max(10, min(40, width + 2))
+
+        # Wrap header + data in a real Excel Table with its AutoFilter, so the
+        # exported file opens already sortable/filterable per column in Excel
+        # -- not just a plain value dump. Skipped for a header-only (no data
+        # rows) export: nothing to sort/filter, and Excel's Table requires at
+        # least one row below the header.
+        if len(data_rows) > 0:
+            last_col_letter = get_column_letter(len(safe_headers))
+            table_ref = f"A{header_row_idx}:{last_col_letter}{ws.max_row}"
+            table = Table(displayName="ReportTable", ref=table_ref)
+            table.tableStyleInfo = TableStyleInfo(
+                name="TableStyleMedium2", showFirstColumn=False, showLastColumn=False,
+                showRowStripes=True, showColumnStripes=False,
+            )
+            ws.add_table(table)
 
         wb.save(file_path)
 
