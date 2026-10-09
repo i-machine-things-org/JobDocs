@@ -169,6 +169,11 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
          <widget class="QComboBox" name="report_type_combo">
           <item>
            <property name="text">
+            <string>Job Report</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
             <string>Job Statistics</string>
            </property>
           </item>
