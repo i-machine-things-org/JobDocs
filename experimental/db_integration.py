@@ -56,7 +56,7 @@ ORDER BY Order_Date DESC
 _JOBS_BY_CUSTOMER_QUERY = f"""
 SELECT TOP 200 {_JOB_COLUMNS}
 FROM Job
-WHERE Order_Date IS NOT NULL AND Customer LIKE %s
+WHERE Order_Date IS NOT NULL AND {{customer_clause}}
 ORDER BY Order_Date DESC
 """
 
@@ -106,6 +106,13 @@ ORDER BY Customer
 # There's no column anywhere in this schema that corresponds to the sample
 # report's "Classification" field -- left blank in _rows_from_job_report
 # rather than guessed.
+#
+# Assembly_Level=0 means a standalone/top-level job (Top_Lvl_Job == Job);
+# Assembly_Level>0 is a sub-component under a parent assembly job (e.g.
+# "30274A" under parent "30274", Top_Lvl_Job='30274') -- confirmed against
+# production data, including that the sub-component's own Type is often
+# 'Regular' (not 'Assembly'), so Type can't be used for this filter, only
+# Assembly_Level/Top_Lvl_Job. Optionally excluded via filters['exclude_assemblies'].
 _JOB_REPORT_COLUMNS = (
     "Job, Customer, Customer_PO, Customer_PO_LN, Drawing, Part_Number, Rev, "
     "Description, Order_Date, Order_Quantity, Sched_End, Status, Note_Text"
@@ -128,9 +135,21 @@ OUTER APPLY (
     WHERE d.Job = j.Job
     ORDER BY CASE WHEN d.Remaining_Quantity > 0 THEN 0 ELSE 1 END, d.Promised_Date ASC
 ) dlv
-WHERE Status = 'Active' AND Customer LIKE %s
+WHERE Status = 'Active' AND {{customer_clause}} AND {{assembly_clause}}
 ORDER BY Customer, Sched_End
 """
+
+
+def _customer_filter_clause(customers: Optional[List[str]]) -> "tuple[str, tuple]":
+    """Build a 'Customer IN (...)' clause plus its matching parameter tuple
+    for however many customers are selected (0 = no filter -- every job/row,
+    not zero of them; 1 or many both use the same IN-list shape).
+    """
+    names = [c for c in (customers or []) if c]
+    if not names:
+        return "1=1", ()
+    placeholders = ", ".join(["%s"] * len(names))
+    return f"Customer IN ({placeholders})", tuple(names)
 
 
 def _keyring_key(username: str) -> str:
@@ -266,9 +285,10 @@ def fetch_report(settings: Dict[str, Any], report_type: str,
     with pytds.connect(dsn, **connect_kwargs) as conn:
         with conn.cursor() as cur:
             if report_type == "Job Report":
-                customer = (filters.get('customer') or '').strip()
-                like = f"%{customer}%" if customer else "%"
-                cur.execute(_JOB_REPORT_QUERY, (like,))
+                customer_clause, customer_params = _customer_filter_clause(filters.get('customers'))
+                assembly_clause = "Assembly_Level = 0" if filters.get('exclude_assemblies') else "1=1"
+                query = _JOB_REPORT_QUERY.format(customer_clause=customer_clause, assembly_clause=assembly_clause)
+                cur.execute(query, customer_params)
                 return _rows_from_job_report(cur.fetchall())
 
             if report_type == "Recent Jobs":
@@ -276,9 +296,9 @@ def fetch_report(settings: Dict[str, Any], report_type: str,
                 return _rows_from_jobs(cur.fetchall())
 
             if report_type == "Jobs by Customer":
-                customer = (filters.get('customer') or '').strip()
-                like = f"%{customer}%" if customer else "%"
-                cur.execute(_JOBS_BY_CUSTOMER_QUERY, (like,))
+                customer_clause, customer_params = _customer_filter_clause(filters.get('customers'))
+                query = _JOBS_BY_CUSTOMER_QUERY.format(customer_clause=customer_clause)
+                cur.execute(query, customer_params)
                 return _rows_from_jobs(cur.fetchall())
 
             if report_type == "Jobs by Date Range":

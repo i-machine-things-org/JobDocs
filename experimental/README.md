@@ -30,6 +30,10 @@ This directory contains experimental and work-in-progress features that are **no
 3. The password is **not** written to `settings.json`. It's stored in your OS credential store (Windows Credential Manager, macOS Keychain, or Linux Secret Service) via the `keyring` package, under service name `JobDocs`.
 4. On the Reporting tab, click **Connect to Database**, then pick a report type and **Generate Report**.
 
+**Customer filter**: for "Jobs by Customer" and "Job Report", the Customer button opens a checklist picker -- pick zero (All Customers), one, or several at once. "Job Report" also has an "Exclude assembly sub-jobs" checkbox (filters on `Assembly_Level = 0`, i.e. `Top_Lvl_Job == Job`) to drop component jobs like "30274A" under a parent "30274" from the results.
+
+**Exported files are real Excel Tables**: the `.xlsx` export wraps the header + data rows in an Excel Table with its AutoFilter, so every column is sortable/filterable as soon as the file opens in Excel -- not a plain value dump.
+
 **Date field**: every report filters/sorts on `Job.Order_Date`, not `Released_Date` -- found by manual testing that `Released_Date` is only populated for roughly the last year on this schema, which made every date-based report silently come back empty for anything older. If your schema's history lives on yet another field, swap `_JOB_COLUMNS` and the query constants in `db_integration.py` (all in one place).
 
 **Known gap**: the `Status` column assumed by every report (`Job.Status`, same single-char convention as `Job_Operation.Status`), and `Total_Price` (summed per customer for Top Customers' "Gross Revenue") have not been verified against a real schema from this codebase alone -- confirm both match your JobBOSS version the first time you connect. Everything except Job Report covers the `Job` table alone (no join to operations/work centers).
