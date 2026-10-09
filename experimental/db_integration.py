@@ -31,6 +31,7 @@ import pytds
 KEYRING_SERVICE = 'JobDocs'
 
 REPORT_TYPES = (
+    "Job Report",
     "Job Statistics",
     "Jobs by Customer",
     "Jobs by Date Range",
@@ -90,6 +91,45 @@ SELECT DISTINCT Customer
 FROM Job
 WHERE Customer IS NOT NULL AND Customer <> ''
 ORDER BY Customer
+"""
+
+# Mirrors JobBOSS's own canned "Job Report" (jobRpt) export: one row per open
+# job with PO/line/drawing/promise-date detail, not just the narrow
+# Date/Customer/Job/Description/Status set the other report types share.
+#
+# Customer_PO/Customer_PO_LN (not SO_Detail.PO/Line) are the real source for
+# PO Number/Line on this schema -- confirmed against production data that
+# SO_Detail is entirely unused (0 rows) at this install, while Customer_PO is
+# populated on ~93% of jobs. Likewise Rev (not Revision, which is always
+# blank here) is the actually-populated revision field.
+#
+# There's no column anywhere in this schema that corresponds to the sample
+# report's "Classification" field -- left blank in _rows_from_job_report
+# rather than guessed.
+_JOB_REPORT_COLUMNS = (
+    "Job, Customer, Customer_PO, Customer_PO_LN, Drawing, Part_Number, Rev, "
+    "Description, Order_Date, Order_Quantity, Sched_End, Status, Note_Text"
+)
+
+# OUTER APPLY, not CROSS APPLY: unlike shop-schedule's current-operation lookup
+# (every open job has at least one non-complete Job_Operation row by
+# definition), a job can have zero Delivery rows -- OUTER APPLY keeps that job
+# in the report with a blank Promise Date instead of silently dropping it.
+# When a job has multiple Delivery rows (partial shipments), the soonest still-
+# open one (Remaining_Quantity > 0) is used as "the" promise date; if every
+# delivery on the job has already fully shipped, falls back to the soonest by
+# date so a fully-shipped-but-still-Active job still shows something.
+_JOB_REPORT_QUERY = f"""
+SELECT TOP 500 {_JOB_REPORT_COLUMNS}, dlv.Promised_Date
+FROM Job j
+OUTER APPLY (
+    SELECT TOP 1 d.Promised_Date
+    FROM Delivery d
+    WHERE d.Job = j.Job
+    ORDER BY CASE WHEN d.Remaining_Quantity > 0 THEN 0 ELSE 1 END, d.Promised_Date ASC
+) dlv
+WHERE Status = 'Active' AND Customer LIKE %s
+ORDER BY Customer, Sched_End
 """
 
 
@@ -173,6 +213,34 @@ def _rows_from_jobs(raw_rows: List[dict]) -> List[Dict[str, str]]:
     return rows
 
 
+def _rows_from_job_report(raw_rows: List[dict]) -> List[Dict[str, str]]:
+    rows = []
+    for r in raw_rows:
+        order_date = r.get('Order_Date')
+        sched_end = r.get('Sched_End')
+        promised = r.get('Promised_Date')
+        rows.append({
+            # No column in this schema corresponds to the sample report's
+            # "Classification" field -- see _JOB_REPORT_QUERY.
+            'classification': '',
+            'job': r.get('Job') or '',
+            'customer': r.get('Customer') or '',
+            'po': r.get('Customer_PO') or '',
+            'line': r.get('Customer_PO_LN') or '',
+            'drawing': r.get('Drawing') or '',
+            'part_number': r.get('Part_Number') or '',
+            'revision': r.get('Rev') or '',
+            'description': r.get('Description') or '',
+            'order_date': order_date.strftime('%Y-%m-%d') if order_date else '',
+            'order_qty': str(r['Order_Quantity']) if r.get('Order_Quantity') is not None else '',
+            'sched_end': sched_end.strftime('%Y-%m-%d') if sched_end else '',
+            'promise_date': promised.strftime('%Y-%m-%d') if promised else '',
+            'status': r.get('Status') or '',
+            'notes': (r.get('Note_Text') or '').strip(),
+        })
+    return rows
+
+
 def fetch_customers(settings: Dict[str, Any]) -> List[str]:
     """Distinct customer names from Job, for populating the Customer filter combo."""
     if not is_configured(settings):
@@ -197,6 +265,12 @@ def fetch_report(settings: Dict[str, Any], report_type: str,
 
     with pytds.connect(dsn, **connect_kwargs) as conn:
         with conn.cursor() as cur:
+            if report_type == "Job Report":
+                customer = (filters.get('customer') or '').strip()
+                like = f"%{customer}%" if customer else "%"
+                cur.execute(_JOB_REPORT_QUERY, (like,))
+                return _rows_from_job_report(cur.fetchall())
+
             if report_type == "Recent Jobs":
                 cur.execute(_RECENT_JOBS_QUERY)
                 return _rows_from_jobs(cur.fetchall())

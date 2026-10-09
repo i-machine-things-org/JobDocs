@@ -22,6 +22,26 @@ from experimental.db_integration import is_configured, test_connection, fetch_re
 
 _REPORT_COLUMNS = ('date', 'customer', 'job', 'description', 'status')
 
+# "Job Report" has far more per-job detail than the other report types' shared
+# five-column layout, so it gets its own wider column set -- report_table's
+# column count is resized to match whichever of these is active (see
+# _update_table_headers()).
+_JOB_REPORT_COLUMNS = (
+    'classification', 'job', 'customer', 'po', 'line', 'drawing', 'part_number',
+    'revision', 'description', 'order_date', 'order_qty', 'sched_end',
+    'promise_date', 'status', 'notes',
+)
+_JOB_REPORT_HEADERS = [
+    'Classification', 'Job ID', 'Customer ID', 'Customer PO Number', 'Line',
+    'Drawing', 'Part Number', 'Revision', 'Description', 'Order Date',
+    'Order Qty', 'Scheduled End Date', 'Promise Date', 'Status', 'Notes',
+]
+
+
+def _report_columns(report_type: str) -> tuple:
+    """The row-dict keys to pull into report_table, in column order, for report_type."""
+    return _JOB_REPORT_COLUMNS if report_type == "Job Report" else _REPORT_COLUMNS
+
 
 class _DateCalendarPopupFilter(QObject):
     """Double-click a QDateEdit to drop down a small calendar for picking a
@@ -217,7 +237,7 @@ class ReportingModule(BaseModule):
         """Grey out the Customer/Date filters when the selected report type
         doesn't use them, instead of silently ignoring whatever's typed in.
         """
-        self.report_customer_combo.setEnabled(report_type == "Jobs by Customer")
+        self.report_customer_combo.setEnabled(report_type in ("Jobs by Customer", "Job Report"))
         uses_dates = report_type in ("Jobs by Date Range", "Top Customers")
         self.report_start_date.setEnabled(uses_dates)
         self.report_end_date.setEnabled(uses_dates)
@@ -226,15 +246,30 @@ class ReportingModule(BaseModule):
         """Relabel the fixed Date/Customer/Job #/Description/Status columns
         for aggregate reports that repurpose them for different data, instead
         of showing misleading headers for what's actually in each cell.
+
+        "Job Report" doesn't fit that shared five-column layout at all, so
+        the table is resized to its own wider column set instead -- every
+        other report type resizes it right back to the five-column default.
         """
-        if report_type == "Top Customers":
+        if report_type == "Job Report":
+            headers = _JOB_REPORT_HEADERS
+        elif report_type == "Top Customers":
             headers = ['', 'Customer', 'Job Count', '', 'Gross Revenue']
         elif report_type == "Job Statistics":
             headers = ['', '', '', 'Metric', 'Value']
         else:
             headers = self._default_table_headers
+
+        self.report_table.setColumnCount(len(headers))
         for col, label in enumerate(headers):
             self.report_table.setHorizontalHeaderItem(col, QTableWidgetItem(label))
+
+        # Stretch-to-fit reads fine for 5 columns but crams Job Report's 15
+        # into illegibly narrow slivers -- Interactive lets the user resize
+        # and scroll instead.
+        resize_mode = (QHeaderView.ResizeMode.Interactive if report_type == "Job Report"
+                        else QHeaderView.ResizeMode.Stretch)
+        self.report_table.horizontalHeader().setSectionResizeMode(resize_mode)
 
     def _get_ui_path(self, relative_path: str) -> Path:
         """Get path to UI file"""
@@ -339,7 +374,7 @@ class ReportingModule(BaseModule):
         report_type = self.report_type_combo.currentText()
         filters = {}
 
-        if report_type == "Jobs by Customer":
+        if report_type in ("Jobs by Customer", "Job Report"):
             customer = self.report_customer_combo.currentText().strip()
             if customer and customer != "All Customers":
                 filters['customer'] = customer
@@ -382,15 +417,17 @@ class ReportingModule(BaseModule):
     def _on_report_rows(self, rows: list):
         self.generate_report_btn.setEnabled(True)
 
+        report_type = self.report_type_combo.currentText()
+        columns = _report_columns(report_type)
+
         self.report_table.setRowCount(0)
         for row in rows:
             r = self.report_table.rowCount()
             self.report_table.insertRow(r)
-            for col, key in enumerate(_REPORT_COLUMNS):
+            for col, key in enumerate(columns):
                 self.report_table.setItem(r, col, QTableWidgetItem(row.get(key, '')))
 
         self._last_generated_at = datetime.now()
-        report_type = self.report_type_combo.currentText()
         self.report_status_label.setText(f"Showing {len(rows)} record(s) for '{report_type}'")
         self.log_message(f"Generated report: {report_type} ({len(rows)} rows)")
 

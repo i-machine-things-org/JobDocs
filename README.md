@@ -377,7 +377,7 @@ JobDocs uses a plugin-based architecture:
 - **Report Fixer** — Transforms Excel job reports to match a template layout (separate plugin, install via **File → Install Plugin**)
 
 ### Experimental Features
-- **Reports (Beta)** — Queries a JobBOSS SQL Server directly (read-only) for Job Statistics, Jobs by Customer, Jobs by Date Range, Recent Jobs, and Top Customers reports. Enable via Settings → Advanced Settings → "Enable experimental features (Reporting)", then configure the DB connection in the same section. See [experimental/README.md](experimental/README.md) for setup (SQL login, grants) and known gaps.
+- **Reports (Beta)** — Queries a JobBOSS SQL Server directly (read-only) for Job Report, Job Statistics, Jobs by Customer, Jobs by Date Range, Recent Jobs, and Top Customers reports. Enable via Settings → Advanced Settings → "Enable experimental features (Reporting)", then configure the DB connection in the same section. See [experimental/README.md](experimental/README.md) for setup (SQL login, grants) and known gaps.
 
 ### Creating Custom Modules
 
