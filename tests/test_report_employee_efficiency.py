@@ -1,16 +1,16 @@
 """Tests for Employee Efficiency (modules/reporting/reports/employee_efficiency.py).
 
-Covers _rows_from_detail(), _rows_from_summary(), and the
-_compute_adj_hrs_and_efficiency() stub -- all pure functions, no DB needed.
-See that module's docstring for why "Adj E Hrs" is still excluded, and why
-Job_Operation.Efficiency_Pct was tried and dropped again (confirmed garbage
-against the real server -- flat 100.0 for every employee).
+Covers _rows_from_detail() and _rows_from_summary() -- pure functions, no DB
+needed. See that module's docstring for how Adj Hrs / % Eff are computed
+(Est Hrs * Pct_Complete / 100, a reverse-engineered-but-evidence-backed
+formula) and why Job_Operation.Efficiency_Pct and the naive Est/Act ratio
+were both tried and dropped first.
 """
 
 from modules.reporting.reports import REPORT_TYPES
 from modules.reporting.reports.employee_efficiency import (
     _EMPLOYEE_EFFICIENCY_DETAIL_QUERY, _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY,
-    _compute_adj_hrs_and_efficiency, _rows_from_detail, _rows_from_summary,
+    _rows_from_detail, _rows_from_summary,
 )
 
 
@@ -39,14 +39,16 @@ def test_detail_formats_populated_row():
         'Job': '30309', 'Work_Center': 'CNC MILL', 'Operation_Service': '20',
         'Setup_Act_Hrs': 1.5, 'Setup_Est_Hrs': 1.25,
         'Run_Act_Hrs': 4.0, 'Run_Est_Hrs': 3.75, 'Run_Qty': 50,
+        'Adj_Hrs': 5.0,
     }]
     rows = _rows_from_detail(raw)
     assert rows == [{
         'employee': 'John Smith', 'job': '30309', 'work_center': 'CNC MILL',
         'operation': '20', 'setup_act_hrs': '1.50', 'setup_est_hrs': '1.25',
         'run_act_hrs': '4.00', 'run_est_hrs': '3.75', 'run_qty': '50',
-        # (1.25 + 3.75) / (1.5 + 4.0) * 100 = 5.0 / 5.5 * 100
-        'est_act_pct': '90.9',
+        'adj_hrs': '5.00',
+        # 5.0 / (1.5 + 4.0) * 100
+        'pct_eff': '90.9',
     }]
 
 
@@ -56,32 +58,37 @@ def test_detail_falls_back_to_employee_code_when_name_blank():
         'Job': '1', 'Work_Center': '', 'Operation_Service': '',
         'Setup_Act_Hrs': None, 'Setup_Est_Hrs': None,
         'Run_Act_Hrs': None, 'Run_Est_Hrs': None, 'Run_Qty': None,
+        'Adj_Hrs': None,
     }]
     rows = _rows_from_detail(raw)
     assert rows[0]['employee'] == 'A1234'
     assert rows[0]['setup_act_hrs'] == '0.00'
     assert rows[0]['run_qty'] == '0'
-    assert rows[0]['est_act_pct'] == ''  # 0 Act Hrs -- nothing to divide by, not "0% efficient"
+    assert rows[0]['adj_hrs'] == '0.00'
+    assert rows[0]['pct_eff'] == ''  # 0 Act Hrs -- nothing to divide by, not "0% efficient"
 
 
 def test_summary_formats_populated_row():
     raw = [{
         'Employee': 'A1234', 'First_Name': 'John', 'Last_Name': 'Smith',
-        'Total_Act_Hrs': 12.5, 'Total_Est_Hrs': 11.0,
+        'Total_Act_Hrs': 12.5, 'Total_Est_Hrs': 11.0, 'Total_Adj_Hrs': 10.0,
     }]
     rows = _rows_from_summary(raw)
     assert rows == [{
         'employee': 'John Smith', 'total_act_hrs': '12.50', 'total_est_hrs': '11.00',
-        'est_act_pct': '88.0',
+        'total_adj_hrs': '10.00',
+        # 10.0 / 12.5 * 100
+        'pct_eff': '80.0',
     }]
 
 
 def test_summary_handles_zero_hours_without_crashing():
-    raw = [{'Employee': 'B5678', 'First_Name': None, 'Last_Name': None, 'Total_Act_Hrs': None, 'Total_Est_Hrs': None}]
+    raw = [{
+        'Employee': 'B5678', 'First_Name': None, 'Last_Name': None,
+        'Total_Act_Hrs': None, 'Total_Est_Hrs': None, 'Total_Adj_Hrs': None,
+    }]
     rows = _rows_from_summary(raw)
-    assert rows == [{'employee': 'B5678', 'total_act_hrs': '0.00', 'total_est_hrs': '0.00', 'est_act_pct': ''}]
-
-
-def test_adj_hrs_stub_always_returns_none():
-    assert _compute_adj_hrs_and_efficiency(10.0, 8.0, 50) is None
-    assert _compute_adj_hrs_and_efficiency(0.0, 0.0, None) is None
+    assert rows == [{
+        'employee': 'B5678', 'total_act_hrs': '0.00', 'total_est_hrs': '0.00',
+        'total_adj_hrs': '0.00', 'pct_eff': '',
+    }]
