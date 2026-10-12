@@ -14,7 +14,7 @@ import sys
 import csv
 from datetime import datetime
 from pathlib import Path
-from PyQt6.QtCore import QThread, pyqtSignal, QObject, QEvent, Qt
+from PyQt6.QtCore import QDate, QThread, pyqtSignal, QObject, QEvent, Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QWidget, QTableWidgetItem, QFileDialog, QHeaderView, QAbstractItemView,
@@ -304,6 +304,12 @@ class ReportingModule(BaseModule):
         self.exclude_assemblies_check = widget.exclude_assemblies_check
         self.report_start_date = widget.report_start_date
         self.report_end_date = widget.report_end_date
+        # End defaults to today, not "(No Filter)" -- "through today" is the
+        # overwhelmingly common upper bound, so this saves a click on every
+        # date-filtered report. Start has no equally obvious default, so it
+        # stays at reporting_tab.ui's "(No Filter)" sentinel (minimumDate)
+        # until the user actually picks one.
+        self.report_end_date.setDate(QDate.currentDate())
 
         self._start_date_popup_filter = _DateCalendarPopupFilter(self.report_start_date, widget)
         self.report_start_date.lineEdit().installEventFilter(self._start_date_popup_filter)
