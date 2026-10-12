@@ -19,7 +19,9 @@ from PyQt6.QtWidgets import (
 from PyQt6 import uic
 
 from core.base_module import BaseModule
-from experimental.db_integration import is_configured, test_connection, fetch_report, fetch_customers
+from experimental.db_integration import (
+    is_configured, test_connection, fetch_report, fetch_customers, AVAILABLE_FIELDS
+)
 
 _REPORT_COLUMNS = ('date', 'customer', 'job', 'description', 'status')
 
@@ -38,10 +40,7 @@ _JOB_REPORT_HEADERS = [
     'Order Qty', 'Scheduled End Date', 'Promise Date', 'Status', 'Notes',
 ]
 
-
-def _report_columns(report_type: str) -> tuple:
-    """The row-dict keys to pull into report_table, in column order, for report_type."""
-    return _JOB_REPORT_COLUMNS if report_type == "Job Report" else _REPORT_COLUMNS
+_FIELD_LABELS = {key: label for key, label, _expr in AVAILABLE_FIELDS}
 
 
 class _CustomerPickerDialog(QDialog):
@@ -88,6 +87,57 @@ class _CustomerPickerDialog(QDialog):
     def selected_customers(self) -> list:
         return [
             self.list_widget.item(i).text()
+            for i in range(self.list_widget.count())
+            if self.list_widget.item(i).checkState() == Qt.CheckState.Checked
+        ]
+
+
+class _FieldPickerDialog(QDialog):
+    """Pick which AVAILABLE_FIELDS columns Report Builder should pull.
+
+    Same checklist pattern as _CustomerPickerDialog, but keyed on (key, label)
+    pairs -- the caller needs field *keys* back (what fetch_custom_report and
+    the report_table column mapping both key off of), not display labels.
+    """
+
+    def __init__(self, fields: list, selected_keys: list, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Choose Fields")
+        self.resize(320, 420)
+        layout = QVBoxLayout(self)
+
+        self.list_widget = QListWidget()
+        selected_set = set(selected_keys)
+        for key, label, _expr in fields:
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, key)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if key in selected_set else Qt.CheckState.Unchecked)
+            self.list_widget.addItem(item)
+        layout.addWidget(self.list_widget)
+
+        btn_row = QHBoxLayout()
+        select_all_btn = QPushButton("Select All")
+        select_all_btn.clicked.connect(lambda: self._set_all(Qt.CheckState.Checked))
+        clear_btn = QPushButton("Clear")
+        clear_btn.clicked.connect(lambda: self._set_all(Qt.CheckState.Unchecked))
+        btn_row.addWidget(select_all_btn)
+        btn_row.addWidget(clear_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _set_all(self, state: Qt.CheckState):
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(state)
+
+    def selected_keys(self) -> list:
+        return [
+            self.list_widget.item(i).data(Qt.ItemDataRole.UserRole)
             for i in range(self.list_widget.count())
             if self.list_widget.item(i).checkState() == Qt.CheckState.Checked
         ]
@@ -204,11 +254,13 @@ class ReportingModule(BaseModule):
         self.db_status_label = None
         self.customer_filter_btn = None
         self.exclude_assemblies_check = None
+        self.choose_fields_btn = None
         self.report_start_date = None
         self.report_end_date = None
         self._default_table_headers = []
         self._available_customers = []
         self._selected_customers = []
+        self._selected_fields = [key for key, _label, _expr in AVAILABLE_FIELDS]
 
         self._db_ready = False
         self._connect_worker = None
@@ -257,6 +309,7 @@ class ReportingModule(BaseModule):
         self.db_status_label = widget.db_status_label
         self.customer_filter_btn = widget.customer_filter_btn
         self.exclude_assemblies_check = widget.exclude_assemblies_check
+        self.choose_fields_btn = widget.choose_fields_btn
         self.report_start_date = widget.report_start_date
         self.report_end_date = widget.report_end_date
 
@@ -274,6 +327,7 @@ class ReportingModule(BaseModule):
         self.disconnect_db_btn.clicked.connect(self.disconnect_from_db)
         self.generate_report_btn.clicked.connect(self.generate_report)
         self.customer_filter_btn.clicked.connect(self._open_customer_picker)
+        self.choose_fields_btn.clicked.connect(self._open_field_picker)
         widget.export_report_btn.clicked.connect(self.export_report)
         self._default_table_headers = [
             self.report_table.horizontalHeaderItem(col).text()
@@ -292,23 +346,47 @@ class ReportingModule(BaseModule):
         """Grey out the Customer/Date filters when the selected report type
         doesn't use them, instead of silently ignoring whatever's typed in.
         """
-        self.customer_filter_btn.setEnabled(report_type in ("Jobs by Customer", "Job Report"))
-        self.exclude_assemblies_check.setEnabled(report_type == "Job Report")
+        self.customer_filter_btn.setEnabled(report_type in ("Jobs by Customer", "Job Report", "Report Builder"))
+        self.exclude_assemblies_check.setEnabled(report_type in ("Job Report", "Report Builder"))
+        self.choose_fields_btn.setEnabled(report_type == "Report Builder")
         uses_dates = report_type in ("Jobs by Date Range", "Top Customers")
         self.report_start_date.setEnabled(uses_dates)
         self.report_end_date.setEnabled(uses_dates)
 
-    def _update_table_headers(self, report_type: str):
+    def _report_columns(self, report_type: str) -> tuple:
+        """The row-dict keys to pull into report_table, in column order, for report_type.
+
+        Report Builder reads the field list from _last_filters (what was
+        actually sent to the worker that produced these rows), not the live
+        _selected_fields -- the user can reopen the field picker and change
+        the selection while a report is still running in the background.
+        """
+        if report_type == "Job Report":
+            return _JOB_REPORT_COLUMNS
+        if report_type == "Report Builder":
+            return tuple(self._last_filters.get('fields', self._selected_fields))
+        return _REPORT_COLUMNS
+
+    def _update_table_headers(self, report_type: str, field_keys: list = None):
         """Relabel the fixed Date/Customer/Job #/Description/Status columns
         for aggregate reports that repurpose them for different data, instead
         of showing misleading headers for what's actually in each cell.
 
-        "Job Report" doesn't fit that shared five-column layout at all, so
-        the table is resized to its own wider column set instead -- every
-        other report type resizes it right back to the five-column default.
+        "Job Report" and "Report Builder" don't fit that shared five-column
+        layout at all, so the table is resized to their own column set
+        instead -- every other report type resizes it right back to the
+        five-column default. Report Builder's set is whatever fields are
+        currently checked (self._selected_fields) by default, so this needs
+        re-running whenever that selection changes, not just when the combo
+        changes -- but _on_report_rows passes the authoritative field_keys
+        that actually produced the rows being displayed (self._selected_fields
+        could have changed again while that report was still running).
         """
         if report_type == "Job Report":
             headers = _JOB_REPORT_HEADERS
+        elif report_type == "Report Builder":
+            keys = field_keys if field_keys is not None else self._selected_fields
+            headers = [_FIELD_LABELS[key] for key in keys] or ['(no fields selected)']
         elif report_type == "Top Customers":
             headers = ['', 'Customer', 'Job Count', '', 'Gross Revenue']
         elif report_type == "Job Statistics":
@@ -320,10 +398,11 @@ class ReportingModule(BaseModule):
         for col, label in enumerate(headers):
             self.report_table.setHorizontalHeaderItem(col, QTableWidgetItem(label))
 
-        # Stretch-to-fit reads fine for 5 columns but crams Job Report's 15
-        # into illegibly narrow slivers -- Interactive lets the user resize
-        # and scroll instead.
-        resize_mode = (QHeaderView.ResizeMode.Interactive if report_type == "Job Report"
+        # Stretch-to-fit reads fine for 5 columns but crams Job Report's 15 (or
+        # a wide Report Builder selection) into illegibly narrow slivers --
+        # Interactive lets the user resize and scroll instead.
+        resize_mode = (QHeaderView.ResizeMode.Interactive
+                        if report_type in ("Job Report", "Report Builder")
                         else QHeaderView.ResizeMode.Stretch)
         self.report_table.horizontalHeader().setSectionResizeMode(resize_mode)
 
@@ -424,6 +503,12 @@ class ReportingModule(BaseModule):
             text = f"Customers: {n} selected"
         self.customer_filter_btn.setText(text)
 
+    def _open_field_picker(self):
+        dialog = _FieldPickerDialog(AVAILABLE_FIELDS, self._selected_fields, self._widget)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._selected_fields = dialog.selected_keys()
+            self._update_table_headers(self.report_type_combo.currentText())
+
     @staticmethod
     def _picked_date(date_edit: QDateEdit):
         """The QDate as a Python date, or None if still at the "(No Filter)"
@@ -444,11 +529,16 @@ class ReportingModule(BaseModule):
         report_type = self.report_type_combo.currentText()
         filters = {}
 
-        if report_type in ("Jobs by Customer", "Job Report"):
+        if report_type in ("Jobs by Customer", "Job Report", "Report Builder"):
             if self._selected_customers:
                 filters['customers'] = list(self._selected_customers)
-            if report_type == "Job Report" and self.exclude_assemblies_check.isChecked():
+            if report_type in ("Job Report", "Report Builder") and self.exclude_assemblies_check.isChecked():
                 filters['exclude_assemblies'] = True
+            if report_type == "Report Builder":
+                if not self._selected_fields:
+                    self.show_error("No Fields Selected", "Choose at least one field via \"Choose Fields...\".")
+                    return
+                filters['fields'] = list(self._selected_fields)
         elif report_type == "Jobs by Date Range":
             start = self._picked_date(self.report_start_date)
             end = self._picked_date(self.report_end_date)
@@ -488,8 +578,14 @@ class ReportingModule(BaseModule):
     def _on_report_rows(self, rows: list):
         self.generate_report_btn.setEnabled(True)
 
-        report_type = self.report_type_combo.currentText()
-        columns = _report_columns(report_type)
+        # _last_report_type/_last_filters, not the live combo/field selection
+        # -- both can change while this report is still running in the
+        # background, and these rows were produced from whatever was actually
+        # sent to the worker at generate_report() time.
+        report_type = self._last_report_type
+        columns = self._report_columns(report_type)
+        if report_type == "Report Builder":
+            self._update_table_headers(report_type, field_keys=columns)
 
         self.report_table.setRowCount(0)
         for row in rows:
@@ -524,9 +620,12 @@ class ReportingModule(BaseModule):
             ["Report:", self._last_report_type or ""],
             ["Date Range:", self._date_range_label()],
             ["Customers:", ", ".join(customers) if customers else "All"],
-            ["Generated:", generated.strftime('%Y-%m-%d %H:%M:%S') if generated else ""],
-            [],
         ]
+        if self._last_report_type == "Report Builder":
+            field_keys = self._last_filters.get('fields', [])
+            rows.append(["Fields:", ", ".join(_FIELD_LABELS[k] for k in field_keys)])
+        rows.append(["Generated:", generated.strftime('%Y-%m-%d %H:%M:%S') if generated else ""])
+        rows.append([])
         return rows
 
     def _export_table_rows(self) -> tuple:

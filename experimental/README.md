@@ -23,14 +23,17 @@ This directory contains experimental and work-in-progress features that are **no
    ```
 
    The `Delivery` grant is only needed for the **Job Report** report type (it
-   looks up each job's Promise Date there); every other report type reads
+   looks up each job's Promise Date there), and for **Report Builder** if
+   "Promise Date" is one of the fields checked; every other report type reads
    `Job` alone.
 
 2. In JobDocs, open **Settings > Advanced Settings**, check **Enable experimental features (Reporting)**, then fill in the JobBOSS DB Host / Port / Database / Username / Password fields. Use the exact `Server` value from your SQL Server ODBC DSN for Host -- for a named instance (e.g. `SMI-APP02\JBSQL`), leave Port blank and it resolves automatically via the SQL Browser service, the same way the ODBC driver does for Excel/Power Query.
 3. The password is **not** written to `settings.json`. It's stored in your OS credential store (Windows Credential Manager, macOS Keychain, or Linux Secret Service) via the `keyring` package, under service name `JobDocs`.
 4. On the Reporting tab, click **Connect to Database**, then pick a report type and **Generate Report**.
 
-**Customer filter**: for "Jobs by Customer" and "Job Report", the Customer button opens a checklist picker -- pick zero (All Customers), one, or several at once. "Job Report" also has an "Exclude assembly sub-jobs" checkbox (filters on `Assembly_Level = 0`, i.e. `Top_Lvl_Job == Job`) to drop component jobs like "30274A" under a parent "30274" from the results.
+**Customer filter**: for "Jobs by Customer", "Job Report", and "Report Builder", the Customer button opens a checklist picker -- pick zero (All Customers), one, or several at once. "Job Report" and "Report Builder" also have an "Exclude assembly sub-jobs" checkbox (filters on `Assembly_Level = 0`, i.e. `Top_Lvl_Job == Job`) to drop component jobs like "30274A" under a parent "30274" from the results.
+
+**Report Builder**: pick exactly which columns to pull instead of using one of the fixed report layouts. "Choose Fields..." opens a checklist over `AVAILABLE_FIELDS` in `db_integration.py` -- the same columns Job Report already uses (plus `Total_Price`), so nothing here is new/unverified schema, just a different way to select from it. Everything checked becomes one dynamic `SELECT ... AS <key>` (field keys are a fixed allow-list the user picks a subset of, never free text, so this can't become a SQL-injection surface), filtered the same way as Job Report (Active jobs, optional customer list, optional assembly exclusion). `Delivery` is only joined in if "Promise Date" is one of the checked fields. Adding a newly-verified column later is one entry in `AVAILABLE_FIELDS` -- no new query, branch, or formatter needed per field, unlike the fixed report types above.
 
 **Exported files are real Excel Tables**: the `.xlsx` export wraps the header + data rows in an Excel Table with its AutoFilter, so every column is sortable/filterable as soon as the file opens in Excel -- not a plain value dump.
 
