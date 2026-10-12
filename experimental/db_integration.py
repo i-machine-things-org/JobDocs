@@ -106,8 +106,9 @@ WHERE Customer IS NOT NULL AND Customer <> ''
 ORDER BY Customer
 """
 
-# Mirrors JobBOSS's own canned "Job Report" (jobRpt) export: one row per open
-# job with PO/line/drawing/promise-date detail, not just the narrow
+# Matches the shape of this shop's existing "Job Report" (jobRpt) -- a
+# custom report, not something JobBOSS ships built-in -- one row per open job
+# with PO/line/drawing/promise-date detail, not just the narrow
 # Date/Customer/Job/Description/Status set the other report types share.
 #
 # Customer_PO/Customer_PO_LN (not SO_Detail.PO/Line) are the real source for
@@ -240,7 +241,17 @@ def test_connection(settings: Dict[str, Any]) -> tuple[bool, str]:
     """
     if not is_configured(settings):
         return False, "Not configured -- set the JobBOSS DB connection in Settings > Advanced Settings."
-    dsn, connect_kwargs = _connect_kwargs(settings)
+    try:
+        dsn, connect_kwargs = _connect_kwargs(settings)
+    except ValueError:
+        # int(port_raw) in _connect_kwargs raises on a non-numeric Port (e.g. a
+        # stray space, "auto" typed literally, "1433,1434"). _ConnectWorker.run()
+        # has no try of its own -- it trusts this function to always return a
+        # (bool, str) tuple rather than raise, so an uncaught exception here
+        # would leave finished_ok never emitted and the tab stuck on
+        # "Connecting..." forever (connect_db_btn stays disabled) instead of
+        # showing a clear error.
+        return False, "Invalid port -- enter a number or leave Port blank."
     try:
         with pytds.connect(dsn, **connect_kwargs):
             pass
