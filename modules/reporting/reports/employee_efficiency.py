@@ -54,15 +54,15 @@ Status = 'Active' (Job_Operation_Time has no status value confirmed to mean
 the only filter applied is the one the real report's own "Active Employees
 Only" checkbox describes, always on for v1 (see db_integration.fetch_employees()).
 
-Indirect jobs (overhead/non-production time -- vacation, training, cleanup,
-etc., charged to a special non-customer job number) are excluded from both
-queries via Job.Type <> 'Indirect', joining Job itself (not just
-Job_Operation, which has no Type column) for this. 'Indirect' is JobBOSS's
-standard value for this field, not independently confirmed against row
-data on this install (the schema dump has no rows) -- if this install uses
-a different literal value or convention, this filter silently does nothing
-and indirect time keeps dragging down Est/Act % same as before. Always on,
-same as the two Status filters above -- not a checkbox, since indirect time
+Indirect time (vacation, training, cleanup, etc.) is excluded from both
+queries via Work_Center.Type <> 'Indirect' -- confirmed directly from this
+shop's own Work Center setup screen (user-provided screenshot): Work_Center
+has a real Type column (Direct/Indirect), and it's the *work center* that's
+marked Indirect, not the job. Corrects an earlier wrong first attempt at
+this same filter (Job.Type <> 'Indirect' -- Job has no such value; a Job's
+own Type is things like 'Regular'/'Assembly', unrelated to this). Joins the
+Work_Center table (not just Job_Operation, which stores the work center
+code but not its Type) for this. Always on, not a checkbox -- indirect time
 counting toward an employee's efficiency is a correctness bug, not an
 optional view.
 """
@@ -81,10 +81,10 @@ SELECT jot.Employee, e.First_Name, e.Last_Name, jo.Job, jo.Work_Center, jo.Opera
        SUM(jot.Act_Run_Qty) AS Run_Qty
 FROM Job_Operation_Time jot
 JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
-JOIN Job j ON j.Job = jo.Job
+JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
 JOIN Employee e ON e.Employee = jot.Employee
 WHERE jot.Work_Date BETWEEN %s AND %s AND e.Status = 'Active'
-      AND (j.Type IS NULL OR j.Type <> 'Indirect') AND {employee_clause}
+      AND (wc.Type IS NULL OR wc.Type <> 'Indirect') AND {employee_clause}
 GROUP BY jot.Employee, e.First_Name, e.Last_Name, jo.Job, jo.Work_Center, jo.Operation_Service
 ORDER BY e.Last_Name, e.First_Name, jo.Job
 """
@@ -92,9 +92,10 @@ ORDER BY e.Last_Name, e.First_Name, jo.Job
 # op_rollup groups by (Employee, Job_Operation) first, exactly like Detail's
 # GROUP BY -- same reason, so each operation's estimate is only counted once
 # before rolling the per-operation rows up to one row per employee. Joins
-# Job here too (not just in the outer query) so the Indirect exclusion
-# applies before the rollup, not after -- an indirect job's hours must never
-# enter the SUM, not just get dropped from the final display.
+# Work_Center here too (not just in the outer query) so the Indirect
+# exclusion applies before the rollup, not after -- an indirect work
+# center's hours must never enter the SUM, not just get dropped from the
+# final display.
 _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY = """
 WITH op_rollup AS (
     SELECT jot.Employee, jot.Job_Operation,
@@ -102,9 +103,9 @@ WITH op_rollup AS (
            SUM(jot.Act_Run_Hrs) AS Run_Act_Hrs, MAX(jo.Est_Run_Hrs) AS Run_Est_Hrs
     FROM Job_Operation_Time jot
     JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
-    JOIN Job j ON j.Job = jo.Job
+    JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
     WHERE jot.Work_Date BETWEEN %s AND %s
-          AND (j.Type IS NULL OR j.Type <> 'Indirect')
+          AND (wc.Type IS NULL OR wc.Type <> 'Indirect')
     GROUP BY jot.Employee, jot.Job_Operation
 )
 SELECT op.Employee, e.First_Name, e.Last_Name,

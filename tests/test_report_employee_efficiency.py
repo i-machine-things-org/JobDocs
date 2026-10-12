@@ -19,14 +19,18 @@ def test_both_types_are_registered():
     assert "Employee Efficiency - Summary" in REPORT_TYPES
 
 
-def test_both_queries_exclude_indirect_jobs():
-    # Regression guard: indirect (non-production) job time must never count
-    # toward an employee's hours/efficiency. Checks the filter text is still
-    # present, not that it's correct against live data (can't verify that
-    # from here) -- catches someone accidentally dropping it later.
+def test_both_queries_exclude_indirect_work_centers():
+    # Regression guard: indirect (non-production) time must never count
+    # toward an employee's hours/efficiency. It's the WORK CENTER that's
+    # marked Indirect (Work_Center.Type), not the job -- confirmed directly
+    # from this shop's Work Center setup screen after an earlier wrong
+    # attempt filtered on Job.Type instead, which doesn't carry this value.
+    # Checks the filter text is still present, not that it's correct against
+    # live data (can't verify that from here) -- catches someone accidentally
+    # dropping it, or reverting to the wrong Job.Type version, later.
     for query in (_EMPLOYEE_EFFICIENCY_DETAIL_QUERY, _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY):
-        assert "JOIN Job j ON j.Job = jo.Job" in query
-        assert "Type <> 'Indirect'" in query
+        assert "JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center" in query
+        assert "wc.Type <> 'Indirect'" in query
 
 
 def test_detail_formats_populated_row():
