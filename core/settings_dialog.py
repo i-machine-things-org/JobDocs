@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QLabel, QLineEdit, QPushButton, QCheckBox,
     QRadioButton, QButtonGroup, QComboBox, QScrollArea,
     QWidget, QFrame, QDialogButtonBox, QFileDialog,
-    QStyleFactory
+    QStyleFactory, QMessageBox
 )
 
 from shared.utils import get_os_type, get_os_text
@@ -386,16 +386,30 @@ class SettingsDialog(QDialog):
             new_user = self.jobboss_user_edit.text().strip()
             self.settings['jobboss_db_user'] = new_user
             new_password = self.jobboss_password_edit.text()
+            import keyring.errors
             from experimental.db_integration import get_password, set_password
-            if new_password:
-                set_password(new_user, new_password)
-            elif new_user and new_user != self._original_jobboss_user:
-                # Username changed with the password field left blank ("unchanged") --
-                # carry the old username's stored password forward so access isn't
-                # silently lost; the stale entry under the old username is harmless.
-                carried = get_password(self._original_jobboss_user)
-                if carried:
-                    set_password(new_user, carried)
+            try:
+                if new_password and new_user:
+                    set_password(new_user, new_password)
+                elif new_user and new_user != self._original_jobboss_user:
+                    # Username changed with the password field left blank ("unchanged") --
+                    # carry the old username's stored password forward so access isn't
+                    # silently lost; the stale entry under the old username is harmless.
+                    carried = get_password(self._original_jobboss_user)
+                    if carried:
+                        set_password(new_user, carried)
+            except keyring.errors.KeyringError as exc:
+                # No Secret Service running, a sandboxed Flatpak, a locked keychain,
+                # etc. -- an unhandled exception here would abort the whole dialog
+                # (PyQt6 kills the process on an exception escaping a slot) and lose
+                # every other setting the user just entered. Keep going without the
+                # password rather than crash; the non-secret fields above are
+                # already set on self.settings regardless.
+                QMessageBox.warning(
+                    self, "Password Not Saved",
+                    f"The JobBOSS password could not be stored in the OS credential "
+                    f"store ({type(exc).__name__}). Other settings were saved."
+                )
         if self._active('disabled_modules'):
             disabled_modules = []
             for module_name, checkbox in self.module_checkboxes.items():
