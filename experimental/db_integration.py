@@ -32,41 +32,12 @@ KEYRING_SERVICE = 'JobDocs'
 
 REPORT_TYPES = (
     "Job Report",
-    "Report Builder",
     "Job Statistics",
     "Jobs by Customer",
     "Jobs by Date Range",
     "Recent Jobs",
     "Top Customers",
 )
-
-# Fixed, developer-controlled allow-list of (key, label, sql_expr) for the
-# "Report Builder" report type -- the user only ever picks a *subset of this
-# list* via checkboxes (see _FieldPickerDialog in modules/reporting/module.py),
-# never free text, so building a dynamic SELECT from whichever keys they
-# checked is safe: every expr that can land in a query always comes from here.
-# All columns are already proven live via _JOB_REPORT_QUERY -- this is pure
-# recombination, not new unverified schema. Add a newly-verified column by
-# appending one entry here; no new query/branch/formatter needed per field.
-AVAILABLE_FIELDS = [
-    ("job", "Job ID", "j.Job"),
-    ("customer", "Customer", "j.Customer"),
-    ("po", "Customer PO Number", "j.Customer_PO"),
-    ("line", "Line", "j.Customer_PO_LN"),
-    ("drawing", "Drawing", "j.Drawing"),
-    ("part_number", "Part Number", "j.Part_Number"),
-    ("revision", "Revision", "j.Rev"),
-    ("description", "Description", "j.Description"),
-    ("order_date", "Order Date", "j.Order_Date"),
-    ("order_qty", "Order Qty", "j.Order_Quantity"),
-    ("sched_end", "Scheduled End Date", "j.Sched_End"),
-    ("status", "Status", "j.Status"),
-    ("notes", "Notes", "j.Note_Text"),
-    ("total_price", "Total Price", "j.Total_Price"),
-    ("promise_date", "Promise Date", "dlv.Promised_Date"),
-    ("curr_wc", "Current Work Center", "cur.Curr_WC"),
-]
-_AVAILABLE_FIELDS_BY_KEY = {key: (label, expr) for key, label, expr in AVAILABLE_FIELDS}
 
 # Row-per-job reports all select the same columns, matching the report_table's
 # fixed Date/Customer/Job #/Description/Status layout (reporting_tab.ui).
@@ -198,43 +169,6 @@ def _customer_filter_clause(customers: Optional[List[str]]) -> "tuple[str, tuple
     return f"Customer IN ({placeholders})", tuple(names)
 
 
-def _build_custom_report_query(field_keys: List[str]) -> "tuple[str, list]":
-    """Build a SELECT for Report Builder from a checked subset of
-    AVAILABLE_FIELDS. Every expr/key here is drawn from that fixed allow-list
-    -- field_keys is just which rows of it to include, never raw SQL text.
-
-    Returns (query, valid_keys) -- valid_keys is field_keys filtered down to
-    recognized ones, in the same order, which also doubles as the row-dict
-    key order _rows_from_custom_report() needs.
-    """
-    valid_keys = [k for k in field_keys if k in _AVAILABLE_FIELDS_BY_KEY]
-    select_list = ", ".join(f"{_AVAILABLE_FIELDS_BY_KEY[k][1]} AS {k}" for k in valid_keys)
-    delivery_join = """
-OUTER APPLY (
-    SELECT TOP 1 d.Promised_Date
-    FROM Delivery d
-    WHERE d.Job = j.Job
-    ORDER BY CASE WHEN d.Remaining_Quantity > 0 THEN 0 ELSE 1 END, d.Promised_Date ASC
-) dlv""" if 'promise_date' in valid_keys else ""
-    # Same OUTER APPLY (not CROSS APPLY) reasoning as _JOB_REPORT_QUERY: this
-    # query starts FROM Job with no Job_Operation filter, so a non-complete
-    # operation row isn't guaranteed to exist for every Active job.
-    curr_wc_join = """
-OUTER APPLY (
-    SELECT TOP 1 jo.Work_Center AS Curr_WC
-    FROM Job_Operation jo
-    WHERE jo.Job = j.Job AND jo.Status <> 'C'
-    ORDER BY jo.Sequence ASC
-) cur""" if 'curr_wc' in valid_keys else ""
-    query = f"""
-SELECT TOP 500 {select_list}
-FROM Job j{delivery_join}{curr_wc_join}
-WHERE j.Status = 'Active' AND {{customer_clause}} AND {{assembly_clause}}
-ORDER BY j.Order_Date DESC, j.Job
-"""
-    return query, valid_keys
-
-
 def _keyring_key(username: str) -> str:
     return f"jobboss_db:{username}"
 
@@ -344,55 +278,6 @@ def _rows_from_job_report(raw_rows: List[dict]) -> List[Dict[str, str]]:
     return rows
 
 
-def _format_field_value(value) -> str:
-    """Generic cell formatting for Report Builder -- unlike the fixed reports'
-    per-field formatting (e.g. Top Customers' "$1,234.56"), this has to handle
-    whatever type any AVAILABLE_FIELDS column happens to be, so it only knows
-    about "blank", "date", and "everything else via str()".
-    """
-    if value is None:
-        return ''
-    if isinstance(value, (datetime, date)):
-        return value.strftime('%Y-%m-%d')
-    return str(value)
-
-
-def _rows_from_custom_report(raw_rows: List[dict], field_keys: List[str]) -> List[Dict[str, str]]:
-    """Pure row formatter for Report Builder. raw_rows are pytds dict rows
-    keyed by field_keys (the query aliases each column AS <key> -- see
-    _build_custom_report_query), so this never touches real JobBOSS column
-    names, only the AVAILABLE_FIELDS keys already validated there.
-    """
-    return [
-        {key: _format_field_value(r.get(key)) for key in field_keys}
-        for r in raw_rows
-    ]
-
-
-def fetch_custom_report(settings: Dict[str, Any], field_keys: List[str],
-                        filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
-    """Report Builder: run a SELECT over whichever AVAILABLE_FIELDS the user
-    checked (see _FieldPickerDialog in modules/reporting/module.py), with the
-    same Active/customer/assembly filters as Job Report.
-    """
-    if not is_configured(settings):
-        raise RuntimeError("JobBOSS DB is not configured")
-    filters = filters or {}
-    query_template, valid_keys = _build_custom_report_query(field_keys)
-    if not valid_keys:
-        return []
-
-    customer_clause, customer_params = _customer_filter_clause(filters.get('customers'))
-    assembly_clause = "Assembly_Level = 0" if filters.get('exclude_assemblies') else "1=1"
-    query = query_template.format(customer_clause=customer_clause, assembly_clause=assembly_clause)
-
-    dsn, connect_kwargs = _connect_kwargs(settings)
-    with pytds.connect(dsn, **connect_kwargs) as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, customer_params)
-            return _rows_from_custom_report(cur.fetchall(), valid_keys)
-
-
 def fetch_customers(settings: Dict[str, Any]) -> List[str]:
     """Distinct customer names from Job, for populating the Customer filter combo."""
     if not is_configured(settings):
@@ -413,12 +298,6 @@ def fetch_report(settings: Dict[str, Any], report_type: str,
     if not is_configured(settings):
         raise RuntimeError("JobBOSS DB is not configured")
     filters = filters or {}
-
-    # Report Builder manages its own connection via fetch_custom_report() --
-    # handled here, before opening the connection every other branch shares,
-    # rather than nesting a second pytds.connect() inside this one.
-    if report_type == "Report Builder":
-        return fetch_custom_report(settings, filters.get('fields', []), filters)
 
     dsn, connect_kwargs = _connect_kwargs(settings)
 
