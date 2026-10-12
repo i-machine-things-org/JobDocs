@@ -30,6 +30,7 @@ class SettingsDialog(QDialog):
                  active_keys: Optional[set] = None):
         super().__init__(parent)
         self.settings = settings.copy()
+        self._original_jobboss_user = settings.get('jobboss_db_user', '')
         self._active_keys = active_keys  # keys present in DEFAULT_SETTINGS; None means show all
         self.available_modules = available_modules or []  # List of (module_name, display_name) tuples
         self.module_checkboxes = {}  # Store module checkboxes
@@ -271,12 +272,50 @@ class SettingsDialog(QDialog):
         self.experimental_check.setVisible(self._active('experimental_features'))
         advanced_content_layout.addWidget(self.experimental_check)
 
+        _jobboss_block = QWidget()
+        _jb_vbox = QVBoxLayout(_jobboss_block)
+        _jb_vbox.setContentsMargins(0, 0, 0, 0)
+        _jb_vbox.addWidget(QLabel("JobBOSS DB Connection (Reporting tab):"))
+        jobboss_layout = QGridLayout()
+        jobboss_layout.addWidget(QLabel("Host:"), 0, 0)
+        self.jobboss_host_edit = QLineEdit(self.settings.get('jobboss_db_host', ''))
+        self.jobboss_host_edit.setPlaceholderText(r"SERVER\INSTANCE or hostname")
+        jobboss_layout.addWidget(self.jobboss_host_edit, 0, 1)
+        jobboss_layout.addWidget(QLabel("Port (optional):"), 0, 2)
+        self.jobboss_port_edit = QLineEdit(str(self.settings.get('jobboss_db_port', '')))
+        self.jobboss_port_edit.setPlaceholderText("auto")
+        jobboss_layout.addWidget(self.jobboss_port_edit, 0, 3)
+        jobboss_layout.addWidget(QLabel("Database:"), 1, 0)
+        self.jobboss_name_edit = QLineEdit(self.settings.get('jobboss_db_name', ''))
+        jobboss_layout.addWidget(self.jobboss_name_edit, 1, 1)
+        jobboss_layout.addWidget(QLabel("Username:"), 2, 0)
+        self.jobboss_user_edit = QLineEdit(self.settings.get('jobboss_db_user', ''))
+        jobboss_layout.addWidget(self.jobboss_user_edit, 2, 1)
+        jobboss_layout.addWidget(QLabel("Password:"), 2, 2)
+        self.jobboss_password_edit = QLineEdit()
+        self.jobboss_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.jobboss_password_edit.setPlaceholderText(
+            "(unchanged)" if self.settings.get('jobboss_db_user') else ""
+        )
+        jobboss_layout.addWidget(self.jobboss_password_edit, 2, 3)
+        _jb_vbox.addLayout(jobboss_layout)
+        jobboss_info = QLabel(
+            "SELECT-only access to the Job table. The password is stored in your OS "
+            "credential store, not in settings.json. See experimental/README.md."
+        )
+        jobboss_info.setWordWrap(True)
+        jobboss_info.setStyleSheet("color: gray; font-size: 9pt;")
+        _jb_vbox.addWidget(jobboss_info)
+        _jobboss_block.setVisible(self._active('jobboss_db_host'))
+        advanced_content_layout.addWidget(_jobboss_block)
+
         advanced_layout.addWidget(self.advanced_content)
         self.advanced_content.setVisible(False)
         self.advanced_group.toggled.connect(self.advanced_content.setVisible)
 
         _any_advanced = any(self._active(k) for k in (
-            'job_folder_structure', 'quote_folder_path', 'legacy_mode', 'experimental_features'
+            'job_folder_structure', 'quote_folder_path', 'legacy_mode', 'experimental_features',
+            'jobboss_db_host',
         ))
         self.advanced_group.setVisible(_any_advanced)
         scroll_layout.addWidget(self.advanced_group)
@@ -340,6 +379,23 @@ class SettingsDialog(QDialog):
                 self.settings['default_tab'] = self._tab_display_names[idx]
         if self._active('experimental_features'):
             self.settings['experimental_features'] = self.experimental_check.isChecked()
+        if self._active('jobboss_db_host'):
+            self.settings['jobboss_db_host'] = self.jobboss_host_edit.text().strip()
+            self.settings['jobboss_db_port'] = self.jobboss_port_edit.text().strip()
+            self.settings['jobboss_db_name'] = self.jobboss_name_edit.text().strip()
+            new_user = self.jobboss_user_edit.text().strip()
+            self.settings['jobboss_db_user'] = new_user
+            new_password = self.jobboss_password_edit.text()
+            from experimental.db_integration import get_password, set_password
+            if new_password:
+                set_password(new_user, new_password)
+            elif new_user and new_user != self._original_jobboss_user:
+                # Username changed with the password field left blank ("unchanged") --
+                # carry the old username's stored password forward so access isn't
+                # silently lost; the stale entry under the old username is harmless.
+                carried = get_password(self._original_jobboss_user)
+                if carried:
+                    set_password(new_user, carried)
         if self._active('disabled_modules'):
             disabled_modules = []
             for module_name, checkbox in self.module_checkboxes.items():
