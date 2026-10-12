@@ -169,6 +169,11 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
          <widget class="QComboBox" name="report_type_combo">
           <item>
            <property name="text">
+            <string>Job Report</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
             <string>Job Statistics</string>
            </property>
           </item>
@@ -219,15 +224,10 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
          </widget>
         </item>
         <item row="0" column="1">
-         <widget class="QComboBox" name="report_customer_combo">
-          <property name="editable">
-           <bool>true</bool>
+         <widget class="QPushButton" name="customer_filter_btn">
+          <property name="text">
+           <string>Customers: All</string>
           </property>
-          <item>
-           <property name="text">
-            <string>All Customers</string>
-           </property>
-          </item>
          </widget>
         </item>
         <item row="1" column="0">
@@ -238,9 +238,29 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
          </widget>
         </item>
         <item row="1" column="1">
-         <widget class="QLineEdit" name="report_start_date">
-          <property name="placeholderText">
-           <string>YYYY-MM-DD</string>
+         <widget class="QDateEdit" name="report_start_date">
+          <property name="calendarPopup">
+           <bool>true</bool>
+          </property>
+          <property name="displayFormat">
+           <string>yyyy-MM-dd</string>
+          </property>
+          <property name="specialValueText">
+           <string>(No Filter)</string>
+          </property>
+          <property name="minimumDate">
+           <date>
+            <year>2000</year>
+            <month>1</month>
+            <day>1</day>
+           </date>
+          </property>
+          <property name="date">
+           <date>
+            <year>2000</year>
+            <month>1</month>
+            <day>1</day>
+           </date>
           </property>
          </widget>
         </item>
@@ -252,9 +272,36 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
          </widget>
         </item>
         <item row="1" column="3">
-         <widget class="QLineEdit" name="report_end_date">
-          <property name="placeholderText">
-           <string>YYYY-MM-DD</string>
+         <widget class="QDateEdit" name="report_end_date">
+          <property name="calendarPopup">
+           <bool>true</bool>
+          </property>
+          <property name="displayFormat">
+           <string>yyyy-MM-dd</string>
+          </property>
+          <property name="specialValueText">
+           <string>(No Filter)</string>
+          </property>
+          <property name="minimumDate">
+           <date>
+            <year>2000</year>
+            <month>1</month>
+            <day>1</day>
+           </date>
+          </property>
+          <property name="date">
+           <date>
+            <year>2000</year>
+            <month>1</month>
+            <day>1</day>
+           </date>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="0" colspan="2">
+         <widget class="QCheckBox" name="exclude_assemblies_check">
+          <property name="text">
+           <string>Exclude assembly sub-jobs</string>
           </property>
          </widget>
         </item>
@@ -275,7 +322,7 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
         <item>
          <widget class="QPushButton" name="export_report_btn">
           <property name="text">
-           <string>Export to CSV</string>
+           <string>Export Report...</string>
           </property>
          </widget>
         </item>
