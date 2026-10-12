@@ -6,7 +6,7 @@ This directory contains experimental and work-in-progress features that are **no
 
 ### Database Integration
 
-**Status**: Working against a live JobBOSS SQL Server, scoped to the `Job`, `Delivery`, `Job_Operation`, `Job_Operation_Time`, and `Employee` tables. Still experimental: gated behind the "Enable experimental features (Reporting)" setting, and the exact column names (particularly `Job.Status`/`Employee.Status`) should be confirmed against your own JobBOSS schema the first time you connect -- see "Known gap" below.
+**Status**: Working against a live JobBOSS SQL Server, scoped to the `Job`, `Delivery`, `Job_Operation`, `Job_Operation_Time`, `Employee`, and `Work_Center` tables. Still experimental: gated behind the "Enable experimental features (Reporting)" setting, and the exact column names (particularly `Job.Status`/`Employee.Status`) should be confirmed against your own JobBOSS schema the first time you connect -- see "Known gap" below.
 
 **Purpose**: Lets the Reporting tab pull live job/labor data straight out of JobBOSS over SQL Server (via [`python-tds`](https://pypi.org/project/python-tds/), the same pure-Python TDS client used by the sibling `shop-schedule` project), instead of showing placeholder sample data.
 
@@ -25,9 +25,10 @@ This directory contains experimental and work-in-progress features that are **no
    GRANT SELECT ON dbo.Job_Operation TO jobdocs_reporting_ro;
    GRANT SELECT ON dbo.Job_Operation_Time TO jobdocs_reporting_ro;
    GRANT SELECT ON dbo.Employee TO jobdocs_reporting_ro;
+   GRANT SELECT ON dbo.Work_Center TO jobdocs_reporting_ro;
    ```
 
-   `Delivery`/`Job_Operation` are only needed for Job Report (Promise Date and Current Work Center respectively). `Job_Operation_Time`/`Employee` are only needed for the two Employee Efficiency report types. Every other report type reads `Job` alone.
+   `Delivery`/`Job_Operation` are only needed for Job Report (Promise Date and Current Work Center respectively). `Job_Operation_Time`/`Employee`/`Work_Center` are only needed for the two Employee Efficiency report types. Every other report type reads `Job` alone.
 
 2. In JobDocs, open **Settings > Advanced Settings**, check **Enable experimental features (Reporting)**, then fill in the JobBOSS DB Host / Port / Database / Username / Password fields. Use the exact `Server` value from your SQL Server ODBC DSN for Host -- for a named instance (e.g. `SMI-APP02\JBSQL`), leave Port blank and it resolves automatically via the SQL Browser service, the same way the ODBC driver does for Excel/Power Query.
 3. The password is **not** written to `settings.json`. It's stored in your OS credential store (Windows Credential Manager, macOS Keychain, or Linux Secret Service) via the `keyring` package, under service name `JobDocs`.
@@ -75,7 +76,7 @@ Source tables, confirmed against a full live schema dump (no `Labor_Ticket` tabl
 
 **`Est/Act %` is the one %Eff-shaped column shown**: `(Setup Est Hrs + Run Est Hrs) / (Setup Act Hrs + Run Act Hrs) * 100` -- zero new inference, just a ratio of the Hours columns already shown. Won't match the real report wherever actual quantity run differs from the job's original estimated quantity (that's exactly the gap "Adjusted" closes and this doesn't). `Job_Operation.Efficiency_Pct` was also tried (briefly shown as "JobBOSS Eff%") and dropped again -- live-tested against the real server, it came back exactly `100.0` for every employee regardless of how far off their real Est/Act ratio actually ran (0.2% to 140.9% in one real export), the signature of a static scheduling-input default, not a computed value. Confirmed garbage, not just unverified -- don't reintroduce it without new evidence it means something else on a different install.
 
-**Indirect jobs are excluded** (overhead/non-production time -- vacation, training, cleanup, etc. -- charged to a special non-customer job number): both queries join `Job` and filter `Type <> 'Indirect'`, always on, not a checkbox (indirect time counting toward an employee's efficiency is a correctness bug, not an optional view). `'Indirect'` is JobBOSS's standard value for `Job.Type`, not independently confirmed against row data on this install -- if your install uses a different value/convention here, this filter silently does nothing.
+**Indirect time is excluded** (vacation, training, cleanup, etc.): both queries join `Work_Center` and filter `Type <> 'Indirect'`, always on, not a checkbox (indirect time counting toward an employee's efficiency is a correctness bug, not an optional view). It's the *work center* that carries this distinction (confirmed directly from this shop's Work Center setup screen -- `Work_Center.Type` is `Direct`/`Indirect`), not the job -- an earlier version of this filter wrongly checked `Job.Type` instead, which has no such value.
 
 **Active Employees Only / grouped quantities**: both always-on for v1, not separate checkboxes -- the Employee picker only ever lists `Employee.Status = 'Active'` rows (itself an unverified assumption, same caveat as `Job.Status` above), and Detail is inherently grouped per (employee, operation) by the query itself. Work Center / Department / Supervisor / Job filters from the real report are not included in v1.
 
