@@ -30,6 +30,14 @@ _REPORT_COLUMNS = ('date', 'customer', 'job', 'description', 'status')
 # Job Report is a from-scratch SQL pull, not that tool's output.
 _LATE_FILL_COLOR = QColor(255, 204, 204)
 
+# Cap on auto-fit column width (px) -- without it, one row with an unusually
+# long Description/Notes value would stretch that single column wide enough
+# to push every other column off-screen. The horizontal scrollbar (Interactive
+# resize mode already enables it) covers genuinely-wide content beyond this;
+# the user can still drag a capped column wider by hand if they want to see
+# the full value without scrolling.
+_MAX_AUTO_COLUMN_WIDTH = 300
+
 
 def _is_past_promise(sched_end: str, promise_date: str) -> bool:
     """True if Scheduled End Date is later than Promise Date. Both are
@@ -523,6 +531,17 @@ class ReportingModule(BaseModule):
             if report_type == "Job Report" and _is_past_promise(row.get('sched_end', ''), row.get('promise_date', '')):
                 sched_col = columns.index('sched_end')
                 self.report_table.item(r, sched_col).setBackground(_LATE_FILL_COLOR)
+
+        # Auto-fit columns to their actual content (header + widest cell) now
+        # that the table is populated -- Interactive resize mode's default
+        # column widths don't reflect content at all, which is what made Job
+        # Report's 16 columns read as compacted/truncated. No-op in Stretch
+        # mode (the 5-column reports): Stretch always re-fills the viewport
+        # width regardless, so this has no lasting visible effect there.
+        self.report_table.resizeColumnsToContents()
+        for col in range(self.report_table.columnCount()):
+            if self.report_table.columnWidth(col) > _MAX_AUTO_COLUMN_WIDTH:
+                self.report_table.setColumnWidth(col, _MAX_AUTO_COLUMN_WIDTH)
 
         self._last_generated_at = datetime.now()
         self.report_status_label.setText(f"Showing {len(rows)} record(s) for '{report_type}'")
