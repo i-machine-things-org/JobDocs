@@ -64,6 +64,7 @@ AVAILABLE_FIELDS = [
     ("notes", "Notes", "j.Note_Text"),
     ("total_price", "Total Price", "j.Total_Price"),
     ("promise_date", "Promise Date", "dlv.Promised_Date"),
+    ("curr_wc", "Current Work Center", "cur.Curr_WC"),
 ]
 _AVAILABLE_FIELDS_BY_KEY = {key: (label, expr) for key, label, expr in AVAILABLE_FIELDS}
 
@@ -148,14 +149,25 @@ _JOB_REPORT_COLUMNS = (
 
 # OUTER APPLY, not CROSS APPLY: unlike shop-schedule's current-operation lookup
 # (every open job has at least one non-complete Job_Operation row by
-# definition), a job can have zero Delivery rows -- OUTER APPLY keeps that job
-# in the report with a blank Promise Date instead of silently dropping it.
-# When a job has multiple Delivery rows (partial shipments), the soonest still-
-# open one (Remaining_Quantity > 0) is used as "the" promise date; if every
-# delivery on the job has already fully shipped, falls back to the soonest by
-# date so a fully-shipped-but-still-Active job still shows something.
+# definition, since that query starts FROM Job_Operation itself), Job Report
+# starts FROM Job with no Job_Operation filter at all -- a Job in 'Active'
+# status isn't guaranteed to have a non-complete Job_Operation row (not yet
+# routed, or operations closed out of sync with the job header). CROSS APPLY
+# would silently drop such a job from the report entirely; OUTER APPLY keeps
+# it with a blank Current Work Center instead. Same reasoning as the Delivery
+# lookup below. When a job has multiple Delivery rows (partial shipments),
+# the soonest still-open one (Remaining_Quantity > 0) is used as "the"
+# promise date; if every delivery on the job has already fully shipped,
+# falls back to the soonest by date so a fully-shipped-but-still-Active job
+# still shows something.
+#
+# Current Work Center = the work center of the earliest non-complete
+# operation (by Sequence) -- the exact "current operation per job" logic
+# already proven live in shop-schedule/jobboss_db.py's CROSS APPLY, reused
+# here verbatim (Job_Operation.Work_Center/.Sequence/.Status), just OUTER
+# instead of CROSS for the reason above.
 _JOB_REPORT_QUERY = f"""
-SELECT TOP 500 {_JOB_REPORT_COLUMNS}, dlv.Promised_Date
+SELECT TOP 500 {_JOB_REPORT_COLUMNS}, dlv.Promised_Date, cur.Curr_WC
 FROM Job j
 OUTER APPLY (
     SELECT TOP 1 d.Promised_Date
@@ -163,6 +175,12 @@ OUTER APPLY (
     WHERE d.Job = j.Job
     ORDER BY CASE WHEN d.Remaining_Quantity > 0 THEN 0 ELSE 1 END, d.Promised_Date ASC
 ) dlv
+OUTER APPLY (
+    SELECT TOP 1 jo.Work_Center AS Curr_WC
+    FROM Job_Operation jo
+    WHERE jo.Job = j.Job AND jo.Status <> 'C'
+    ORDER BY jo.Sequence ASC
+) cur
 WHERE Status = 'Active' AND {{customer_clause}} AND {{assembly_clause}}
 ORDER BY Customer, Sched_End
 """
@@ -191,17 +209,26 @@ def _build_custom_report_query(field_keys: List[str]) -> "tuple[str, list]":
     """
     valid_keys = [k for k in field_keys if k in _AVAILABLE_FIELDS_BY_KEY]
     select_list = ", ".join(f"{_AVAILABLE_FIELDS_BY_KEY[k][1]} AS {k}" for k in valid_keys)
-    needs_delivery = 'promise_date' in valid_keys
     delivery_join = """
 OUTER APPLY (
     SELECT TOP 1 d.Promised_Date
     FROM Delivery d
     WHERE d.Job = j.Job
     ORDER BY CASE WHEN d.Remaining_Quantity > 0 THEN 0 ELSE 1 END, d.Promised_Date ASC
-) dlv""" if needs_delivery else ""
+) dlv""" if 'promise_date' in valid_keys else ""
+    # Same OUTER APPLY (not CROSS APPLY) reasoning as _JOB_REPORT_QUERY: this
+    # query starts FROM Job with no Job_Operation filter, so a non-complete
+    # operation row isn't guaranteed to exist for every Active job.
+    curr_wc_join = """
+OUTER APPLY (
+    SELECT TOP 1 jo.Work_Center AS Curr_WC
+    FROM Job_Operation jo
+    WHERE jo.Job = j.Job AND jo.Status <> 'C'
+    ORDER BY jo.Sequence ASC
+) cur""" if 'curr_wc' in valid_keys else ""
     query = f"""
 SELECT TOP 500 {select_list}
-FROM Job j{delivery_join}
+FROM Job j{delivery_join}{curr_wc_join}
 WHERE j.Status = 'Active' AND {{customer_clause}} AND {{assembly_clause}}
 ORDER BY j.Order_Date DESC, j.Job
 """
@@ -311,6 +338,7 @@ def _rows_from_job_report(raw_rows: List[dict]) -> List[Dict[str, str]]:
             'sched_end': sched_end.strftime('%Y-%m-%d') if sched_end else '',
             'promise_date': promised.strftime('%Y-%m-%d') if promised else '',
             'status': r.get('Status') or '',
+            'curr_wc': r.get('Curr_WC') or '',
             'notes': (r.get('Note_Text') or '').strip(),
         })
     return rows

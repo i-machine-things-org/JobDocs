@@ -22,7 +22,7 @@ def test_formats_populated_row():
         'Description': 'STBD END PLATE - ROUGH MACHINE',
         'Order_Date': datetime(2026, 9, 24), 'Order_Quantity': 1,
         'Sched_End': None, 'Status': 'Active', 'Note_Text': 'DPAS  DO-A3',
-        'Promised_Date': datetime(2027, 2, 24),
+        'Promised_Date': datetime(2027, 2, 24), 'Curr_WC': 'CNC MILL',
     }]
     rows = _rows_from_job_report(raw)
     assert rows == [{
@@ -32,7 +32,7 @@ def test_formats_populated_row():
         'description': 'STBD END PLATE - ROUGH MACHINE',
         'order_date': '2026-09-24', 'order_qty': '1', 'sched_end': '',
         'promise_date': '2027-02-24', 'status': 'Active',
-        'notes': 'DPAS  DO-A3',
+        'curr_wc': 'CNC MILL', 'notes': 'DPAS  DO-A3',
     }]
 
 
@@ -42,12 +42,31 @@ def test_formats_blank_row_without_crashing():
         'Customer_PO_LN': None, 'Drawing': None, 'Part_Number': None,
         'Rev': None, 'Description': None, 'Order_Date': None,
         'Order_Quantity': None, 'Sched_End': None, 'Status': None,
-        'Note_Text': None, 'Promised_Date': None,
+        'Note_Text': None, 'Promised_Date': None, 'Curr_WC': None,
     }]
     rows = _rows_from_job_report(raw)
     assert rows == [{
         'classification': '', 'job': '1', 'customer': '', 'po': '',
         'line': '', 'drawing': '', 'part_number': '', 'revision': '',
         'description': '', 'order_date': '', 'order_qty': '', 'sched_end': '',
-        'promise_date': '', 'status': '', 'notes': '',
+        'promise_date': '', 'status': '', 'curr_wc': '', 'notes': '',
     }]
+
+
+def test_curr_wc_blank_when_job_has_no_open_operation():
+    """OUTER APPLY, not CROSS APPLY -- a job with no non-complete
+    Job_Operation row (or no operations at all) still appears in the report,
+    just with a blank Current Work Center, rather than being silently
+    dropped. Simulated here as the DB simply returning no Curr_WC key/value
+    for that row (same as the SQL producing NULL).
+    """
+    raw = [{
+        'Job': '2', 'Customer': 'ACME', 'Customer_PO': None,
+        'Customer_PO_LN': None, 'Drawing': None, 'Part_Number': None,
+        'Rev': None, 'Description': None, 'Order_Date': None,
+        'Order_Quantity': None, 'Sched_End': None, 'Status': 'Active',
+        'Note_Text': None, 'Promised_Date': None, 'Curr_WC': None,
+    }]
+    rows = _rows_from_job_report(raw)
+    assert rows[0]['job'] == '2'
+    assert rows[0]['curr_wc'] == ''
