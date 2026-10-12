@@ -370,7 +370,7 @@ def _rows_from_custom_report(raw_rows: List[dict], field_keys: List[str]) -> Lis
 
 
 def fetch_custom_report(settings: Dict[str, Any], field_keys: List[str],
-                         filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+                        filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
     """Report Builder: run a SELECT over whichever AVAILABLE_FIELDS the user
     checked (see _FieldPickerDialog in modules/reporting/module.py), with the
     same Active/customer/assembly filters as Job Report.
@@ -405,7 +405,7 @@ def fetch_customers(settings: Dict[str, Any]) -> List[str]:
 
 
 def fetch_report(settings: Dict[str, Any], report_type: str,
-                  filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+                 filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
     """Run the query for `report_type` and return rows shaped for report_table
     (date, customer, job, description, status keys), regardless of whether the
     underlying query is row-per-job or an aggregate.
@@ -475,8 +475,10 @@ def fetch_report(settings: Dict[str, Any], report_type: str,
 
                 return [
                     {'date': '', 'customer': '', 'job': '', 'description': 'Total Jobs', 'status': str(total)},
-                    {'date': '', 'customer': '', 'job': '', 'description': 'Jobs This Month', 'status': str(this_month)},
-                    {'date': '', 'customer': '', 'job': '', 'description': 'Jobs This Week', 'status': str(this_week)},
+                    {'date': '', 'customer': '', 'job': '', 'description': 'Jobs This Month',
+                     'status': str(this_month)},
+                    {'date': '', 'customer': '', 'job': '', 'description': 'Jobs This Week',
+                     'status': str(this_week)},
                 ]
 
             raise ValueError(f"Unknown report type: {report_type!r}")
