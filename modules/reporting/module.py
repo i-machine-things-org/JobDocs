@@ -11,6 +11,7 @@ import csv
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal, QObject, QEvent, Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QWidget, QTableWidgetItem, QFileDialog, QHeaderView, QAbstractItemView,
     QDateEdit, QCalendarWidget, QDialog, QDialogButtonBox, QListWidget,
@@ -24,6 +25,21 @@ from experimental.db_integration import (
 )
 
 _REPORT_COLUMNS = ('date', 'customer', 'job', 'description', 'status')
+
+# Job Report: flags a job whose Scheduled End Date has slipped past its
+# Promise Date -- mirrors Report Fixer's Fix & Export red-highlight rule for
+# the same comparison (jobdocs-report-fixer/module.py), reapplied here since
+# Job Report is a from-scratch SQL pull, not that tool's output.
+_LATE_FILL_COLOR = QColor(255, 204, 204)
+
+
+def _is_past_promise(sched_end: str, promise_date: str) -> bool:
+    """True if Scheduled End Date is later than Promise Date. Both are
+    'YYYY-MM-DD' strings (or '' if blank) from _rows_from_job_report, so a
+    plain string comparison already sorts correctly -- no need to re-parse
+    into date objects. Either side blank means nothing to compare -> False.
+    """
+    return bool(sched_end and promise_date and sched_end > promise_date)
 
 # "Job Report" has far more per-job detail than the other report types' shared
 # five-column layout, so it gets its own wider column set -- report_table's
@@ -593,6 +609,9 @@ class ReportingModule(BaseModule):
             self.report_table.insertRow(r)
             for col, key in enumerate(columns):
                 self.report_table.setItem(r, col, QTableWidgetItem(row.get(key, '')))
+            if report_type == "Job Report" and _is_past_promise(row.get('sched_end', ''), row.get('promise_date', '')):
+                sched_col = columns.index('sched_end')
+                self.report_table.item(r, sched_col).setBackground(_LATE_FILL_COLOR)
 
         self._last_generated_at = datetime.now()
         self.report_status_label.setText(f"Showing {len(rows)} record(s) for '{report_type}'")
@@ -683,7 +702,7 @@ class ReportingModule(BaseModule):
 
     def _export_xlsx(self, file_path: str):
         from openpyxl import Workbook
-        from openpyxl.styles import Font
+        from openpyxl.styles import Font, PatternFill
         from openpyxl.utils import get_column_letter
         from openpyxl.worksheet.table import Table, TableStyleInfo
 
@@ -713,6 +732,18 @@ class ReportingModule(BaseModule):
         ws.append(safe_headers)
         for row in data_rows:
             ws.append(row)
+
+        # Same Scheduled-End-past-Promise flag as the on-screen report_table
+        # (_on_report_rows) -- reapplied here from the exported string values
+        # rather than read back off the QTableWidgetItem brushes, so this
+        # stays correct even if someone exports without ever having the tab open.
+        if self._last_report_type == "Job Report" and 'Scheduled End Date' in headers and 'Promise Date' in headers:
+            sched_idx = headers.index('Scheduled End Date')
+            promise_idx = headers.index('Promise Date')
+            red_fill = PatternFill(start_color='FFCCCC', end_color='FFCCCC', fill_type='solid')
+            for i, row in enumerate(data_rows):
+                if _is_past_promise(row[sched_idx], row[promise_idx]):
+                    ws.cell(row=header_row_idx + 1 + i, column=sched_idx + 1).fill = red_fill
 
         ws['A1'].font = Font(bold=True, size=12)
         for cell in ws[header_row_idx]:
