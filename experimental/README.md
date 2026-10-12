@@ -20,12 +20,14 @@ This directory contains experimental and work-in-progress features that are **no
    CREATE USER jobdocs_reporting_ro FOR LOGIN jobdocs_reporting_ro;
    GRANT SELECT ON dbo.Job TO jobdocs_reporting_ro;
    GRANT SELECT ON dbo.Delivery TO jobdocs_reporting_ro;
+   GRANT SELECT ON dbo.Job_Operation TO jobdocs_reporting_ro;
    ```
 
    The `Delivery` grant is only needed for the **Job Report** report type (it
    looks up each job's Promise Date there), and for **Report Builder** if
-   "Promise Date" is one of the fields checked; every other report type reads
-   `Job` alone.
+   "Promise Date" is one of the fields checked. `Job_Operation` is only
+   needed for Job Report's Current Work Center column. Every other report
+   type reads `Job` alone.
 
 2. In JobDocs, open **Settings > Advanced Settings**, check **Enable experimental features (Reporting)**, then fill in the JobBOSS DB Host / Port / Database / Username / Password fields. Use the exact `Server` value from your SQL Server ODBC DSN for Host -- for a named instance (e.g. `SMI-APP02\JBSQL`), leave Port blank and it resolves automatically via the SQL Browser service, the same way the ODBC driver does for Excel/Power Query.
 3. The password is **not** written to `settings.json`. It's stored in your OS credential store (Windows Credential Manager, macOS Keychain, or Linux Secret Service) via the `keyring` package, under service name `JobDocs`.
@@ -33,15 +35,17 @@ This directory contains experimental and work-in-progress features that are **no
 
 **Customer filter**: for "Jobs by Customer", "Job Report", and "Report Builder", the Customer button opens a checklist picker -- pick zero (All Customers), one, or several at once. "Job Report" and "Report Builder" also have an "Exclude assembly sub-jobs" checkbox (filters on `Assembly_Level = 0`, i.e. `Top_Lvl_Job == Job`) to drop component jobs like "30274A" under a parent "30274" from the results.
 
-**Report Builder**: pick exactly which columns to pull instead of using one of the fixed report layouts. "Choose Fields..." opens a checklist over `AVAILABLE_FIELDS` in `db_integration.py` -- the same columns Job Report already uses (plus `Total_Price`), so nothing here is new/unverified schema, just a different way to select from it. Everything checked becomes one dynamic `SELECT ... AS <key>` (field keys are a fixed allow-list the user picks a subset of, never free text, so this can't become a SQL-injection surface), filtered the same way as Job Report (Active jobs, optional customer list, optional assembly exclusion). `Delivery` is only joined in if "Promise Date" is one of the checked fields. Adding a newly-verified column later is one entry in `AVAILABLE_FIELDS` -- no new query, branch, or formatter needed per field, unlike the fixed report types above.
+**Report Builder**: pick exactly which columns to pull instead of using one of the fixed report layouts. "Choose Fields..." opens a checklist over `AVAILABLE_FIELDS` in `db_integration.py` -- the same columns Job Report already uses (plus `Total_Price`), so nothing here is new/unverified schema, just a different way to select from it. Everything checked becomes one dynamic `SELECT ... AS <key>` (field keys are a fixed allow-list the user picks a subset of, never free text, so this can't become a SQL-injection surface), filtered the same way as Job Report (Active jobs, optional customer list, optional assembly exclusion). `Delivery` is only joined in if "Promise Date" is checked, `Job_Operation` only if "Current Work Center" is checked. Adding a newly-verified column later is one entry in `AVAILABLE_FIELDS` -- no new query, branch, or formatter needed per field, unlike the fixed report types above.
 
 **Exported files are real Excel Tables**: the `.xlsx` export wraps the header + data rows in an Excel Table with its AutoFilter, so every column is sortable/filterable as soon as the file opens in Excel -- not a plain value dump.
 
 **Date field**: every report filters/sorts on `Job.Order_Date`, not `Released_Date` -- found by manual testing that `Released_Date` is only populated for roughly the last year on this schema, which made every date-based report silently come back empty for anything older. If your schema's history lives on yet another field, swap `_JOB_COLUMNS` and the query constants in `db_integration.py` (all in one place).
 
-**Known gap**: the `Status` column assumed by every report (`Job.Status`, same single-char convention as `Job_Operation.Status`), and `Total_Price` (summed per customer for Top Customers' "Gross Revenue") have not been verified against a real schema from this codebase alone -- confirm both match your JobBOSS version the first time you connect. Everything except Job Report covers the `Job` table alone (no join to operations/work centers).
+**Known gap**: the `Status` column assumed by every report (`Job.Status`, same single-char convention as `Job_Operation.Status`), and `Total_Price` (summed per customer for Top Customers' "Gross Revenue") have not been verified against a real schema from this codebase alone -- confirm both match your JobBOSS version the first time you connect. Everything except Job Report (and Report Builder, if Promise Date or Current Work Center are checked) covers the `Job` table alone, with no join to `Delivery`/`Job_Operation`.
 
 **Job Report field mapping**: mirrors JobBOSS's own canned "Job Report" export (one row per open job: PO, line, drawing, revision, promise date). Confirmed against a real schema that `Job.Customer_PO`/`Customer_PO_LN` (not `SO_Detail.PO`/`Line` -- `SO_Detail` was entirely unused, 0 rows, on the schema this was built against) are the real PO/Line source, and `Job.Rev` (not `Job.Revision`, always blank there) is the populated revision field -- if your install actually uses JobBOSS's Sales Order module, you may want `SO_Detail` instead. There is no column anywhere in that schema corresponding to the sample report's "Classification" field; it's left blank rather than guessed -- fill it in from wherever that lives on your install, if anywhere.
+
+**Current Work Center**: the work center of each job's earliest non-complete operation (by `Job_Operation.Sequence`) -- the exact "current operation" logic already proven live in the sibling `shop-schedule` project's `jobboss_db.py`, reused here. Unlike that project's `CROSS APPLY` (safe there only because its query starts `FROM Job_Operation` itself, so a matching row is guaranteed), Job Report starts `FROM Job` with no such guarantee -- an `Active` job isn't certain to have a non-complete operation row (not yet routed, or operations closed out of sync with the job header). Uses `OUTER APPLY` instead, so such a job still appears in the report with a blank Current Work Center rather than being silently dropped.
 
 **Job Report late-job highlight**: the Scheduled End Date cell turns red (on screen and in the `.xlsx` export) whenever it's later than that job's Promise Date -- same comparison Report Fixer's Fix & Export used to flag the same condition, reapplied here since Job Report is a fresh SQL pull rather than that tool's output. A blank Scheduled End Date or Promise Date is never flagged (nothing to compare).
 

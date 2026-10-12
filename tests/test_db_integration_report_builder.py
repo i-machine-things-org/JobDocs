@@ -33,6 +33,24 @@ def test_query_includes_delivery_join_only_when_promise_date_picked():
     assert keys_with == ['job', 'promise_date']
 
 
+def test_query_includes_job_operation_join_only_when_curr_wc_picked():
+    query_without, keys_without = _build_custom_report_query(['job', 'customer'])
+    assert 'Job_Operation' not in query_without
+
+    query_with, keys_with = _build_custom_report_query(['job', 'curr_wc'])
+    assert 'OUTER APPLY' in query_with
+    assert 'Job_Operation' in query_with
+    assert keys_with == ['job', 'curr_wc']
+
+
+def test_query_includes_both_joins_when_both_fields_picked():
+    query, keys = _build_custom_report_query(['job', 'promise_date', 'curr_wc'])
+    assert query.count('OUTER APPLY') == 2
+    assert 'Delivery' in query
+    assert 'Job_Operation' in query
+    assert keys == ['job', 'promise_date', 'curr_wc']
+
+
 def test_unknown_field_keys_are_dropped_not_interpolated():
     query, valid_keys = _build_custom_report_query(['job', "'; DROP TABLE Job; --", 'bogus'])
     assert valid_keys == ['job']

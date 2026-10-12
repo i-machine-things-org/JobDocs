@@ -48,12 +48,13 @@ def _is_past_promise(sched_end: str, promise_date: str) -> bool:
 _JOB_REPORT_COLUMNS = (
     'classification', 'job', 'customer', 'po', 'line', 'drawing', 'part_number',
     'revision', 'description', 'order_date', 'order_qty', 'sched_end',
-    'promise_date', 'status', 'notes',
+    'promise_date', 'status', 'curr_wc', 'notes',
 )
 _JOB_REPORT_HEADERS = [
     'Classification', 'Job ID', 'Customer ID', 'Customer PO Number', 'Line',
     'Drawing', 'Part Number', 'Revision', 'Description', 'Order Date',
-    'Order Qty', 'Scheduled End Date', 'Promise Date', 'Status', 'Notes',
+    'Order Qty', 'Scheduled End Date', 'Promise Date', 'Status',
+    'Current Work Center', 'Notes',
 ]
 
 _FIELD_LABELS = {key: label for key, label, _expr in AVAILABLE_FIELDS}
