@@ -24,6 +24,19 @@ from experimental.db_integration import is_configured, test_connection, fetch_re
 
 _REPORT_COLUMNS = ('date', 'customer', 'job', 'description', 'status')
 
+# Exported cells (Description/Notes/Customer/PO etc.) are free text sourced
+# from JobBOSS -- neutralize values Excel/CSV readers treat as formula
+# triggers (a note starting with "=" becomes a live formula on open; "+"/"-"/
+# "@"/tab/CR are also sniffed by Excel's CSV importer). Prefixing with "'"
+# is the standard mitigation (matches how Excel itself stores a manually
+# typed "'=foo" as literal text).
+_FORMULA_TRIGGER_CHARS = ('=', '+', '-', '@', '\t', '\r')
+
+
+def _neutralize_formula_cell(value: str) -> str:
+    return f"'{value}" if value and value.startswith(_FORMULA_TRIGGER_CHARS) else value
+
+
 # Job Report: flags a job whose Scheduled End Date has slipped past its
 # Promise Date -- mirrors Report Fixer's Fix & Export red-highlight rule for
 # the same comparison (jobdocs-report-fixer/module.py), reapplied here since
@@ -307,7 +320,14 @@ class ReportingModule(BaseModule):
 
     def _on_report_type_changed(self, report_type: str):
         self._update_filter_enabled_state(report_type)
-        self._update_table_headers(report_type)
+        # Only reset rows/headers immediately if nothing's in flight -- if a
+        # report is still running, leave the old (still internally consistent)
+        # headers/rows in place rather than resetting to the new type's empty
+        # layout; _on_report_rows() applies the correct headers for whichever
+        # report actually completes, using the type that was really queried.
+        if self._report_worker is None or not self._report_worker.isRunning():
+            self.report_table.setRowCount(0)
+            self._update_table_headers(report_type)
 
     def _update_filter_enabled_state(self, report_type: str):
         """Grey out the Customer/Date filters when the selected report type
@@ -419,6 +439,13 @@ class ReportingModule(BaseModule):
 
     def _load_customer_list(self):
         """Populate the Customer filter combo from JobBOSS after a successful connect."""
+        # Guard against Connect -> Disconnect -> Connect faster than the
+        # distinct-customer query finishes: replacing self._customer_worker
+        # while the old one is still running drops its only reference (it has
+        # no Qt parent), and Qt aborts the process on "destroyed while thread
+        # is still running" once that worker's run() eventually finishes.
+        if self._customer_worker is not None and self._customer_worker.isRunning():
+            return
         self._customer_worker = _CustomerListWorker(self._jobboss_settings())
         self._customer_worker.success.connect(self._on_customers_loaded)
         self._customer_worker.error.connect(
@@ -521,6 +548,12 @@ class ReportingModule(BaseModule):
         # sent to the worker at generate_report() time.
         report_type = self._last_report_type
         columns = self._report_columns(report_type)
+        # Apply headers for the report type that was actually queried, not
+        # whatever the combo currently shows -- otherwise a combo switch
+        # while this query was running leaves stale, mismatched headers/
+        # column-count in place and setItem()/the late-highlight lookup below
+        # can silently truncate or index into a None cell.
+        self._update_table_headers(report_type)
 
         self.report_table.setRowCount(0)
         for row in rows:
@@ -597,8 +630,8 @@ class ReportingModule(BaseModule):
         file_path, selected_filter = QFileDialog.getSaveFileName(
             self._widget,
             "Export Report",
-            f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            "CSV Files (*.csv);;Excel Files (*.xlsx)"
+            f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            "Excel Files (*.xlsx);;CSV Files (*.csv)"
         )
         if not file_path:
             return
@@ -621,11 +654,16 @@ class ReportingModule(BaseModule):
 
     def _export_csv(self, file_path: str):
         headers, data_rows = self._export_table_rows()
-        with open(file_path, 'w', newline='') as f:
+        safe_rows = [[_neutralize_formula_cell(v) for v in row] for row in data_rows]
+        # utf-8-sig, not the platform-default encoding (cp1252 on Windows) --
+        # a customer name or note containing a character outside cp1252 would
+        # otherwise raise UnicodeEncodeError and fail the export; the BOM also
+        # makes Excel itself open the file as UTF-8 instead of guessing wrong.
+        with open(file_path, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
             writer.writerows(self._export_title_block())
             writer.writerow(headers)
-            writer.writerows(data_rows)
+            writer.writerows(safe_rows)
 
     def _export_xlsx(self, file_path: str):
         from openpyxl import Workbook
@@ -635,6 +673,14 @@ class ReportingModule(BaseModule):
 
         title_block = self._export_title_block()
         headers, data_rows = self._export_table_rows()
+        # Neutralizing here (not just in _export_csv) matters for xlsx too --
+        # openpyxl auto-detects data_type='f' (formula) for any plain string
+        # cell value starting with "=", so an unprefixed JobBOSS note would
+        # become a *real* live formula, not just something Excel's CSV import
+        # heuristically treats as one. Safe to do once, upfront: date/numeric
+        # columns never start with a trigger char, so the late-highlight
+        # lookup below (which reads these same data_rows by index) is unaffected.
+        data_rows = [[_neutralize_formula_cell(v) for v in row] for row in data_rows]
 
         wb = Workbook()
         ws = wb.active
