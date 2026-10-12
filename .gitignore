@@ -5,6 +5,7 @@ sample_files/
 test_jobs.csv
 test_dist*/
 build[0-9]*/
+tools/
 
 # Claude Code and development notes
 .claude/settings.local.json
@@ -42,6 +43,8 @@ ENV/
 Thumbs.db
 
 # Project specific
+*.xlsx
+*.xlx
 *.db
 *.sqlite
 test_output/
