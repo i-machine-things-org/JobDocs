@@ -41,6 +41,7 @@ def _is_past_promise(sched_end: str, promise_date: str) -> bool:
     """
     return bool(sched_end and promise_date and sched_end > promise_date)
 
+
 # "Job Report" has far more per-job detail than the other report types' shared
 # five-column layout, so it gets its own wider column set -- report_table's
 # column count is resized to match whichever of these is active (see
@@ -419,8 +420,8 @@ class ReportingModule(BaseModule):
         # a wide Report Builder selection) into illegibly narrow slivers --
         # Interactive lets the user resize and scroll instead.
         resize_mode = (QHeaderView.ResizeMode.Interactive
-                        if report_type in ("Job Report", "Report Builder")
-                        else QHeaderView.ResizeMode.Stretch)
+                       if report_type in ("Job Report", "Report Builder")
+                       else QHeaderView.ResizeMode.Stretch)
         self.report_table.horizontalHeader().setSectionResizeMode(resize_mode)
 
     def _get_ui_path(self, relative_path: str) -> Path:
