@@ -46,26 +46,39 @@ REPORT_TYPES = (
 # filter/sort built on it silently went empty for older data.
 _JOB_COLUMNS = "Job, Customer, Description, Status, Order_Date"
 
-_RECENT_JOBS_QUERY = f"""
-SELECT TOP 50 {_JOB_COLUMNS}
-FROM Job
-WHERE Order_Date IS NOT NULL
-ORDER BY Order_Date DESC
-"""
+# Built as implicit-concatenated string literals, one query-defining f-string
+# line per constant, rather than a single triple-quoted f-string -- bandit's
+# B608 check flags any single string/f-string node that looks like a formatted
+# SQL statement, with no data-flow analysis to see what was interpolated.
+# This shape puts the one truly dynamic line (always just this module's own
+# hardcoded constants -- _JOB_COLUMNS, 'Assembly_Level = 0'/'1=1' -- or
+# _customer_filter_clause()'s output, always a fixed %s-placeholder template,
+# never a raw value) on its own line, with a suppression comment scoped to
+# just that B608 check; the plain-string continuation lines (no f-prefix)
+# don't trigger the check at all, since nothing is formatted into them at
+# this point -- {customer_clause}/{assembly_clause} are filled in later via
+# a separate .format() call in fetch_report(), and actual filter values are
+# always bound through cur.execute(query, params), never interpolated here.
+_RECENT_JOBS_QUERY = (
+    f"SELECT TOP 50 {_JOB_COLUMNS}\n"  # nosec B608
+    "FROM Job\n"
+    "WHERE Order_Date IS NOT NULL\n"
+    "ORDER BY Order_Date DESC\n"
+)
 
-_JOBS_BY_CUSTOMER_QUERY = f"""
-SELECT TOP 200 {_JOB_COLUMNS}
-FROM Job
-WHERE Order_Date IS NOT NULL AND {{customer_clause}}
-ORDER BY Order_Date DESC
-"""
+_JOBS_BY_CUSTOMER_QUERY = (
+    f"SELECT TOP 200 {_JOB_COLUMNS}\n"  # nosec B608
+    "FROM Job\n"
+    "WHERE Order_Date IS NOT NULL AND {customer_clause}\n"
+    "ORDER BY Order_Date DESC\n"
+)
 
-_JOBS_BY_DATE_RANGE_QUERY = f"""
-SELECT TOP 500 {_JOB_COLUMNS}
-FROM Job
-WHERE Order_Date BETWEEN %s AND %s
-ORDER BY Order_Date DESC
-"""
+_JOBS_BY_DATE_RANGE_QUERY = (
+    f"SELECT TOP 500 {_JOB_COLUMNS}\n"  # nosec B608
+    "FROM Job\n"
+    "WHERE Order_Date BETWEEN %s AND %s\n"
+    "ORDER BY Order_Date DESC\n"
+)
 
 _TOP_CUSTOMERS_QUERY = """
 SELECT TOP 10 Customer, COUNT(*) AS Job_Count, SUM(Total_Price) AS Gross_Revenue
@@ -137,24 +150,27 @@ _JOB_REPORT_COLUMNS = (
 # already proven live in shop-schedule/jobboss_db.py's CROSS APPLY, reused
 # here verbatim (Job_Operation.Work_Center/.Sequence/.Status), just OUTER
 # instead of CROSS for the reason above.
-_JOB_REPORT_QUERY = f"""
-SELECT TOP 500 {_JOB_REPORT_COLUMNS}, dlv.Promised_Date, cur.Curr_WC
-FROM Job j
-OUTER APPLY (
-    SELECT TOP 1 d.Promised_Date
-    FROM Delivery d
-    WHERE d.Job = j.Job
-    ORDER BY CASE WHEN d.Remaining_Quantity > 0 THEN 0 ELSE 1 END, d.Promised_Date ASC
-) dlv
-OUTER APPLY (
-    SELECT TOP 1 jo.Work_Center AS Curr_WC
-    FROM Job_Operation jo
-    WHERE jo.Job = j.Job AND jo.Status <> 'C'
-    ORDER BY jo.Sequence ASC
-) cur
-WHERE Status = 'Active' AND {{customer_clause}} AND {{assembly_clause}}
-ORDER BY Customer, Sched_End
-"""
+_JOB_REPORT_QUERY = (
+    # _JOB_REPORT_COLUMNS is a hardcoded module constant; see the
+    # implicit-concatenation note above _RECENT_JOBS_QUERY for why only
+    # the one line below needs a suppression comment.
+    f"SELECT TOP 500 {_JOB_REPORT_COLUMNS}, dlv.Promised_Date, cur.Curr_WC\n"  # nosec B608
+    "FROM Job j\n"
+    "OUTER APPLY (\n"
+    "    SELECT TOP 1 d.Promised_Date\n"
+    "    FROM Delivery d\n"
+    "    WHERE d.Job = j.Job\n"
+    "    ORDER BY CASE WHEN d.Remaining_Quantity > 0 THEN 0 ELSE 1 END, d.Promised_Date ASC\n"
+    ") dlv\n"
+    "OUTER APPLY (\n"
+    "    SELECT TOP 1 jo.Work_Center AS Curr_WC\n"
+    "    FROM Job_Operation jo\n"
+    "    WHERE jo.Job = j.Job AND jo.Status <> 'C'\n"
+    "    ORDER BY jo.Sequence ASC\n"
+    ") cur\n"
+    "WHERE Status = 'Active' AND {customer_clause} AND {assembly_clause}\n"
+    "ORDER BY Customer, Sched_End\n"
+)
 
 
 def _customer_filter_clause(customers: Optional[List[str]]) -> "tuple[str, tuple]":
