@@ -1,13 +1,14 @@
-"""Tests for the "Job Report" row formatter in experimental/db_integration.py.
+"""Tests for Job Report (modules/reporting/reports/job_report.py).
 
-Only covers _rows_from_job_report(), a pure function -- no DB connection
-needed. The query itself was validated by hand against a live JobBOSS
-schema (see experimental/README.md's "Job Report field mapping" note).
+Covers _rows_from_job_report() and _is_past_promise(), both pure functions --
+no DB/QApplication needed. The query itself was validated by hand against a
+live JobBOSS schema (see experimental/README.md's "Job Report" section).
 """
 
 from datetime import datetime
 
-from experimental.db_integration import REPORT_TYPES, _rows_from_job_report
+from modules.reporting.reports import REPORT_TYPES
+from modules.reporting.reports.job_report import _is_past_promise, _rows_from_job_report
 
 
 def test_job_report_is_registered():
@@ -70,3 +71,27 @@ def test_curr_wc_blank_when_job_has_no_open_operation():
     rows = _rows_from_job_report(raw)
     assert rows[0]['job'] == '2'
     assert rows[0]['curr_wc'] == ''
+
+
+def test_flags_scheduled_end_after_promise():
+    assert _is_past_promise('2026-06-01', '2026-05-01') is True
+
+
+def test_does_not_flag_scheduled_end_before_promise():
+    assert _is_past_promise('2026-04-01', '2026-05-01') is False
+
+
+def test_does_not_flag_equal_dates():
+    assert _is_past_promise('2026-05-01', '2026-05-01') is False
+
+
+def test_does_not_flag_when_scheduled_end_is_blank():
+    assert _is_past_promise('', '2026-05-01') is False
+
+
+def test_does_not_flag_when_promise_date_is_blank():
+    assert _is_past_promise('2026-05-01', '') is False
+
+
+def test_does_not_flag_when_both_blank():
+    assert _is_past_promise('', '') is False

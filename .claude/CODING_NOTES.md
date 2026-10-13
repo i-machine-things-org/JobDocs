@@ -156,6 +156,11 @@
 - **In frozen apps, try the bundled interpreter before falling back to system Python.** ABI mismatches between bundled and system Python can break binary wheels.
 - **Invalidate any startup-computed module cache on install/uninstall.** A `discover_modules()` result cached once at startup (e.g. for a Settings dialog list) goes stale the moment a plugin is installed/uninstalled mid-session; recompute it in both success handlers, not just at launch.
 
+## Reporting Module (JobDocs)
+
+- **A new report type in Reports (Beta) is one file under `modules/reporting/reports/`, not a new branch in `db_integration.py`/`module.py`.** Each file builds a `ReportDefinition` (query/formatter/columns/headers/filter flags, see `base.py`) and registers it in `reports/__init__.py`'s `REPORTS` dict; `module.py`'s generic glue reads those flags, so no per-type `if`/`elif` is ever added there. Introduced because two more report types (Employee Efficiency) made the old if/elif-per-method pattern across both files concrete enough to fix before it grew further.
+- **`experimental/db_integration.py` is shared infrastructure only (connection, credentials, cross-report filter-input lookups like `fetch_customers`/`fetch_employees`) — no report-specific query or formatter belongs there.** Everything report-specific lives in its own `modules/reporting/reports/<name>.py`, even a one-query report; resist the urge to "just add one more `if` " to the old monolith instead of writing the file.
+
 ## Update Checker
 
 - **Strip pre-release suffixes before parsing a version tuple.** `"v0.9.9-test".split('.')` throws; split on `-` first.

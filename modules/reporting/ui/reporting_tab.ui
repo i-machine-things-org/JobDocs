@@ -166,37 +166,11 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
          </widget>
         </item>
         <item>
+         <!-- Items populated at runtime from modules.reporting.reports.REPORT_TYPES
+              (ReportingModule._create_widget), not listed here. Adding a
+              report type means adding a file under modules/reporting/reports/,
+              never editing this .ui file. -->
          <widget class="QComboBox" name="report_type_combo">
-          <item>
-           <property name="text">
-            <string>Job Report</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Job Statistics</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Jobs by Customer</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Jobs by Date Range</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Recent Jobs</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Top Customers</string>
-           </property>
-          </item>
          </widget>
         </item>
         <item>
@@ -302,6 +276,20 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
          <widget class="QCheckBox" name="exclude_assemblies_check">
           <property name="text">
            <string>Exclude assembly sub-jobs</string>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="0">
+         <widget class="QLabel" name="employeeLabel">
+          <property name="text">
+           <string>Employee:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="1">
+         <widget class="QPushButton" name="employee_filter_btn">
+          <property name="text">
+           <string>Employees: All</string>
           </property>
          </widget>
         </item>
