@@ -172,8 +172,13 @@ ORDER BY e.Last_Name, e.First_Name, op.Job
 # just in the outer query) so the Indirect exclusion applies before the
 # rollup, not after. op_scored applies the qty-sanity check per operation,
 # so a flagged operation's Act Hours AND Adj Hrs both drop out of the % Eff
-# ratio together -- Total_Act_Hrs still includes them (informational:
-# "hours actually logged" is still true even when the quantity isn't).
+# ratio together. Setup Act/Est Hrs and Run Est Hrs are never "scored" --
+# like Detail, they're plain informational sums, not inputs to % Eff, so a
+# flagged operation's hours still show there even though they're excluded
+# from Run Act Hrs/Adj Hrs. Setup and Run are kept as separate columns here
+# too, never summed into one blended "Total" -- the real report never does
+# that either, and blending them would silently combine an excluded
+# category (Setup) with the one that actually drives % Eff (Run).
 _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY = """
 WITH op_rollup AS (
     SELECT jot.Employee, jot.Job_Operation,
@@ -189,7 +194,7 @@ WITH op_rollup AS (
     GROUP BY jot.Employee, jot.Job_Operation
 ),
 op_scored AS (
-    SELECT Employee, Setup_Act_Hrs, Setup_Est_Hrs, Run_Act_Hrs, Run_Est_Hrs,
+    SELECT Employee, Setup_Act_Hrs, Setup_Est_Hrs, Run_Est_Hrs,
            CASE WHEN Est_Required_Qty > 0 AND Run_Qty > Est_Required_Qty * {qty_multiplier}
                 THEN 0 ELSE Run_Act_Hrs END AS Scored_Run_Act_Hrs,
            CASE WHEN Est_Required_Qty > 0 AND Run_Qty > Est_Required_Qty * {qty_multiplier}
@@ -197,9 +202,10 @@ op_scored AS (
     FROM op_rollup
 )
 SELECT op.Employee, e.First_Name, e.Last_Name,
-       SUM(op.Setup_Act_Hrs + op.Run_Act_Hrs) AS Total_Act_Hrs,
-       SUM(op.Setup_Est_Hrs + op.Run_Est_Hrs) AS Total_Est_Hrs,
+       SUM(op.Setup_Act_Hrs) AS Setup_Act_Hrs,
+       SUM(op.Setup_Est_Hrs) AS Setup_Est_Hrs,
        SUM(op.Scored_Run_Act_Hrs) AS Run_Act_Hrs,
+       SUM(op.Run_Est_Hrs) AS Run_Est_Hrs,
        SUM(op.Scored_Adj_Hrs) AS Adj_Hrs
 FROM op_scored op
 JOIN Employee e ON e.Employee = op.Employee
@@ -216,12 +222,13 @@ DETAIL_HEADERS = [
     'Employee', 'Job', 'Work Center', 'Operation', 'Setup Act Hrs',
     'Setup Est Hrs', 'Run Act Hrs', 'Run Est Hrs', 'Run Qty', 'Adj Hrs', '% Eff',
 ]
-# Total Act/Est Hrs include Setup (informational, "how many hours did they
-# log in total"); Run Act Hrs / Adj Hrs / % Eff are shown separately since
-# % Eff is Run-only -- lining Total Act Hrs up next to % Eff would imply a
-# relationship that isn't there (Setup is excluded from the ratio).
-SUMMARY_COLUMNS = ('employee', 'total_act_hrs', 'total_est_hrs', 'run_act_hrs', 'adj_hrs', 'pct_eff')
-SUMMARY_HEADERS = ['Employee', 'Total Act Hrs', 'Total Est Hrs', 'Run Act Hrs', 'Adj Hrs', '% Eff']
+# Setup and Run are always separate columns, never summed into one blended
+# "Total" -- matches Detail, and matches the real report, which never
+# combines them either (Setup isn't part of % Eff at all).
+SUMMARY_COLUMNS = ('employee', 'setup_act_hrs', 'setup_est_hrs', 'run_act_hrs', 'run_est_hrs', 'adj_hrs', 'pct_eff')
+SUMMARY_HEADERS = [
+    'Employee', 'Setup Act Hrs', 'Setup Est Hrs', 'Run Act Hrs', 'Run Est Hrs', 'Adj Hrs', '% Eff',
+]
 
 
 def _pct_or_blank(numerator: float, denominator: float) -> str:
@@ -266,16 +273,18 @@ def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
 def _rows_from_summary(raw_rows: List[dict]) -> List[Dict[str, str]]:
     rows = []
     for r in raw_rows:
-        act = r.get('Total_Act_Hrs') or 0
-        est = r.get('Total_Est_Hrs') or 0
+        setup_act = r.get('Setup_Act_Hrs') or 0
+        setup_est = r.get('Setup_Est_Hrs') or 0
         run_act = r.get('Run_Act_Hrs') or 0
+        run_est = r.get('Run_Est_Hrs') or 0
         adj = r.get('Adj_Hrs') or 0
         name = f"{r.get('First_Name') or ''} {r.get('Last_Name') or ''}".strip() or (r.get('Employee') or '')
         rows.append({
             'employee': name,
-            'total_act_hrs': f"{act:.2f}",
-            'total_est_hrs': f"{est:.2f}",
+            'setup_act_hrs': f"{setup_act:.2f}",
+            'setup_est_hrs': f"{setup_est:.2f}",
             'run_act_hrs': f"{run_act:.2f}",
+            'run_est_hrs': f"{run_est:.2f}",
             'adj_hrs': f"{adj:.2f}",
             'pct_eff': _pct_or_blank(adj, run_act),
         })

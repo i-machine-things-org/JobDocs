@@ -6,8 +6,10 @@ article #000012591: Adj Hrs = Act_Run_Qty * Est_Run_Per_Part, % Eff =
 Adj Hrs / Act_Run_Hrs -- Setup excluded entirely), the three earlier wrong
 attempts it replaces, the qty-sanity guard added after a real operation
 (Est_Required_Qty=1, Act_Run_Qty=5,629) blew one employee's % Eff up to
-796%, and the two rules confirmed directly from JobBOSS's own report source
-(Rework_Time=0, and quantity zeroed when Run Act Hrs is 0).
+796%, the two rules confirmed directly from JobBOSS's own report source
+(Rework_Time=0, and quantity zeroed when Run Act Hrs is 0), and why Setup
+and Run are always separate columns in Summary too, never blended into one
+"Total".
 """
 
 from modules.reporting.reports import REPORT_TYPES
@@ -146,13 +148,13 @@ def test_detail_blanks_adj_hrs_and_pct_eff_when_sql_flags_the_row():
 def test_summary_formats_populated_row():
     raw = [{
         'Employee': 'A1234', 'First_Name': 'John', 'Last_Name': 'Smith',
-        'Total_Act_Hrs': 12.5, 'Total_Est_Hrs': 11.0, 'Run_Act_Hrs': 10.0, 'Adj_Hrs': 8.0,
+        'Setup_Act_Hrs': 2.5, 'Setup_Est_Hrs': 2.0, 'Run_Act_Hrs': 10.0, 'Run_Est_Hrs': 9.0, 'Adj_Hrs': 8.0,
     }]
     rows = _rows_from_summary(raw)
     assert rows == [{
-        'employee': 'John Smith', 'total_act_hrs': '12.50', 'total_est_hrs': '11.00',
-        'run_act_hrs': '10.00', 'adj_hrs': '8.00',
-        # 8.0 / 10.0 * 100 -- NOT 8.0 / 12.5 (Total Act Hrs includes Setup, % Eff must not)
+        'employee': 'John Smith', 'setup_act_hrs': '2.50', 'setup_est_hrs': '2.00',
+        'run_act_hrs': '10.00', 'run_est_hrs': '9.00', 'adj_hrs': '8.00',
+        # 8.0 / 10.0 * 100 -- Setup Act Hrs (2.5) does NOT enter this ratio
         'pct_eff': '80.0',
     }]
 
@@ -160,10 +162,21 @@ def test_summary_formats_populated_row():
 def test_summary_handles_zero_hours_without_crashing():
     raw = [{
         'Employee': 'B5678', 'First_Name': None, 'Last_Name': None,
-        'Total_Act_Hrs': None, 'Total_Est_Hrs': None, 'Run_Act_Hrs': None, 'Adj_Hrs': None,
+        'Setup_Act_Hrs': None, 'Setup_Est_Hrs': None, 'Run_Act_Hrs': None, 'Run_Est_Hrs': None, 'Adj_Hrs': None,
     }]
     rows = _rows_from_summary(raw)
     assert rows == [{
-        'employee': 'B5678', 'total_act_hrs': '0.00', 'total_est_hrs': '0.00',
-        'run_act_hrs': '0.00', 'adj_hrs': '0.00', 'pct_eff': '',
+        'employee': 'B5678', 'setup_act_hrs': '0.00', 'setup_est_hrs': '0.00',
+        'run_act_hrs': '0.00', 'run_est_hrs': '0.00', 'adj_hrs': '0.00', 'pct_eff': '',
     }]
+
+
+def test_summary_never_blends_setup_and_run_hours():
+    # Regression guard: Summary used to combine Setup+Run into "Total Act
+    # Hrs"/"Total Est Hrs" -- the real report never does this (Setup isn't
+    # even part of % Eff), and Detail never did either. Neither query
+    # should sum them together into one blended column.
+    assert "Setup_Act_Hrs + " not in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
+    assert "Setup_Est_Hrs + " not in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
+    assert "Total_Act_Hrs" not in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
+    assert "Total_Est_Hrs" not in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
