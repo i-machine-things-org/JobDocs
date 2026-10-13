@@ -4,8 +4,10 @@ Covers _rows_from_detail() and _rows_from_summary() -- pure functions, no DB
 needed. See that module's docstring for the real JobBOSS formula (ECI KB
 article #000012591: Adj Hrs = Act_Run_Qty * Est_Run_Per_Part, % Eff =
 Adj Hrs / Act_Run_Hrs -- Setup excluded entirely), the three earlier wrong
-attempts it replaces, and the qty-sanity guard added after a real operation
-(Est_Required_Qty=1, Act_Run_Qty=5,629) blew one employee's % Eff up to 796%.
+attempts it replaces, the qty-sanity guard added after a real operation
+(Est_Required_Qty=1, Act_Run_Qty=5,629) blew one employee's % Eff up to
+796%, and the two rules confirmed directly from JobBOSS's own report source
+(Rework_Time=0, and quantity zeroed when Run Act Hrs is 0).
 """
 
 from modules.reporting.reports import REPORT_TYPES
@@ -32,8 +34,28 @@ def test_both_queries_exclude_indirect_work_centers():
 def test_both_queries_compute_adj_hrs_from_run_qty_times_est_run_per_part():
     # Regression guard for the real formula (ECI KB #000012591) -- catches
     # someone reintroducing one of the three rejected formulas instead.
+    # Run_Qty * Est_Run_Per_Part, not the raw SUM()/MAX() inline, since both
+    # are computed once in a CTE (see test_both_queries_zero_run_qty_when_no_run_act_hrs).
     for query in (_EMPLOYEE_EFFICIENCY_DETAIL_QUERY, _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY):
-        assert "Act_Run_Qty) * MAX(jo.Est_Run_Per_Part)" in query
+        assert "Run_Qty * " in query and "Est_Run_Per_Part" in query
+
+
+def test_both_queries_exclude_rework_time():
+    # Regression guard: confirmed from JobBOSS's own report source
+    # (LR_EmployeeEfficiency_Rpt.htm) -- every query there filters
+    # Rework_Time=0. Rework entries never counted toward Act hours or Adj
+    # Hrs here before this was found; must never silently come back.
+    for query in (_EMPLOYEE_EFFICIENCY_DETAIL_QUERY, _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY):
+        assert "jot.Rework_Time = 0" in query
+
+
+def test_both_queries_zero_run_qty_when_no_run_act_hrs():
+    # Regression guard: also confirmed from JobBOSS's own report source --
+    # IIF(ARHSum=0, 0, ARQSum). If an employee logged zero actual run hours
+    # for an operation, the reported quantity must be forced to 0 too,
+    # regardless of what Act_Run_Qty itself summed to.
+    for query in (_EMPLOYEE_EFFICIENCY_DETAIL_QUERY, _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY):
+        assert "WHEN SUM(jot.Act_Run_Hrs) = 0 THEN 0 ELSE SUM(jot.Act_Run_Qty) END AS Run_Qty" in query
 
 
 def test_both_queries_guard_against_implausible_run_qty():
