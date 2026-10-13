@@ -63,6 +63,24 @@ SUM -- matching the KB article's "operations without Adj E Hrs are not
 included" without one unscoreable operation nulling out every other
 operation's real contribution.
 
+**Bad-data guard**: one real operation found live (Job 29718, CNC HMC OP6)
+has Act_Run_Qty = 5,629 against Est_Required_Qty = 1 -- the job needed one
+part, 5,629 are logged as run, in 10 total hours. Confirmed via the real
+JobBOSS report that this does NOT count toward that employee's %Eff (their
+real number is sane; ours wasn't, until this guard), but there's no boolean
+"exclude this" column anywhere on Job_Operation -- checked every one of its
+~100 columns directly. No live trace of JobBOSS's own query was possible
+either (the available login lacks VIEW SERVER STATE/VIEW DATABASE STATE,
+so Profiler/Extended Events/Query Store/plan-cache are all out). Lacking
+the real exclusion rule, _QTY_SANITY_MULTIPLIER below is a pragmatic
+stand-in: an operation's Run_Qty is excluded from Adj Hrs / % Eff (not from
+the informational Hours columns) when it's more than that many times
+Est_Required_Qty. This is a deliberate choice to favor robustness over
+precision -- it will not match JobBOSS's real exclusion logic exactly, but
+catches the one confirmed failure mode (and any of the same shape) without
+guessing at an arbitrary %Eff-based cutoff. Revisit if the real query is
+ever actually captured.
+
 Status = 'Active' (Job_Operation_Time has no status value confirmed to mean
 "void"/"deleted" from the schema dump alone, so none is filtered here) --
 the only filter applied is the one the real report's own "Active Employees
@@ -88,12 +106,22 @@ from typing import Any, Dict, List
 from experimental.db_integration import connect, employee_filter_clause
 from modules.reporting.reports.base import ReportDefinition
 
+# See the module docstring's "Bad-data guard" section -- not a JobBOSS-
+# confirmed rule, a pragmatic stand-in chosen to favor robustness over
+# precision given one confirmed real example (5,629x) and no way to find
+# JobBOSS's own exclusion logic from here.
+_QTY_SANITY_MULTIPLIER = 10
+
 _EMPLOYEE_EFFICIENCY_DETAIL_QUERY = """
 SELECT jot.Employee, e.First_Name, e.Last_Name, jo.Job, jo.Work_Center, jo.Operation_Service,
        SUM(jot.Act_Setup_Hrs) AS Setup_Act_Hrs, MAX(jo.Est_Setup_Hrs) AS Setup_Est_Hrs,
        SUM(jot.Act_Run_Hrs) AS Run_Act_Hrs, MAX(jo.Est_Run_Hrs) AS Run_Est_Hrs,
        SUM(jot.Act_Run_Qty) AS Run_Qty,
-       ISNULL(SUM(jot.Act_Run_Qty) * MAX(jo.Est_Run_Per_Part), 0) AS Adj_Hrs
+       CASE WHEN MAX(jo.Est_Required_Qty) > 0
+                 AND SUM(jot.Act_Run_Qty) > MAX(jo.Est_Required_Qty) * {qty_multiplier}
+            THEN NULL
+            ELSE SUM(jot.Act_Run_Qty) * MAX(jo.Est_Run_Per_Part)
+       END AS Adj_Hrs
 FROM Job_Operation_Time jot
 JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
 JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
@@ -108,26 +136,40 @@ ORDER BY e.Last_Name, e.First_Name, jo.Job
 # GROUP BY -- same reason, so Est_Run_Per_Part is applied to this employee's
 # Run Qty for this one operation exactly once, not once per Job_Operation_Time
 # row. Joins Work_Center here too (not just in the outer query) so the
-# Indirect exclusion applies before the rollup, not after.
+# Indirect exclusion applies before the rollup, not after. Raw_Adj_Hrs is
+# left un-guarded (nullable) inside op_rollup; op_scored applies the same
+# qty-sanity check Detail uses, per operation, so a flagged operation's Act
+# Hours AND Adj Hrs both drop out of the % Eff ratio together -- Total_Act_Hrs
+# still includes them (informational: "hours actually logged" is still true
+# even when the quantity data isn't trustworthy).
 _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY = """
 WITH op_rollup AS (
     SELECT jot.Employee, jot.Job_Operation,
            SUM(jot.Act_Setup_Hrs) AS Setup_Act_Hrs, MAX(jo.Est_Setup_Hrs) AS Setup_Est_Hrs,
            SUM(jot.Act_Run_Hrs) AS Run_Act_Hrs, MAX(jo.Est_Run_Hrs) AS Run_Est_Hrs,
-           ISNULL(SUM(jot.Act_Run_Qty) * MAX(jo.Est_Run_Per_Part), 0) AS Adj_Hrs
+           SUM(jot.Act_Run_Qty) AS Run_Qty, MAX(jo.Est_Required_Qty) AS Est_Required_Qty,
+           SUM(jot.Act_Run_Qty) * MAX(jo.Est_Run_Per_Part) AS Raw_Adj_Hrs
     FROM Job_Operation_Time jot
     JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
     JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
     WHERE jot.Work_Date BETWEEN %s AND %s
           AND (wc.Type IS NULL OR wc.Type <> 'Indirect')
     GROUP BY jot.Employee, jot.Job_Operation
+),
+op_scored AS (
+    SELECT Employee, Setup_Act_Hrs, Setup_Est_Hrs, Run_Act_Hrs, Run_Est_Hrs,
+           CASE WHEN Est_Required_Qty > 0 AND Run_Qty > Est_Required_Qty * {qty_multiplier}
+                THEN 0 ELSE Run_Act_Hrs END AS Scored_Run_Act_Hrs,
+           CASE WHEN Est_Required_Qty > 0 AND Run_Qty > Est_Required_Qty * {qty_multiplier}
+                THEN 0 ELSE Raw_Adj_Hrs END AS Scored_Adj_Hrs
+    FROM op_rollup
 )
 SELECT op.Employee, e.First_Name, e.Last_Name,
        SUM(op.Setup_Act_Hrs + op.Run_Act_Hrs) AS Total_Act_Hrs,
        SUM(op.Setup_Est_Hrs + op.Run_Est_Hrs) AS Total_Est_Hrs,
-       SUM(op.Run_Act_Hrs) AS Run_Act_Hrs,
-       SUM(op.Adj_Hrs) AS Adj_Hrs
-FROM op_rollup op
+       SUM(op.Scored_Run_Act_Hrs) AS Run_Act_Hrs,
+       SUM(op.Scored_Adj_Hrs) AS Adj_Hrs
+FROM op_scored op
 JOIN Employee e ON e.Employee = op.Employee
 WHERE e.Status = 'Active' AND {employee_clause}
 GROUP BY op.Employee, e.First_Name, e.Last_Name
@@ -168,7 +210,10 @@ def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
         run_act = r.get('Run_Act_Hrs') or 0
         run_est = r.get('Run_Est_Hrs') or 0
         qty = r.get('Run_Qty') or 0
-        adj = r.get('Adj_Hrs') or 0
+        # None (not 0) means either no Run component at all (Est_Run_Per_Part
+        # unset) or the qty-sanity guard flagged this operation -- blank, not
+        # "0.00"/"0.0", since both mean "not scoreable", not "scored at zero".
+        adj = r.get('Adj_Hrs')
         name = f"{r.get('First_Name') or ''} {r.get('Last_Name') or ''}".strip() or (r.get('Employee') or '')
         rows.append({
             'employee': name,
@@ -180,8 +225,8 @@ def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
             'run_act_hrs': f"{run_act:.2f}",
             'run_est_hrs': f"{run_est:.2f}",
             'run_qty': str(qty),
-            'adj_hrs': f"{adj:.2f}",
-            'pct_eff': _pct_or_blank(adj, run_act),
+            'adj_hrs': f"{adj:.2f}" if adj is not None else '',
+            'pct_eff': _pct_or_blank(adj, run_act) if adj is not None else '',
         })
     return rows
 
@@ -209,7 +254,7 @@ def _fetch_detail(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Dic
     start = filters['start_date']
     end = filters['end_date']
     clause, employee_params = employee_filter_clause(filters.get('employees'), column='jot.Employee')
-    query = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(employee_clause=clause)
+    query = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(employee_clause=clause, qty_multiplier=_QTY_SANITY_MULTIPLIER)
     with connect(settings) as conn:
         with conn.cursor() as cur:
             cur.execute(query, (start, end) + employee_params)
@@ -220,7 +265,7 @@ def _fetch_summary(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Di
     start = filters['start_date']
     end = filters['end_date']
     clause, employee_params = employee_filter_clause(filters.get('employees'), column='op.Employee')
-    query = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(employee_clause=clause)
+    query = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(employee_clause=clause, qty_multiplier=_QTY_SANITY_MULTIPLIER)
     with connect(settings) as conn:
         with conn.cursor() as cur:
             cur.execute(query, (start, end) + employee_params)

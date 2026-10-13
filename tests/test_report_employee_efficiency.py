@@ -3,13 +3,14 @@
 Covers _rows_from_detail() and _rows_from_summary() -- pure functions, no DB
 needed. See that module's docstring for the real JobBOSS formula (ECI KB
 article #000012591: Adj Hrs = Act_Run_Qty * Est_Run_Per_Part, % Eff =
-Adj Hrs / Act_Run_Hrs -- Setup excluded entirely) and the three earlier
-wrong attempts it replaces.
+Adj Hrs / Act_Run_Hrs -- Setup excluded entirely), the three earlier wrong
+attempts it replaces, and the qty-sanity guard added after a real operation
+(Est_Required_Qty=1, Act_Run_Qty=5,629) blew one employee's % Eff up to 796%.
 """
 
 from modules.reporting.reports import REPORT_TYPES
 from modules.reporting.reports.employee_efficiency import (
-    _EMPLOYEE_EFFICIENCY_DETAIL_QUERY, _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY,
+    _EMPLOYEE_EFFICIENCY_DETAIL_QUERY, _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY, _QTY_SANITY_MULTIPLIER,
     _rows_from_detail, _rows_from_summary,
 )
 
@@ -33,6 +34,18 @@ def test_both_queries_compute_adj_hrs_from_run_qty_times_est_run_per_part():
     # someone reintroducing one of the three rejected formulas instead.
     for query in (_EMPLOYEE_EFFICIENCY_DETAIL_QUERY, _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY):
         assert "Act_Run_Qty) * MAX(jo.Est_Run_Per_Part)" in query
+
+
+def test_both_queries_guard_against_implausible_run_qty():
+    # Regression guard for the qty-sanity fix -- a real operation
+    # (Est_Required_Qty=1, Act_Run_Qty=5,629) produced a 796% % Eff for one
+    # employee until this landed. Checks the guard references
+    # Est_Required_Qty and the shared multiplier constant, not that it's the
+    # right multiplier (can't verify that from here).
+    for query in (_EMPLOYEE_EFFICIENCY_DETAIL_QUERY, _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY):
+        formatted = query.format(employee_clause="1=1", qty_multiplier=_QTY_SANITY_MULTIPLIER)
+        assert "Est_Required_Qty" in formatted
+        assert f"* {_QTY_SANITY_MULTIPLIER}" in formatted
 
 
 def test_detail_formats_populated_row():
@@ -84,8 +97,28 @@ def test_detail_falls_back_to_employee_code_when_name_blank():
     assert rows[0]['employee'] == 'A1234'
     assert rows[0]['setup_act_hrs'] == '0.00'
     assert rows[0]['run_qty'] == '0'
-    assert rows[0]['adj_hrs'] == '0.00'
-    assert rows[0]['pct_eff'] == ''  # 0 Run Act Hrs -- nothing to divide by
+    # Adj_Hrs is None here (no Run_Act_Hrs to begin with) -- blank, not "0.00"
+    assert rows[0]['adj_hrs'] == ''
+    assert rows[0]['pct_eff'] == ''
+
+
+def test_detail_blanks_adj_hrs_and_pct_eff_when_sql_flags_the_row():
+    # The SQL returns Adj_Hrs = NULL (not 0) for a row the qty-sanity guard
+    # excludes -- same signal as "no Run component at all". The formatter
+    # must not coerce this to 0 and compute a fake "0.0%"; it must blank
+    # both cells, even though Run Act Hrs is a real, nonzero, informational
+    # number that's still shown.
+    raw = [{
+        'Employee': '***REDACTED***', 'First_Name': 'Tyler', 'Last_Name': 'Smith',
+        'Job': '29718', 'Work_Center': 'CNC HMC', 'Operation_Service': 'OP6',
+        'Setup_Act_Hrs': 2.0, 'Setup_Est_Hrs': 1.5,
+        'Run_Act_Hrs': 10.0, 'Run_Est_Hrs': 1.75, 'Run_Qty': 5629,
+        'Adj_Hrs': None,  # flagged: 5629 >> Est_Required_Qty(1) * multiplier
+    }]
+    rows = _rows_from_detail(raw)
+    assert rows[0]['run_act_hrs'] == '10.00'  # still shown -- real hours were logged
+    assert rows[0]['adj_hrs'] == ''
+    assert rows[0]['pct_eff'] == ''
 
 
 def test_summary_formats_populated_row():
