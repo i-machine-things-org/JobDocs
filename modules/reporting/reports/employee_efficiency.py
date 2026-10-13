@@ -26,35 +26,55 @@ picks up that one fixed per-operation value exactly once no matter how many
 time entries it has.
 
 "Adj Hrs" / "% Eff" -- the real JobBOSS report's own headline numbers -- are
-now computed from the actual documented JobBOSS formula (ECI knowledge base
-article "JobBOSS - Employee Efficiency Report", #000012591), not another
+shown separately for Setup and Run, exactly like the real report's own
+layout (two parallel blocks, each with Est/Act/Adj/%Eff), per the real
+report's own footer: "Efficiency Calculations use Adj E Hrs / Act Hrs" --
+stated once, generically, confirming the same formula applies
+independently to each block, not just Run.
+
+**Run** uses the actual documented JobBOSS formula (ECI knowledge base
+article "JobBOSS - Employee Efficiency Report", #000012591), not a
 reverse-engineered guess:
 
-    Adj Hrs = Act_Run_Qty * Est_Run_Per_Part
-    % Eff = Adj Hrs / Act_Run_Hrs * 100
+    Run Adj Hrs = Act_Run_Qty * Est_Run_Per_Part
+    Run % Eff = Run Adj Hrs / Act_Run_Hrs * 100
 
 Confirmed with the article's own worked example: Make Qty 100 at 30
 parts/hr -> Est_Run_Per_Part = (100/30)/100 = 0.0333 hrs/part; a time entry
 of 2 Act Hrs with Run Qty 25 gives Adj Hrs = 25 * 0.0333 = 0.83, % Eff =
 0.83/2 = 41.5%.
 
-Two things this corrects from three earlier (wrong) attempts, all now
-removed -- a naive Est/Act ratio, Job_Operation.Efficiency_Pct (confirmed
-static garbage), and an Adj Hrs formula based on
+**Setup** has no quantity to adjust by (it's a one-time "did you do the
+setup" cost, not scaled per part), so:
+
+    Setup Adj Hrs = Setup Est Hrs
+    Setup % Eff = Setup Adj Hrs / Act_Setup_Hrs * 100
+
+This is the empirically-verified DEFAULT case (not a new guess): a real
+single-employee export's individual rows showed Setup Est Hrs == Setup Adj
+E Hrs exactly in ~94% of rows. The remaining ~6% diverge for an unknown
+reason -- deliberately NOT modeled as Setup_Pct_Complete scaling, which has
+the same "reflects today, not history" flaw already proven wrong for Run
+(see below). Setup % Eff here is therefore exact ~94% of the time and only
+approximately right the rest -- better than showing nothing, not claimed
+to be precise.
+
+Per the KB article ("Employee Efficiency does not consider the Setup
+Estimate Time -- subtract the setup time for these calculations"), Setup's
+% Eff is informational only -- it does not feed any combined/overall score,
+and there isn't one; Setup and Run are always two independent numbers, per
+the real report's own layout, never blended into one.
+
+One correction from three earlier (wrong) attempts at Run's formula, all
+now removed -- a naive Est/Act ratio, Job_Operation.Efficiency_Pct
+(confirmed static garbage), and an Adj Hrs formula based on
 Setup_Pct_Complete/Run_Pct_Complete (conceptually wrong -- those reflect
 whether the operation is closed out as of *today*, not historical progress,
 and collapsed to near-zero for anyone with real hours still logged against
-open work):
-
-  1. **Setup is excluded from the efficiency calculation entirely** -- per
-     the KB article ("Employee Efficiency does not consider the Setup
-     Estimate Time -- subtract the setup time for these calculations").
-     Setup Act/Est Hrs are still shown (informational, matching the real
-     report's own layout), but only Run feeds Adj Hrs / % Eff.
-  2. **Act_Run_Hrs (not Act_Run_Labor_Hrs) is correct** -- the KB article
-     notes "The report uses the Machine Hours, not Labor Hours"; this
-     schema has both Act_Run_Hrs and a separate Act_Run_Labor_Hrs on
-     Job_Operation_Time, and this module has used Act_Run_Hrs throughout.
+open work): **Act_Run_Hrs (not Act_Run_Labor_Hrs) is correct** for Run --
+the KB article notes "The report uses the Machine Hours, not Labor Hours";
+this schema has both Act_Run_Hrs and a separate Act_Run_Labor_Hrs on
+Job_Operation_Time, and this module has used Act_Run_Hrs throughout.
 
 **"Operations without Adj E Hrs are not included" -- the report's own
 footnote -- is now precisely confirmed to be real and material, even
@@ -215,19 +235,25 @@ ORDER BY e.Last_Name, e.First_Name
 """
 
 DETAIL_COLUMNS = (
-    'employee', 'job', 'work_center', 'operation', 'setup_act_hrs',
-    'setup_est_hrs', 'run_act_hrs', 'run_est_hrs', 'run_qty', 'adj_hrs', 'pct_eff',
+    'employee', 'job', 'work_center', 'operation',
+    'setup_act_hrs', 'setup_est_hrs', 'setup_adj_hrs', 'setup_pct_eff',
+    'run_act_hrs', 'run_est_hrs', 'run_qty', 'run_adj_hrs', 'run_pct_eff',
 )
 DETAIL_HEADERS = [
-    'Employee', 'Job', 'Work Center', 'Operation', 'Setup Act Hrs',
-    'Setup Est Hrs', 'Run Act Hrs', 'Run Est Hrs', 'Run Qty', 'Adj Hrs', '% Eff',
+    'Employee', 'Job', 'Work Center', 'Operation',
+    'Setup Act Hrs', 'Setup Est Hrs', 'Setup Adj Hrs', 'Setup % Eff',
+    'Run Act Hrs', 'Run Est Hrs', 'Run Qty', 'Run Adj Hrs', 'Run % Eff',
 ]
-# Setup and Run are always separate columns, never summed into one blended
-# "Total" -- matches Detail, and matches the real report, which never
-# combines them either (Setup isn't part of % Eff at all).
-SUMMARY_COLUMNS = ('employee', 'setup_act_hrs', 'setup_est_hrs', 'run_act_hrs', 'run_est_hrs', 'adj_hrs', 'pct_eff')
+# Setup and Run are always separate, parallel blocks, never summed into one
+# blended "Total" -- matches Detail, and matches the real report, which
+# never combines them either (Setup isn't part of any combined score).
+SUMMARY_COLUMNS = (
+    'employee', 'setup_act_hrs', 'setup_est_hrs', 'setup_adj_hrs', 'setup_pct_eff',
+    'run_act_hrs', 'run_est_hrs', 'run_adj_hrs', 'run_pct_eff',
+)
 SUMMARY_HEADERS = [
-    'Employee', 'Setup Act Hrs', 'Setup Est Hrs', 'Run Act Hrs', 'Run Est Hrs', 'Adj Hrs', '% Eff',
+    'Employee', 'Setup Act Hrs', 'Setup Est Hrs', 'Setup Adj Hrs', 'Setup % Eff',
+    'Run Act Hrs', 'Run Est Hrs', 'Run Adj Hrs', 'Run % Eff',
 ]
 
 
@@ -249,10 +275,14 @@ def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
         run_act = r.get('Run_Act_Hrs') or 0
         run_est = r.get('Run_Est_Hrs') or 0
         qty = r.get('Run_Qty') or 0
+        # Setup Adj Hrs = Setup Est Hrs -- see module docstring ("Setup" section)
+        # for why, and its ~94%-exact caveat. No qty-sanity guard here -- Setup
+        # has no quantity to sanity-check against in the first place.
+        setup_adj = setup_est
         # None (not 0) means either no Run component at all (Est_Run_Per_Part
         # unset) or the qty-sanity guard flagged this operation -- blank, not
         # "0.00"/"0.0", since both mean "not scoreable", not "scored at zero".
-        adj = r.get('Adj_Hrs')
+        run_adj = r.get('Adj_Hrs')
         name = f"{r.get('First_Name') or ''} {r.get('Last_Name') or ''}".strip() or (r.get('Employee') or '')
         rows.append({
             'employee': name,
@@ -261,11 +291,13 @@ def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
             'operation': r.get('Operation_Service') or '',
             'setup_act_hrs': f"{setup_act:.2f}",
             'setup_est_hrs': f"{setup_est:.2f}",
+            'setup_adj_hrs': f"{setup_adj:.2f}",
+            'setup_pct_eff': _pct_or_blank(setup_adj, setup_act),
             'run_act_hrs': f"{run_act:.2f}",
             'run_est_hrs': f"{run_est:.2f}",
             'run_qty': str(qty),
-            'adj_hrs': f"{adj:.2f}" if adj is not None else '',
-            'pct_eff': _pct_or_blank(adj, run_act) if adj is not None else '',
+            'run_adj_hrs': f"{run_adj:.2f}" if run_adj is not None else '',
+            'run_pct_eff': _pct_or_blank(run_adj, run_act) if run_adj is not None else '',
         })
     return rows
 
@@ -277,16 +309,20 @@ def _rows_from_summary(raw_rows: List[dict]) -> List[Dict[str, str]]:
         setup_est = r.get('Setup_Est_Hrs') or 0
         run_act = r.get('Run_Act_Hrs') or 0
         run_est = r.get('Run_Est_Hrs') or 0
-        adj = r.get('Adj_Hrs') or 0
+        run_adj = r.get('Adj_Hrs') or 0
+        # Setup Adj Hrs = Setup Est Hrs -- see _rows_from_detail/module docstring.
+        setup_adj = setup_est
         name = f"{r.get('First_Name') or ''} {r.get('Last_Name') or ''}".strip() or (r.get('Employee') or '')
         rows.append({
             'employee': name,
             'setup_act_hrs': f"{setup_act:.2f}",
             'setup_est_hrs': f"{setup_est:.2f}",
+            'setup_adj_hrs': f"{setup_adj:.2f}",
+            'setup_pct_eff': _pct_or_blank(setup_adj, setup_act),
             'run_act_hrs': f"{run_act:.2f}",
             'run_est_hrs': f"{run_est:.2f}",
-            'adj_hrs': f"{adj:.2f}",
-            'pct_eff': _pct_or_blank(adj, run_act),
+            'run_adj_hrs': f"{run_adj:.2f}",
+            'run_pct_eff': _pct_or_blank(run_adj, run_act),
         })
     return rows
 
