@@ -56,18 +56,29 @@ open work):
      schema has both Act_Run_Hrs and a separate Act_Run_Labor_Hrs on
      Job_Operation_Time, and this module has used Act_Run_Hrs throughout.
 
-ISNULL-guards the Adj Hrs computation (Act_Run_Qty * Est_Run_Per_Part) so
-one operation with a NULL Est_Run_Per_Part (e.g. a setup-only time entry
-with no run component at all) contributes 0, not NULL, to an employee's
-SUM -- matching the KB article's "operations without Adj E Hrs are not
-included" without one unscoreable operation nulling out every other
-operation's real contribution.
+**"Operations without Adj E Hrs are not included" -- the report's own
+footnote -- is now precisely confirmed to be real and material, even
+though its exact trigger condition is still unknown.** Cross-checked a
+real single-employee xlsx export cell-by-cell against its own "Employee
+Total" row: summing every individual row's Run Act Hrs gives a bigger
+number than the Employee Total's own Run Act Hrs (1218.08 vs 1072.13 for
+one real employee) -- the gap (145.95) is exactly the Act Hrs from the rows
+whose exported Adj E Hrs cell was blank, confirmed by matching "Adj E Hrs
+is present" sum to the Employee Total's Run Act Hrs to the cent. Tried and
+disproved: Quantity = 0 -- 18 counter-example rows have Quantity = 0 *and*
+a real, present, nonzero Adj E Hrs (e.g. Qty=0, Adj E Hrs=0.135059088351154,
+an oddly-precise value that doesn't come from qty * a per-part rate at
+all). Whatever JobBOSS actually checks isn't visible from the exported
+columns available here, and isn't implemented -- shipping a guessed rule
+after disproving the first guess would repeat the exact mistake this
+disproof just caught. The gap between this module's Act/Adj Hrs and
+JobBOSS's own is real and not fully closed; _QTY_SANITY_MULTIPLIER below
+remains the one guard actually shipped, for the one failure mode actually
+confirmed (next paragraph).
 
 **Bad-data guard**: one real operation found live (Job 29718, CNC HMC OP6)
 has Act_Run_Qty = 5,629 against Est_Required_Qty = 1 -- the job needed one
-part, 5,629 are logged as run, in 10 total hours. Confirmed via the real
-JobBOSS report that this does NOT count toward that employee's %Eff (their
-real number is sane; ours wasn't, until this guard), but there's no boolean
+part, 5,629 are logged as run, in 10 total hours. There's no boolean
 "exclude this" column anywhere on Job_Operation -- checked every one of its
 ~100 columns directly. _QTY_SANITY_MULTIPLIER below is a pragmatic
 stand-in, not JobBOSS's real exclusion logic: an operation's Run_Qty is
