@@ -24,31 +24,33 @@ by (Employee, Job_Operation) first -- directly via GROUP BY for Detail, via
 the op_rollup CTE for Summary -- so MAX(Est_*_Hrs) picks up that one fixed
 per-operation estimate exactly once no matter how many time entries it has.
 
-"Adj Hrs" / "% Eff" -- the real JobBOSS report's own headline numbers --
-ARE now computed, via Adj Hrs = Est Hrs * Pct_Complete / 100 (per Setup/Run
-block, using Job_Operation.Setup_Pct_Complete / Run_Pct_Complete, both real
-stored columns), % Eff = Adj Hrs / Act Hrs * 100 -- same definition as the
-real report's own PDF footnote ("Efficiency Calculations use Adj E Hrs /
-Act Hrs"). This formula is a reverse-engineered hypothesis, not read from
-JobBOSS documentation or source: cross-checked against ~1000 real rows from
-a full LR_EmployeeEfficiency.xlsx export, Setup Adj E Hrs exactly equals
-Setup Est Hrs in ~94% of rows (consistent with Setup_Pct_Complete == 100 for
-a fully-set-up operation), and a spot check of one employee's full-history
-totals this way landed within a few points of the real report's %Eff (96.4%
-real vs. the formula's prediction) -- much closer than the naive Est/Act
-ratio tried first (62.0%), which ignores Pct_Complete entirely and swings
-wildly whenever a job's actual run quantity differs from what was
-originally estimated. Not byte-for-byte verified against a live query's
-Setup_Pct_Complete/Run_Pct_Complete values directly (no DB row access from
-here) -- spot-check a known employee's real export against this report's
-numbers once live.
-
-The per-operation Adj Hrs is computed inside the query (ISNULL-guarded, so
-one operation with an unset Pct_Complete can't null out an employee's
-entire SUM) and rolled up as HOURS, not as an average of percentages --
-Summary's % Eff is Total Adj Hrs / Total Act Hrs, a single hours-weighted
-ratio across every operation the employee touched, matching how the real
-report's own overall % would be computed.
+NOT included: "Adj Hrs" / "% Eff", the real JobBOSS report's own headline
+numbers. Three attempts tried and dropped, in order -- don't repeat any of
+them without actual DB row access to verify against directly, not another
+exported-report inference:
+  1. A naive Est/Act ratio of the Hours columns already shown. Rejected:
+     swings wildly whenever a job's actual run quantity differs from its
+     original estimated quantity (a real employee's full-history ratio
+     this way was 62.0%, vs. their real report's 96.4% %Eff).
+  2. Job_Operation.Efficiency_Pct, a real stored column. Rejected: live-
+     tested as a flat 100.0 for every employee regardless of real
+     performance -- a static scheduling default, not a computed value.
+  3. Adj Hrs = Est Hrs * Setup_Pct_Complete/Run_Pct_Complete / 100 (both
+     real stored columns on Job_Operation). Looked promising in an offline
+     cross-check against ~1000 rows of a real exported report (94% exact
+     match on Setup, one employee's full-history total within a few points
+     of their real %Eff) -- but live-tested a day later against the SAME
+     historical date range and came back near-zero for most employees
+     (people with 1000+ real hours showing 0.0-5% "efficient"). Root cause:
+     Setup_Pct_Complete/Run_Pct_Complete are per-OPERATION fields reflecting
+     whether the *operation itself* has since been fully closed out, not
+     how much of an employee's historically-logged time represented real
+     progress -- querying them today only credits operations that happen to
+     be 100% complete as of today, zeroing out any employee with
+     substantial real hours logged against work that's still open (i.e.
+     most people, most of the time). Not a precision problem -- the field
+     doesn't mean what the formula needed it to mean for a retrospective,
+     date-range report.
 
 Status = 'Active' (Job_Operation_Time has no status value confirmed to mean
 "void"/"deleted" from the schema dump alone, so none is filtered here) --
@@ -57,15 +59,13 @@ Only" checkbox describes, always on for v1 (see db_integration.fetch_employees()
 
 Indirect time (vacation, training, cleanup, etc.) is excluded from both
 queries via Work_Center.Type <> 'Indirect' -- confirmed directly from this
-shop's own Work Center setup screen (user-provided screenshot): Work_Center
-has a real Type column (Direct/Indirect), and it's the *work center* that's
-marked Indirect, not the job. Corrects an earlier wrong first attempt at
-this same filter (Job.Type <> 'Indirect' -- Job has no such value; a Job's
-own Type is things like 'Regular'/'Assembly', unrelated to this). Joins the
-Work_Center table (not just Job_Operation, which stores the work center
+shop's own Work Center setup screen: Work_Center has a real Type column
+(Direct/Indirect), and it's the *work center* that's marked Indirect, not
+the job. Joins the Work_Center table (Job_Operation stores the work center
 code but not its Type) for this. Always on, not a checkbox -- indirect time
-counting toward an employee's efficiency is a correctness bug, not an
-optional view.
+counting toward an employee's hours is a correctness bug, not an optional
+view. This filter (unlike the three above) is unaffected by the Adj Hrs
+reversion -- it's independently verified and stays.
 """
 
 from __future__ import annotations
@@ -75,17 +75,11 @@ from typing import Any, Dict, List
 from experimental.db_integration import connect, employee_filter_clause
 from modules.reporting.reports.base import ReportDefinition
 
-# ISNULL(..., 0) around each Pct_Complete-scaled term -- an operation whose
-# Setup_Pct_Complete (or Run_Pct_Complete) was never set must contribute 0 to
-# the Adj Hrs sum, not turn the whole SUM() NULL and silently zero out every
-# other operation the employee worked (NULL + anything = NULL in SQL).
 _EMPLOYEE_EFFICIENCY_DETAIL_QUERY = """
 SELECT jot.Employee, e.First_Name, e.Last_Name, jo.Job, jo.Work_Center, jo.Operation_Service,
        SUM(jot.Act_Setup_Hrs) AS Setup_Act_Hrs, MAX(jo.Est_Setup_Hrs) AS Setup_Est_Hrs,
        SUM(jot.Act_Run_Hrs) AS Run_Act_Hrs, MAX(jo.Est_Run_Hrs) AS Run_Est_Hrs,
-       SUM(jot.Act_Run_Qty) AS Run_Qty,
-       ISNULL(MAX(jo.Est_Setup_Hrs) * MAX(jo.Setup_Pct_Complete) / 100, 0)
-           + ISNULL(MAX(jo.Est_Run_Hrs) * MAX(jo.Run_Pct_Complete) / 100, 0) AS Adj_Hrs
+       SUM(jot.Act_Run_Qty) AS Run_Qty
 FROM Job_Operation_Time jot
 JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
 JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
@@ -97,18 +91,16 @@ ORDER BY e.Last_Name, e.First_Name, jo.Job
 """
 
 # op_rollup groups by (Employee, Job_Operation) first, exactly like Detail's
-# GROUP BY -- same reason, so each operation's estimate (and Adj Hrs, also a
-# per-operation value) is only counted once before rolling the per-operation
-# rows up to one row per employee. Joins Work_Center here too (not just in
-# the outer query) so the Indirect exclusion applies before the rollup, not
-# after -- an indirect work center's hours must never enter the SUM.
+# GROUP BY -- same reason, so each operation's estimate is only counted once
+# before rolling the per-operation rows up to one row per employee. Joins
+# Work_Center here too (not just in the outer query) so the Indirect
+# exclusion applies before the rollup, not after -- an indirect work
+# center's hours must never enter the SUM.
 _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY = """
 WITH op_rollup AS (
     SELECT jot.Employee, jot.Job_Operation,
            SUM(jot.Act_Setup_Hrs) AS Setup_Act_Hrs, MAX(jo.Est_Setup_Hrs) AS Setup_Est_Hrs,
-           SUM(jot.Act_Run_Hrs) AS Run_Act_Hrs, MAX(jo.Est_Run_Hrs) AS Run_Est_Hrs,
-           ISNULL(MAX(jo.Est_Setup_Hrs) * MAX(jo.Setup_Pct_Complete) / 100, 0)
-               + ISNULL(MAX(jo.Est_Run_Hrs) * MAX(jo.Run_Pct_Complete) / 100, 0) AS Adj_Hrs
+           SUM(jot.Act_Run_Hrs) AS Run_Act_Hrs, MAX(jo.Est_Run_Hrs) AS Run_Est_Hrs
     FROM Job_Operation_Time jot
     JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
     JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
@@ -118,8 +110,7 @@ WITH op_rollup AS (
 )
 SELECT op.Employee, e.First_Name, e.Last_Name,
        SUM(op.Setup_Act_Hrs + op.Run_Act_Hrs) AS Total_Act_Hrs,
-       SUM(op.Setup_Est_Hrs + op.Run_Est_Hrs) AS Total_Est_Hrs,
-       SUM(op.Adj_Hrs) AS Total_Adj_Hrs
+       SUM(op.Setup_Est_Hrs + op.Run_Est_Hrs) AS Total_Est_Hrs
 FROM op_rollup op
 JOIN Employee e ON e.Employee = op.Employee
 WHERE e.Status = 'Active' AND {employee_clause}
@@ -129,24 +120,14 @@ ORDER BY e.Last_Name, e.First_Name
 
 DETAIL_COLUMNS = (
     'employee', 'job', 'work_center', 'operation', 'setup_act_hrs',
-    'setup_est_hrs', 'run_act_hrs', 'run_est_hrs', 'run_qty', 'adj_hrs', 'pct_eff',
+    'setup_est_hrs', 'run_act_hrs', 'run_est_hrs', 'run_qty',
 )
 DETAIL_HEADERS = [
     'Employee', 'Job', 'Work Center', 'Operation', 'Setup Act Hrs',
-    'Setup Est Hrs', 'Run Act Hrs', 'Run Est Hrs', 'Run Qty', 'Adj Hrs', '% Eff',
+    'Setup Est Hrs', 'Run Act Hrs', 'Run Est Hrs', 'Run Qty',
 ]
-SUMMARY_COLUMNS = ('employee', 'total_act_hrs', 'total_est_hrs', 'total_adj_hrs', 'pct_eff')
-SUMMARY_HEADERS = ['Employee', 'Total Act Hrs', 'Total Est Hrs', 'Total Adj Hrs', '% Eff']
-
-
-def _pct_or_blank(numerator: float, denominator: float) -> str:
-    """numerator/denominator * 100 as a 1-decimal string, or '' if
-    denominator is 0/falsy (nothing actually worked yet -- not 0% efficient,
-    just not comparable).
-    """
-    if not denominator:
-        return ''
-    return f"{(numerator / denominator) * 100:.1f}"
+SUMMARY_COLUMNS = ('employee', 'total_act_hrs', 'total_est_hrs')
+SUMMARY_HEADERS = ['Employee', 'Total Act Hrs', 'Total Est Hrs']
 
 
 def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
@@ -157,7 +138,6 @@ def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
         run_act = r.get('Run_Act_Hrs') or 0
         run_est = r.get('Run_Est_Hrs') or 0
         qty = r.get('Run_Qty') or 0
-        adj = r.get('Adj_Hrs') or 0
         name = f"{r.get('First_Name') or ''} {r.get('Last_Name') or ''}".strip() or (r.get('Employee') or '')
         rows.append({
             'employee': name,
@@ -169,8 +149,6 @@ def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
             'run_act_hrs': f"{run_act:.2f}",
             'run_est_hrs': f"{run_est:.2f}",
             'run_qty': str(qty),
-            'adj_hrs': f"{adj:.2f}",
-            'pct_eff': _pct_or_blank(adj, setup_act + run_act),
         })
     return rows
 
@@ -180,14 +158,11 @@ def _rows_from_summary(raw_rows: List[dict]) -> List[Dict[str, str]]:
     for r in raw_rows:
         act = r.get('Total_Act_Hrs') or 0
         est = r.get('Total_Est_Hrs') or 0
-        adj = r.get('Total_Adj_Hrs') or 0
         name = f"{r.get('First_Name') or ''} {r.get('Last_Name') or ''}".strip() or (r.get('Employee') or '')
         rows.append({
             'employee': name,
             'total_act_hrs': f"{act:.2f}",
             'total_est_hrs': f"{est:.2f}",
-            'total_adj_hrs': f"{adj:.2f}",
-            'pct_eff': _pct_or_blank(adj, act),
         })
     return rows
 
