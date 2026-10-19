@@ -281,9 +281,7 @@ class ReportingModule(BaseModule):
         self.report_table = None
         self.report_status_label = None
         self.generate_report_btn = None
-        self.connect_db_btn = None
-        self.disconnect_db_btn = None
-        self.db_status_label = None
+        self.db_status_indicator = None
         self.customer_filter_btn = None
         self.employee_filter_btn = None
         self.exclude_assemblies_check = None
@@ -337,9 +335,7 @@ class ReportingModule(BaseModule):
         self.report_table = widget.report_table
         self.report_status_label = widget.report_status_label
         self.generate_report_btn = widget.generate_report_btn
-        self.connect_db_btn = widget.connect_db_btn
-        self.disconnect_db_btn = widget.disconnect_db_btn
-        self.db_status_label = widget.db_status_label
+        self.db_status_indicator = widget.db_status_indicator
         self.customer_filter_btn = widget.customer_filter_btn
         self.employee_filter_btn = widget.employee_filter_btn
         self.exclude_assemblies_check = widget.exclude_assemblies_check
@@ -362,8 +358,7 @@ class ReportingModule(BaseModule):
         self.report_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 
         # Connect signals
-        self.connect_db_btn.clicked.connect(self.connect_to_db)
-        self.disconnect_db_btn.clicked.connect(self.disconnect_from_db)
+        self.db_status_indicator.clicked.connect(self.connect_to_db)
         self.generate_report_btn.clicked.connect(self.generate_report)
         self.customer_filter_btn.clicked.connect(self._open_customer_picker)
         self.employee_filter_btn.clicked.connect(self._open_employee_picker)
@@ -377,6 +372,13 @@ class ReportingModule(BaseModule):
 
         self.report_type_combo.currentTextChanged.connect(self._on_report_type_changed)
         self._on_report_type_changed(self.report_type_combo.currentText())
+
+        # Auto-connect as soon as the tab is opened -- no manual "Connect"
+        # step anymore. get_widget() caches this QWidget, so _create_widget()
+        # (and this call) only run once per app session; db_status_indicator
+        # is clickable to retry if this attempt fails or the server was
+        # briefly unreachable.
+        self.connect_to_db()
 
         return widget
 
@@ -452,18 +454,27 @@ class ReportingModule(BaseModule):
     # ==================== Database Connection ====================
 
     def connect_to_db(self):
+        """Test the JobBOSS DB connection and refresh the status indicator.
+
+        Called once automatically when the tab first opens, and again on
+        every click of db_status_indicator itself (the only way to retry,
+        since get_widget() caches this QWidget -- _create_widget() and this
+        initial call only run once per app session). No popup here even
+        when unconfigured/unreachable -- that would fire on every tab open
+        for anyone who hasn't set up DB access yet. generate_report() does
+        its own is_configured() check and shows a real error dialog instead,
+        since that's a deliberate user action, not something that just ran
+        silently in the background.
+        """
         settings = self._jobboss_settings()
         if not is_configured(settings):
-            self.show_error(
-                "Not Configured",
-                "Set the JobBOSS DB connection (Host, Database, Username, Password) "
-                "in Settings > Advanced Settings first."
+            self._db_ready = False
+            self._set_db_status_indicator(
+                "#999", "JobBOSS database not configured -- see Settings > Advanced Settings. Click to retry."
             )
             return
 
-        self.connect_db_btn.setEnabled(False)
-        self.db_status_label.setText("Status: Connecting...")
-        self.db_status_label.setStyleSheet("color: #999;")
+        self._set_db_status_indicator("#999", "Connecting to JobBOSS database...")
 
         self._connect_worker = _ConnectWorker(settings)
         self._connect_worker.finished_ok.connect(self._on_connect_result)
@@ -471,24 +482,19 @@ class ReportingModule(BaseModule):
 
     def _on_connect_result(self, ok: bool, message: str):
         self._db_ready = ok
-        self.connect_db_btn.setEnabled(not ok)
-        self.disconnect_db_btn.setEnabled(ok)
         if ok:
-            self.db_status_label.setText("Status: Connected")
-            self.db_status_label.setStyleSheet("color: green;")
+            self._set_db_status_indicator("#2e8b2e", "Connected to JobBOSS database. Click to re-check.")
             self.log_message("Connected to JobBOSS DB")
             self._load_customer_list()
             self._load_employee_list()
         else:
-            self.db_status_label.setText(f"Status: {message}")
-            self.db_status_label.setStyleSheet("color: #999;")
+            self._set_db_status_indicator("#c0392b", f"{message} Click to retry.")
 
-    def disconnect_from_db(self):
-        self._db_ready = False
-        self.connect_db_btn.setEnabled(True)
-        self.disconnect_db_btn.setEnabled(False)
-        self.db_status_label.setText("Status: Not connected")
-        self.db_status_label.setStyleSheet("color: #999;")
+    def _set_db_status_indicator(self, color: str, tooltip: str):
+        self.db_status_indicator.setStyleSheet(
+            f"QPushButton {{ background-color: {color}; border-radius: 7px; border: none; }}"
+        )
+        self.db_status_indicator.setToolTip(tooltip)
 
     def _load_customer_list(self):
         """Populate the Customer filter combo from JobBOSS after a successful connect."""
@@ -592,8 +598,20 @@ class ReportingModule(BaseModule):
         flags (base.ReportDefinition) -- a new report type with any
         combination of these flags needs no new code here.
         """
-        if not self._db_ready:
-            self.show_error("Not Connected", "Click \"Connect to Database\" first.")
+        # A cheap, synchronous local-settings check, not the _db_ready flag --
+        # that depends on the auto-connect test's async round-trip, which
+        # may still be running or may have failed transiently even though
+        # the DB is reachable now. Letting the real query attempt (below)
+        # be the actual source of truth for reachability means a slow/flaky
+        # first connect doesn't permanently block Generate Report; only a
+        # genuinely unconfigured DB does, which deserves this clear message
+        # instead of _on_report_error()'s generic "(ExceptionType)" text.
+        if not is_configured(self._jobboss_settings()):
+            self.show_error(
+                "Not Configured",
+                "Set the JobBOSS DB connection (Host, Database, Username, Password) "
+                "in Settings > Advanced Settings first."
+            )
             return
 
         report_type = self.report_type_combo.currentText()
