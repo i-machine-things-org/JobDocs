@@ -5,7 +5,6 @@ sample_files/
 test_jobs.csv
 test_dist*/
 build[0-9]*/
-tools/
 
 # Claude Code and development notes
 .claude/settings.local.json
