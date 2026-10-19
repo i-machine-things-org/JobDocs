@@ -39,3 +39,12 @@ def test_row_highlight_when_set_is_callable():
     for name, report in REPORTS.items():
         if report.row_highlight is not None:
             assert callable(report.row_highlight), f"{name}: row_highlight is not callable"
+
+
+def test_footer_lines_when_set_is_a_nonempty_list_of_strings():
+    for name, report in REPORTS.items():
+        if report.footer_lines is not None:
+            assert report.footer_lines, f"{name}: footer_lines is set but empty"
+            assert all(isinstance(line, str) and line for line in report.footer_lines), (
+                f"{name}: footer_lines must be non-empty strings"
+            )

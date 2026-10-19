@@ -1,4 +1,4 @@
-"""Employee Efficiency -- Detail (one row per employee/job/operation, within
+"""Employee Efficiency -- Detail (one row per employee/job-operation, within
 the picked date range) and Summary (one row per employee, totals rolled up
 across their operations). Replaces Report Fixer's "JobBOSS Custom Reports"
 hack, which just runs JobBOSS's own canned Employee Efficiency export then
@@ -6,9 +6,8 @@ hides rows behind an Excel AutoFilter -- no real querying.
 
 Kept together as one file, the one deliberate exception to "one file per
 report type": both views query the exact same tables with the exact same
-employee filter, and share the exact same reasoning for what's deliberately
-left out (see below) -- splitting them would just duplicate that context
-across two files.
+employee filter, and share the exact same formula -- splitting them would
+just duplicate that context across two files.
 
 Verified against a full live schema dump (no Labor_Ticket table on this
 install): the real source is Job_Operation_Time (one row per employee per
@@ -16,120 +15,225 @@ job-operation per Work_Date -- this *is* the report's "Time Entry Date
 Range" field), joined to Job_Operation for the operation's own estimate
 hours and Employee for name/status.
 
-Job_Operation.Est_Setup_Hrs/Est_Run_Hrs/Est_Run_Per_Part are properties of
-the *operation*, not of each Job_Operation_Time row -- an employee who
-worked the same operation across several days has multiple
-Job_Operation_Time rows for it, so summing the estimate naively would
-multiply-count it. Both queries group by (Employee, Job_Operation) first,
-via a CTE (op_detail for Detail, op_rollup for Summary), so MAX(Est_*)
-picks up that one fixed per-operation value exactly once no matter how many
-time entries it has.
+**The real Adj Hrs / % Eff formula, reverse-engineered from JobBOSS's own
+exported numbers** (not a guess -- every earlier formula tried in this
+module, including the ECI knowledge-base article's documented one, is
+superseded by this; see below for why):
 
-"Adj Hrs" / "% Eff" -- the real JobBOSS report's own headline numbers -- are
-shown separately for Setup and Run, exactly like the real report's own
-layout (two parallel blocks, each with Est/Act/Adj/%Eff), per the real
-report's own footer: "Efficiency Calculations use Adj E Hrs / Act Hrs" --
-stated once, generically, confirming the same formula applies
-independently to each block, not just Run.
+    Adj Hrs(employee, operation, Setup-or-Run) =
+        Est Hrs(operation) * Act Hrs(employee, operation)
+        / SUM(Act Hrs(every employee who logged time on operation))
 
-**Run** uses the actual documented JobBOSS formula (ECI knowledge base
-article "JobBOSS - Employee Efficiency Report", #000012591), not a
-reverse-engineered guess:
+    % Eff = Adj Hrs / Act Hrs(employee, operation) * 100
 
-    Run Adj Hrs = Act_Run_Qty * Est_Run_Per_Part
-    Run % Eff = Run Adj Hrs / Act_Run_Hrs * 100
+In words: an operation's estimated hours get divided among everyone who
+actually worked it, in proportion to how much of the real time each person
+logged -- not based on parts/quantity at all, and identically for Setup and
+Run. Confirmed by parsing two real xlsx exports cell-by-cell -- JobBOSS's
+own "LR_EmployeeEfficiency" Detail export (39,772 real data rows, 26
+employees) and this module's own Detail export for the same date range --
+and testing this formula against every row where the operation's identity
+was unambiguous (no two employees sharing a same-text-labeled operation):
+**Setup matched exactly on 95.8% of rows** (7,094 / 7,407), **Run on 70.2%
+exact + 11.0% within 0.5 hrs** (the remaining gap is explained below, not
+unexplained noise). Independently confirmed at the aggregate level too: for
+one real employee (ADAMS), summing this formula's predicted Adj Hrs across
+every one of his operations landed within 1% of JobBOSS's own "Employee
+Total" row for both Setup (1247.74 predicted vs 1239.50 actual) and Run
+(3458.30 predicted vs 3346.62 actual) -- using only the real export's own
+numbers as a cross-check, run before any of this was shipped.
 
-Confirmed with the article's own worked example: Make Qty 100 at 30
-parts/hr -> Est_Run_Per_Part = (100/30)/100 = 0.0333 hrs/part; a time entry
-of 2 Act Hrs with Run Qty 25 gives Adj Hrs = 25 * 0.0333 = 0.83, % Eff =
-0.83/2 = 41.5%.
+**Why this replaces the earlier Run formula and Setup's blank columns:**
+The ECI knowledge-base article's formula (Run Adj Hrs = Act_Run_Qty *
+Est_Run_Per_Part) and the "Setup Adj Hrs = Setup Est Hrs" approximation were
+each independently live-tested and found wrong (full history below, kept so
+neither gets retried). The proportional-share formula above was found by
+parsing JobBOSS's own real export and solving for what relationship
+actually holds between its own Est/Act/Adj columns -- not by rereading the
+KB article differently. It fixes the two concrete failures that drove this:
+Setup % Eff values like 6200% (KYLE UTLEY) and 1237% (DAVID ALLEN) in an
+earlier Summary export, and the fact that in the real export, 55.2% of all
+rows have a *displayed* "Quantity" of 0 yet still carry a real, nonzero Adj
+E Hrs (e.g. Quantity=0, Adj E Hrs=0.78125) -- which the old Act_Run_Qty-based
+formula could never produce (0 * anything = 0), proving Quantity was never
+the real driver of Run's Adj Hrs at all.
 
-**Setup** has no quantity to adjust by (it's a one-time "did you do the
-setup" cost, not scaled per part), so:
+**Independently confirmed exact on a second real operation, with two real
+employees.** Job 27652, CNC LATHE OP6 -- queried directly off the live
+database (not re-derived from the export) -- has exactly two contributors:
+ADAMS (Setup Act 1.0, Run Act 2.5) and WILMOT (Setup Act 1.5, Run Act 1.5),
+against a shared Setup Est of 1.25 and Run Est of 1.25. The formula predicts
+ADAMS's Setup Adj as 1.25*1.0/2.5=0.5 and Run Adj as 1.25*2.5/4.0=0.78125;
+WILMOT's Setup Adj as 1.25*1.5/2.5=0.75 and Run Adj as 1.25*1.5/4.0=0.46875.
+All four match JobBOSS's own real exported values exactly, to full float
+precision. This is the strongest confirmation of the formula in this
+module -- two independent employees, both blocks, no rounding.
 
-    Setup Adj Hrs = Setup Est Hrs
-    Setup % Eff = Setup Adj Hrs / Act_Setup_Hrs * 100
+**Confirmed real bug, now fixed: op_totals must only include Active
+employees.** Found chasing a mismatch on Job 27173H, GRINDERS OP2: querying
+the live database directly (not the export) showed a second contributor,
+REYES, with real historical Act_Run_Hrs on that operation -- but REYES
+doesn't appear anywhere in JobBOSS's own Employee Efficiency export at all,
+because REYES is not an Active employee, and the real report's whole
+population (same as this module's Employee picker, via
+db_integration.fetch_employees()) is Active-employees-only. op_totals used
+to sum Act Hrs across literally every employee in Job_Operation_Time,
+active or not, diluting an active employee's share with an inactive
+coworker's hours the real report never counts at all. Now joins Employee
+and filters Status='Active', matching the population the rest of this
+report already assumes everywhere else.
 
-This is the empirically-verified DEFAULT case (not a new guess): a real
-single-employee export's individual rows showed Setup Est Hrs == Setup Adj
-E Hrs exactly in ~94% of rows. The remaining ~6% diverge for an unknown
-reason -- deliberately NOT modeled as Setup_Pct_Complete scaling, which has
-the same "reflects today, not history" flaw already proven wrong for Run
-(see below). Setup % Eff here is therefore exact ~94% of the time and only
-approximately right the rest -- better than showing nothing, not claimed
-to be precise.
+**Two operations investigated to a dead end and deliberately left
+unexplained**, rather than forced into a formula that doesn't fit, because
+each one independently rules out every formula tried so far:
+
+- Job 27173H, GRINDERS OP2 (Job_Operation 160964) -- confirmed via direct
+  query to be a single operation, not a hidden duplicate: Est_Run_Hrs=26.67,
+  Est_Required_Qty=80, Act_Run_Qty=2 for ADAMS. Real Adj Hrs = 13.335
+  (=Est/2 exactly), which rules out *every* formula tried: the proportional-
+  share model (this module's own formula) would need a total of 84 Act Hrs
+  across contributors to produce 13.335 from Est=26.67/Act=42 -- but the
+  database has only 48.25 Act Hrs *ever recorded* against this operation,
+  across every employee, active or not, all of history (ADAMS 42 + REYES
+  6.25) -- 84 exceeds the maximum possible total, full stop, not an
+  approximation issue. The qty-based KB formula, computed properly this
+  time (Act_Run_Qty * Est_Run_Hrs/Est_Required_Qty = 2 * 26.67/80 = 0.667),
+  misses by 20x. Nothing tried explains this row.
+- Job 27173A, ASSEMBLY/ASSEMBLE (Job_Operation 154332) -- confirmed via
+  direct query to have four real contributors (ADAMS 3.5, LUNDY 13.5,
+  RAMIRE 4.5, REYES 10.25 Act Run Hrs), two of them active. JobBOSS's
+  export shows the entire Run block blank for ADAMS here, not a computed
+  value under any formula.
+
+Both are most likely further instances of the report's own "Operations
+without Adj E Hrs are not included" footnote (see above) -- a real,
+confirmed-material JobBOSS exclusion rule whose exact trigger condition has
+never been recovered, from here or earlier in this investigation. Chasing
+either further would mean guessing a new formula to fit two known
+outliers, which is exactly the mistake this module's history warns
+against; both are left unmodeled rather than forced to fit. The formula
+above remains the best-evidenced one for the general case -- confirmed
+exact on two independent real multi-employee operations (one Setup-heavy,
+one Run-heavy) and ~70-96% exact across thousands of real rows -- these two
+operations are treated as known, documented exceptions to it, not grounds
+to abandon it.
+
+**Accuracy improves sharply on newer (2026+) data, confirming this is
+mostly historical-data noise, not a formula problem.** Comparing this
+module's own Detail export against JobBOSS's real one, restricted to each
+job-number range (job numbers increase chronologically here), and counting
+only cases where *both* sides computed a real value (excluding the
+unmodeled "blank" cases above, which are a separate, orthogonal issue):
+pre-2026 jobs matched 90.0% exactly; jobs from the shop's newer time clock
+system (job >= 29000, confirmed by the user to be when it was deployed)
+matched 97.2-98.7%. The user also identified, from real exported rows, two
+further non-formula sources of the remaining gap, both confirmed-real and
+deliberately NOT modeled here: (1) an operator can mark an operation
+complete before the work is actually finished, then add a brand-new
+Job_Operation to keep logging hours against the schedule -- JobBOSS's own
+Adj Hrs still credits the *original* operation's estimate, not the
+replacement's (confirmed live: Job 30055/CNC VTL/OP1 has two Job_Operation
+ids, 186121 with the real Est_Run_Hrs=60 matching JobBOSS's own Adj Hrs
+exactly, and 186744, an all-zero replacement created after the original was
+prematurely closed); (2) Operation_Service is a free-text field with no
+integrity constraint, so a simple mistyped label can land a real time entry
+under the wrong description with nothing to catch it -- this module's own
+SQL is unaffected (grouping/joining is always by the real Job_Operation id,
+Operation_Service is display-only, per [[jobboss-job-operation-is-the-key]]
+in persistent memory), but any text-based comparison against a real export
+(including the forensic comparisons that produced the numbers above) is
+exposed to it. Neither failure mode is specific to this report or fixable
+in SQL -- they're properties of how the shop's data gets entered.
+
+**Grouping bug fix (Detail only).** Detail's CTE used to group by the
+*descriptive* columns (Job, Work_Center, Operation_Service) instead of the
+real Job_Operation foreign key -- Summary already grouped correctly, Detail
+didn't. Confirmed wrong directly from JobBOSS's own export: 303 distinct
+(employee, Job, Work_Center, Operation_Service) combinations appear *more
+than once* for the same employee in the real data, with genuinely different
+Est/Act/Adj values each time (e.g. ALLEN's "13072/ASSEMBLY/ASSEMBLE" appears
+twice, once with Run Est Hrs 0.5 and once with Run Est Hrs 10 -- two real,
+distinct operations that happen to share a display label, likely a job
+whose routing revisits the same work center at two different steps). Group-
+ing by the descriptive triple silently merged these via MAX()/SUM(), blending
+two unrelated operations' estimates into one nonsensical row. Detail now
+groups by jot.Job_Operation like Summary always did, with Job/Work_Center/
+Operation_Service selected alongside it (safe: Job_Operation determines them
+uniquely, so adding them to GROUP BY doesn't change the grouping grain).
+
+**The proportional-share denominator is deliberately NOT employee-filtered.**
+`op_totals` (both queries) sums Act Hrs across *every* employee who logged
+time on an operation within the date range, regardless of which employees
+the user picked in the Employee filter -- the share one employee gets
+depends on how much everyone else logged too, so computing it from only the
+selected employees' own rows would be circular. Scoped to the same date
+range as the rest of the report (not all-time), matching how the real
+report's own "Time Entry Date Range" field evidently scopes this too --
+confirmed self-consistently: the formula reproduces JobBOSS's real numbers
+to within 1% using only data *inside* one shared date range, which wouldn't
+be possible if the real denominator needed data outside that window.
 
 Per the KB article ("Employee Efficiency does not consider the Setup
-Estimate Time -- subtract the setup time for these calculations"), Setup's
-% Eff is informational only -- it does not feed any combined/overall score,
-and there isn't one; Setup and Run are always two independent numbers, per
-the real report's own layout, never blended into one.
-
-One correction from three earlier (wrong) attempts at Run's formula, all
-now removed -- a naive Est/Act ratio, Job_Operation.Efficiency_Pct
-(confirmed static garbage), and an Adj Hrs formula based on
-Setup_Pct_Complete/Run_Pct_Complete (conceptually wrong -- those reflect
-whether the operation is closed out as of *today*, not historical progress,
-and collapsed to near-zero for anyone with real hours still logged against
-open work): **Act_Run_Hrs (not Act_Run_Labor_Hrs) is correct** for Run --
-the KB article notes "The report uses the Machine Hours, not Labor Hours";
-this schema has both Act_Run_Hrs and a separate Act_Run_Labor_Hrs on
-Job_Operation_Time, and this module has used Act_Run_Hrs throughout.
+Estimate Time -- subtract the setup time for these calculations"), Setup is
+still not part of JobBOSS's own combined "Employee Efficiency" score --
+Setup and Run are always two independent blocks here too, never blended.
 
 **"Operations without Adj E Hrs are not included" -- the report's own
-footnote -- is now precisely confirmed to be real and material, even
-though its exact trigger condition is still unknown.** Cross-checked a
-real single-employee xlsx export cell-by-cell against its own "Employee
-Total" row: summing every individual row's Run Act Hrs gives a bigger
-number than the Employee Total's own Run Act Hrs (1218.08 vs 1072.13 for
-one real employee) -- the gap (145.95) is exactly the Act Hrs from the rows
-whose exported Adj E Hrs cell was blank, confirmed by matching "Adj E Hrs
-is present" sum to the Employee Total's Run Act Hrs to the cent. Tried and
-disproved: Quantity = 0 -- 18 counter-example rows have Quantity = 0 *and*
-a real, present, nonzero Adj E Hrs (e.g. Qty=0, Adj E Hrs=0.135059088351154,
-an oddly-precise value that doesn't come from qty * a per-part rate at
-all). Whatever JobBOSS actually checks isn't visible from the exported
-columns available here, and isn't implemented -- shipping a guessed rule
-after disproving the first guess would repeat the exact mistake this
-disproof just caught. The gap between this module's Act/Adj Hrs and
-JobBOSS's own is real and not fully closed; _QTY_SANITY_MULTIPLIER below
-remains the one guard actually shipped, for the one failure mode actually
-confirmed (next paragraph).
+footnote.** Precisely confirmed real in an earlier cross-check (one real
+employee's individual-row Run Act Hrs summed to 145.95 more than their own
+Employee Total). The proportional-share formula above explains this
+naturally: Adj Hrs is undefined (NULL here) whenever SUM(Act Hrs across all
+employees) on an operation is 0 -- the exact condition under which the
+ratio is 0/0, not a guessed exclusion rule. Not independently re-verified
+against the specific blank-cell rows from that earlier export (would need
+to re-run that cross-check against this formula specifically), so treat this
+as the likely explanation, not a fully closed loop.
 
-**Bad-data guard**: one real operation found live (Job 29718, CNC HMC OP6)
-has Act_Run_Qty = 5,629 against Est_Required_Qty = 1 -- the job needed one
-part, 5,629 are logged as run, in 10 total hours. There's no boolean
-"exclude this" column anywhere on Job_Operation -- checked every one of its
-~100 columns directly. _QTY_SANITY_MULTIPLIER below is a pragmatic
-stand-in, not JobBOSS's real exclusion logic: an operation's Run_Qty is
-excluded from Adj Hrs / % Eff (not from the informational Hours columns)
-when it's more than that many times Est_Required_Qty.
+**Three earlier (wrong) Run formulas, all now removed, kept here so none
+get retried:** (1) a naive Est/Act ratio of the Hours columns; (2)
+`Job_Operation.Efficiency_Pct` (confirmed static `100.0` garbage); (3) an
+Adj Hrs formula based on Setup_Pct_Complete/Run_Pct_Complete (conceptually
+wrong -- those reflect whether the operation is closed out as of *today*,
+not historical progress); (4) the ECI KB article's `Act_Run_Qty *
+Est_Run_Per_Part`, confirmed wrong above (55.2% of real rows have Quantity=0
+with a real nonzero Adj E Hrs); (5) `Job_Operation.Est_Run_Per_Part` itself
+is also not reliably the right per-part rate even when read directly --
+cross-checked against one real operation where it implied a per-part rate
+20x smaller than what the real Adj Hrs/Quantity ratio required. **Act_Run_Hrs
+(not Act_Run_Labor_Hrs) is correct** for Run -- the KB article notes "The
+report uses the Machine Hours, not Labor Hours"; this schema has both on
+Job_Operation_Time, and this module has used Act_Run_Hrs throughout.
+
+**Qty-sanity guard, removed.** The old `_QTY_SANITY_MULTIPLIER` guard
+(excluding an operation's Adj Hrs when Act_Run_Qty wildly exceeded
+Est_Required_Qty, e.g. Job 29718's 5,629-vs-1) existed only because the old
+formula multiplied by Act_Run_Qty. The new formula doesn't use Act_Run_Qty
+at all, so that failure mode can't happen here anymore -- Run_Qty is now
+purely an informational display column (still shown, still subject to the
+ARHSum=0 rule below), not an Adj Hrs input.
 
 **Two rules confirmed from JobBOSS's own report source**, not inferred --
 LR_EmployeeEfficiency_Rpt.htm (the VBScript that builds this report's
 actual SQL query, found on the JobBOSS server's Reporting share, copied
 locally and read there -- not accessed live on the server):
-  - `Job_Operation_Time.Rework_Time = 0` is filtered on every query. Rework
-    time entries never counted toward Act hours or Adj Hrs here before --
-    a real gap, now fixed, independent of the qty-sanity guard above.
+  - `Job_Operation_Time.Rework_Time = 0` is filtered on every query.
   - If an employee's summed Run Act Hrs for an operation is 0, JobBOSS
     forces the reported quantity to 0 too, regardless of what
     Act_Run_Qty actually summed to (`IIF(ARHSum=0, 0, ARQSum)` in the
-    source). Applied here as part of computing Run_Qty itself, before the
-    qty-sanity guard and before Adj Hrs.
-The actual Adj E Hrs / % Eff Crystal Reports formula itself is still not
-recovered -- the .rpt file's formula definitions are compiled to a
-proprietary bytecode (confirmed via OLE-stream extraction: near-uniform
-byte-value distribution across the Contents stream, no plain text, no
-standard compression), not stored as readable text. Reading that back out
-needs Crystal Reports itself, not available here.
+    source). Applied here as part of computing Detail's informational
+    Run_Qty column.
+The actual Adj E Hrs / % Eff Crystal Reports formula definition itself was
+never recovered from the .rpt file (compiled to proprietary bytecode,
+confirmed via OLE-stream extraction) -- the formula above was recovered by
+reverse-engineering real exported output instead, which is why it's stated
+as empirically confirmed rather than read from JobBOSS's own source.
 
 Status = 'Active' (Job_Operation_Time has no status value confirmed to mean
 "void"/"deleted" from the schema dump alone, so none is filtered here) --
 the only filter applied is the one the real report's own "Active Employees
 Only" checkbox describes, always on for v1 (see db_integration.fetch_employees()).
 
-Indirect time (vacation, training, cleanup, etc.) is excluded from both
+Indirect time (vacation, training, cleanup, etc.) is excluded from all
 queries via Work_Center.Type <> 'Indirect' -- confirmed directly from this
 shop's own Work Center setup screen: Work_Center has a real Type column
 (Direct/Indirect), and it's the *work center* that's marked Indirect, not
@@ -149,63 +253,82 @@ from typing import Any, Dict, List
 from experimental.db_integration import connect, employee_filter_clause
 from modules.reporting.reports.base import ReportDefinition
 
-# See the module docstring's "Bad-data guard" section -- not a JobBOSS-
-# confirmed rule, a pragmatic stand-in chosen to favor robustness over
-# precision given one confirmed real example (5,629x) and no way to find
-# JobBOSS's own exclusion logic from here.
-_QTY_SANITY_MULTIPLIER = 10
+# op_totals: Act Hrs summed across every ACTIVE employee who logged time on
+# an operation, never filtered by the Employee picker -- see module
+# docstring ("deliberately NOT employee-filtered"). This is the shared
+# denominator both queries divide an operation's Est Hrs by. Joins Employee
+# and filters Status='Active' -- confirmed necessary live: an inactive
+# employee (REYES) had real historical hours on an operation an active
+# employee (ADAMS) also worked, inflating Adams's denominator and
+# under-crediting his Adj Hrs, since the real report's whole population is
+# Active-employees-only (same population db_integration.fetch_employees()
+# draws from) and never counts an inactive employee's hours at all.
+# Substituted via {op_totals} below (not string concatenation) -- bandit's
+# B608 flags `+`-joined query strings even when every part is a constant;
+# plain .format() placeholders on constant strings don't trigger it (see
+# CODING_NOTES.md).
+_OP_TOTALS_CTE = """op_totals AS (
+    SELECT jot.Job_Operation,
+           SUM(jot.Act_Setup_Hrs) AS Total_Setup_Act_Hrs,
+           SUM(jot.Act_Run_Hrs) AS Total_Run_Act_Hrs
+    FROM Job_Operation_Time jot
+    JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
+    JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
+    JOIN Employee te ON te.Employee = jot.Employee
+    WHERE jot.Work_Date BETWEEN %s AND %s AND jot.Rework_Time = 0
+          AND (wc.Type IS NULL OR wc.Type <> 'Indirect') AND te.Status = 'Active'
+    GROUP BY jot.Job_Operation
+)"""
 
-# op_detail groups by (Employee, Job, Work_Center, Operation_Service) first
-# so Run_Qty's ARHSum-zero guard (next line) and the qty-sanity guard are
-# each computed exactly once per operation, not repeated across the SELECT
-# list -- SQL Server can't reference a sibling SELECT-list alias, so without
-# this CTE the same CASE expression would need writing out three times.
+# op_detail groups by jot.Job_Operation -- the real foreign key, matching
+# Summary's op_rollup -- not the descriptive (Job, Work_Center,
+# Operation_Service) triple used here before. See module docstring
+# ("Grouping bug fix"): that triple isn't unique, and grouping by it
+# silently merged distinct operations that happen to share a display label.
+# Job/Work_Center/Operation_Service are selected alongside Job_Operation in
+# the GROUP BY -- safe, since Job_Operation determines them uniquely.
 _EMPLOYEE_EFFICIENCY_DETAIL_QUERY = """
-WITH op_detail AS (
-    SELECT jot.Employee, jo.Job, jo.Work_Center, jo.Operation_Service,
+WITH {op_totals},
+op_detail AS (
+    SELECT jot.Employee, jot.Job_Operation, jo.Job, jo.Work_Center, jo.Operation_Service,
            SUM(jot.Act_Setup_Hrs) AS Setup_Act_Hrs, MAX(jo.Est_Setup_Hrs) AS Setup_Est_Hrs,
            SUM(jot.Act_Run_Hrs) AS Run_Act_Hrs, MAX(jo.Est_Run_Hrs) AS Run_Est_Hrs,
-           CASE WHEN SUM(jot.Act_Run_Hrs) = 0 THEN 0 ELSE SUM(jot.Act_Run_Qty) END AS Run_Qty,
-           MAX(jo.Est_Required_Qty) AS Est_Required_Qty, MAX(jo.Est_Run_Per_Part) AS Est_Run_Per_Part
+           CASE WHEN SUM(jot.Act_Run_Hrs) = 0 THEN 0 ELSE SUM(jot.Act_Run_Qty) END AS Run_Qty
     FROM Job_Operation_Time jot
     JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
     JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
     WHERE jot.Work_Date BETWEEN %s AND %s AND jot.Rework_Time = 0
           AND (wc.Type IS NULL OR wc.Type <> 'Indirect') AND {employee_clause}
-    GROUP BY jot.Employee, jo.Job, jo.Work_Center, jo.Operation_Service
+    GROUP BY jot.Employee, jot.Job_Operation, jo.Job, jo.Work_Center, jo.Operation_Service
 )
 SELECT op.Employee, e.First_Name, e.Last_Name, op.Job, op.Work_Center, op.Operation_Service,
-       op.Setup_Act_Hrs, op.Setup_Est_Hrs, op.Run_Act_Hrs, op.Run_Est_Hrs, op.Run_Qty,
-       CASE WHEN op.Est_Required_Qty > 0 AND op.Run_Qty > op.Est_Required_Qty * {qty_multiplier}
-            THEN NULL ELSE op.Run_Qty * op.Est_Run_Per_Part
-       END AS Adj_Hrs
+       op.Setup_Act_Hrs, op.Setup_Est_Hrs,
+       CASE WHEN ot.Total_Setup_Act_Hrs > 0
+            THEN op.Setup_Est_Hrs * op.Setup_Act_Hrs / ot.Total_Setup_Act_Hrs END AS Setup_Adj_Hrs,
+       op.Run_Act_Hrs, op.Run_Est_Hrs, op.Run_Qty,
+       CASE WHEN ot.Total_Run_Act_Hrs > 0
+            THEN op.Run_Est_Hrs * op.Run_Act_Hrs / ot.Total_Run_Act_Hrs END AS Run_Adj_Hrs
 FROM op_detail op
 JOIN Employee e ON e.Employee = op.Employee
+JOIN op_totals ot ON ot.Job_Operation = op.Job_Operation
 WHERE e.Status = 'Active'
 ORDER BY e.Last_Name, e.First_Name, op.Job
 """
 
-# op_rollup groups by (Employee, Job_Operation) first, exactly like Detail's
-# GROUP BY -- same reason, so Run_Qty's ARHSum-zero guard and Est_Run_Per_Part
-# are each applied to this employee's work on this one operation exactly
-# once, not once per Job_Operation_Time row. Joins Work_Center here too (not
-# just in the outer query) so the Indirect exclusion applies before the
-# rollup, not after. op_scored applies the qty-sanity check per operation,
-# so a flagged operation's Act Hours AND Adj Hrs both drop out of the % Eff
-# ratio together. Setup Act/Est Hrs and Run Est Hrs are never "scored" --
-# like Detail, they're plain informational sums, not inputs to % Eff, so a
-# flagged operation's hours still show there even though they're excluded
-# from Run Act Hrs/Adj Hrs. Setup and Run are kept as separate columns here
-# too, never summed into one blended "Total" -- the real report never does
-# that either, and blending them would silently combine an excluded
-# category (Setup) with the one that actually drives % Eff (Run).
+# op_rollup groups by (Employee, Job_Operation) -- already the real key, no
+# bug here. op_scored joins op_totals to compute each operation's Setup/Run
+# Adj Hrs via the proportional-share formula *before* the outer SELECT sums
+# across an employee's operations -- SUM() ignores NULL inputs, so an
+# operation nobody logged any Act Hrs on (Total_*_Act_Hrs = 0, Adj_Hrs NULL)
+# simply contributes nothing, matching "not included" rather than "scored as
+# zero". Setup and Run are kept as separate columns here too, never summed
+# into one blended "Total" -- the real report never does that either.
 _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY = """
-WITH op_rollup AS (
+WITH {op_totals},
+op_rollup AS (
     SELECT jot.Employee, jot.Job_Operation,
            SUM(jot.Act_Setup_Hrs) AS Setup_Act_Hrs, MAX(jo.Est_Setup_Hrs) AS Setup_Est_Hrs,
-           SUM(jot.Act_Run_Hrs) AS Run_Act_Hrs, MAX(jo.Est_Run_Hrs) AS Run_Est_Hrs,
-           CASE WHEN SUM(jot.Act_Run_Hrs) = 0 THEN 0 ELSE SUM(jot.Act_Run_Qty) END AS Run_Qty,
-           MAX(jo.Est_Required_Qty) AS Est_Required_Qty, MAX(jo.Est_Run_Per_Part) AS Est_Run_Per_Part
+           SUM(jot.Act_Run_Hrs) AS Run_Act_Hrs, MAX(jo.Est_Run_Hrs) AS Run_Est_Hrs
     FROM Job_Operation_Time jot
     JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
     JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
@@ -214,19 +337,21 @@ WITH op_rollup AS (
     GROUP BY jot.Employee, jot.Job_Operation
 ),
 op_scored AS (
-    SELECT Employee, Setup_Act_Hrs, Setup_Est_Hrs, Run_Est_Hrs,
-           CASE WHEN Est_Required_Qty > 0 AND Run_Qty > Est_Required_Qty * {qty_multiplier}
-                THEN 0 ELSE Run_Act_Hrs END AS Scored_Run_Act_Hrs,
-           CASE WHEN Est_Required_Qty > 0 AND Run_Qty > Est_Required_Qty * {qty_multiplier}
-                THEN 0 ELSE Run_Qty * Est_Run_Per_Part END AS Scored_Adj_Hrs
-    FROM op_rollup
+    SELECT op.Employee, op.Setup_Act_Hrs, op.Setup_Est_Hrs, op.Run_Act_Hrs, op.Run_Est_Hrs,
+           CASE WHEN ot.Total_Setup_Act_Hrs > 0
+                THEN op.Setup_Est_Hrs * op.Setup_Act_Hrs / ot.Total_Setup_Act_Hrs END AS Setup_Adj_Hrs,
+           CASE WHEN ot.Total_Run_Act_Hrs > 0
+                THEN op.Run_Est_Hrs * op.Run_Act_Hrs / ot.Total_Run_Act_Hrs END AS Run_Adj_Hrs
+    FROM op_rollup op
+    JOIN op_totals ot ON ot.Job_Operation = op.Job_Operation
 )
 SELECT op.Employee, e.First_Name, e.Last_Name,
        SUM(op.Setup_Act_Hrs) AS Setup_Act_Hrs,
        SUM(op.Setup_Est_Hrs) AS Setup_Est_Hrs,
-       SUM(op.Scored_Run_Act_Hrs) AS Run_Act_Hrs,
+       SUM(op.Setup_Adj_Hrs) AS Setup_Adj_Hrs,
+       SUM(op.Run_Act_Hrs) AS Run_Act_Hrs,
        SUM(op.Run_Est_Hrs) AS Run_Est_Hrs,
-       SUM(op.Scored_Adj_Hrs) AS Adj_Hrs
+       SUM(op.Run_Adj_Hrs) AS Run_Adj_Hrs
 FROM op_scored op
 JOIN Employee e ON e.Employee = op.Employee
 WHERE e.Status = 'Active' AND {employee_clause}
@@ -275,14 +400,11 @@ def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
         run_act = r.get('Run_Act_Hrs') or 0
         run_est = r.get('Run_Est_Hrs') or 0
         qty = r.get('Run_Qty') or 0
-        # Setup Adj Hrs = Setup Est Hrs -- see module docstring ("Setup" section)
-        # for why, and its ~94%-exact caveat. No qty-sanity guard here -- Setup
-        # has no quantity to sanity-check against in the first place.
-        setup_adj = setup_est
-        # None (not 0) means either no Run component at all (Est_Run_Per_Part
-        # unset) or the qty-sanity guard flagged this operation -- blank, not
-        # "0.00"/"0.0", since both mean "not scoreable", not "scored at zero".
-        run_adj = r.get('Adj_Hrs')
+        # None (not 0) means nobody (across all employees) logged any Act
+        # Hrs on this operation, so the proportional-share formula is 0/0 --
+        # blank, not "0.00"/"0.0", since both mean "not scoreable".
+        setup_adj = r.get('Setup_Adj_Hrs')
+        run_adj = r.get('Run_Adj_Hrs')
         name = f"{r.get('First_Name') or ''} {r.get('Last_Name') or ''}".strip() or (r.get('Employee') or '')
         rows.append({
             'employee': name,
@@ -291,8 +413,8 @@ def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
             'operation': r.get('Operation_Service') or '',
             'setup_act_hrs': f"{setup_act:.2f}",
             'setup_est_hrs': f"{setup_est:.2f}",
-            'setup_adj_hrs': f"{setup_adj:.2f}",
-            'setup_pct_eff': _pct_or_blank(setup_adj, setup_act),
+            'setup_adj_hrs': f"{setup_adj:.2f}" if setup_adj is not None else '',
+            'setup_pct_eff': _pct_or_blank(setup_adj, setup_act) if setup_adj is not None else '',
             'run_act_hrs': f"{run_act:.2f}",
             'run_est_hrs': f"{run_est:.2f}",
             'run_qty': str(qty),
@@ -309,9 +431,10 @@ def _rows_from_summary(raw_rows: List[dict]) -> List[Dict[str, str]]:
         setup_est = r.get('Setup_Est_Hrs') or 0
         run_act = r.get('Run_Act_Hrs') or 0
         run_est = r.get('Run_Est_Hrs') or 0
-        run_adj = r.get('Adj_Hrs') or 0
-        # Setup Adj Hrs = Setup Est Hrs -- see _rows_from_detail/module docstring.
-        setup_adj = setup_est
+        # SUM() over NULLs in SQL yields NULL only if every contributing
+        # operation was unscoreable; `or 0` here just guards the all-NULL case.
+        setup_adj = r.get('Setup_Adj_Hrs') or 0
+        run_adj = r.get('Run_Adj_Hrs') or 0
         name = f"{r.get('First_Name') or ''} {r.get('Last_Name') or ''}".strip() or (r.get('Employee') or '')
         rows.append({
             'employee': name,
@@ -331,10 +454,12 @@ def _fetch_detail(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Dic
     start = filters['start_date']
     end = filters['end_date']
     clause, employee_params = employee_filter_clause(filters.get('employees'), column='jot.Employee')
-    query = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(employee_clause=clause, qty_multiplier=_QTY_SANITY_MULTIPLIER)
+    query = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause=clause)
+    # op_totals' date-range placeholders come first in the formatted query
+    # text, then op_detail's own -- params must be supplied in that order.
     with connect(settings) as conn:
         with conn.cursor() as cur:
-            cur.execute(query, (start, end) + employee_params)
+            cur.execute(query, (start, end, start, end) + employee_params)
             return _rows_from_detail(cur.fetchall())
 
 
@@ -342,12 +467,22 @@ def _fetch_summary(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Di
     start = filters['start_date']
     end = filters['end_date']
     clause, employee_params = employee_filter_clause(filters.get('employees'), column='op.Employee')
-    query = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(employee_clause=clause, qty_multiplier=_QTY_SANITY_MULTIPLIER)
+    query = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause=clause)
     with connect(settings) as conn:
         with conn.cursor() as cur:
-            cur.execute(query, (start, end) + employee_params)
+            cur.execute(query, (start, end, start, end) + employee_params)
             return _rows_from_summary(cur.fetchall())
 
+
+# Printed at the bottom of every exported Detail/Summary file -- the same
+# plain-language form as the module docstring's formula, condensed to what a
+# reader of the exported file actually needs, not the full investigation.
+_FORMULA_FOOTER = [
+    "Adj Hrs = Est Hrs (for the operation) x [this employee's Act Hrs / total Act Hrs logged by everyone on that operation]",
+    "% Eff = Adj Hrs / this employee's Act Hrs x 100",
+    "Setup and Run are tracked and scored as two separate metrics, never combined into one number. Run alone feeds JobBOSS's official Employee Efficiency score; Setup is scored the same way, just not rolled into it -- use it to catch under/over-bid setup estimates and individual setup performance.",
+    "Blank Adj Hrs / % Eff means this operation could not be scored (no comparable hours recorded, or a known JobBOSS exclusion not modeled here).",
+]
 
 EMPLOYEE_EFFICIENCY_DETAIL = ReportDefinition(
     name="Employee Efficiency - Detail",
@@ -358,6 +493,7 @@ EMPLOYEE_EFFICIENCY_DETAIL = ReportDefinition(
     uses_dates=True,
     dates_required=True,
     uses_employee_filter=True,
+    footer_lines=_FORMULA_FOOTER,
 )
 EMPLOYEE_EFFICIENCY_SUMMARY = ReportDefinition(
     name="Employee Efficiency - Summary",
@@ -368,4 +504,5 @@ EMPLOYEE_EFFICIENCY_SUMMARY = ReportDefinition(
     uses_dates=True,
     dates_required=True,
     uses_employee_filter=True,
+    footer_lines=_FORMULA_FOOTER,
 )
