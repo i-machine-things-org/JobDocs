@@ -12,14 +12,16 @@ requires editing it.
 
 import sys
 import csv
+import html
+import tempfile
 from datetime import datetime
 from pathlib import Path
-from PyQt6.QtCore import QDate, QThread, pyqtSignal, QObject, QEvent, Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import QDate, QThread, pyqtSignal, QObject, QEvent, Qt, QUrl
+from PyQt6.QtGui import QColor, QDesktopServices
 from PyQt6.QtWidgets import (
     QWidget, QTableWidgetItem, QFileDialog, QHeaderView, QAbstractItemView,
     QDateEdit, QCalendarWidget, QDialog, QDialogButtonBox, QListWidget,
-    QListWidgetItem, QPushButton, QVBoxLayout, QHBoxLayout
+    QListWidgetItem, QPushButton, QVBoxLayout, QHBoxLayout, QComboBox, QFormLayout
 )
 from PyQt6 import uic
 
@@ -111,6 +113,45 @@ class _CustomerPickerDialog(QDialog):
             for i in range(self.list_widget.count())
             if self.list_widget.item(i).checkState() == Qt.CheckState.Checked
         ]
+
+
+class _ExportOptionsDialog(QDialog):
+    """Format + Destination picker shown before every export, mirroring
+    JobBOSS's own Crystal Reports export dialog (Format / Destination
+    dropdowns) rather than letting the OS Save dialog's filter list be the
+    only format choice. Defaults (Excel / Save to disk) reproduce this
+    module's pre-existing export_report() behavior exactly, so accepting
+    without changing anything is a no-op change for existing users.
+    """
+
+    _FORMATS = [("xlsx", "Excel (.xlsx)"), ("csv", "CSV (.csv)"), ("pdf", "PDF (.pdf)")]
+    _DESTINATIONS = [("disk", "Save to disk"), ("app", "Open with default program")]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Export Report")
+        layout = QFormLayout(self)
+
+        self.format_combo = QComboBox()
+        for value, label in self._FORMATS:
+            self.format_combo.addItem(label, value)
+        layout.addRow("Format:", self.format_combo)
+
+        self.destination_combo = QComboBox()
+        for value, label in self._DESTINATIONS:
+            self.destination_combo.addItem(label, value)
+        layout.addRow("Destination:", self.destination_combo)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def selected_format(self) -> str:
+        return self.format_combo.currentData()
+
+    def selected_destination(self) -> str:
+        return self.destination_combo.currentData()
 
 
 class _DateCalendarPopupFilter(QObject):
@@ -692,40 +733,68 @@ class ReportingModule(BaseModule):
             ])
         return headers, data_rows
 
+    _EXPORT_FILTERS = {
+        'xlsx': "Excel Files (*.xlsx)",
+        'csv': "CSV Files (*.csv)",
+        'pdf': "PDF Files (*.pdf)",
+    }
+    _EXPORT_METHODS_BY_FORMAT = {
+        'xlsx': '_export_xlsx',
+        'csv': '_export_csv',
+        'pdf': '_export_pdf',
+    }
+
     def export_report(self):
-        """Export report to CSV or Excel (.xlsx)"""
+        """Export report to Excel (.xlsx), CSV, or PDF -- to disk, or opened
+        directly in the OS's default program for that file type.
+        """
         if self.report_table.rowCount() == 0:
             self.show_error("No Data", "Generate a report first before exporting")
             return
 
-        file_path, selected_filter = QFileDialog.getSaveFileName(
-            self._widget,
-            "Export Report",
-            f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            "Excel Files (*.xlsx);;CSV Files (*.csv)"
-        )
-        if not file_path:
+        dialog = _ExportOptionsDialog(self._widget)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
+        fmt = dialog.selected_format()
+        destination = dialog.selected_destination()
+        default_name = f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt}"
 
-        is_excel = 'xlsx' in selected_filter.lower() or file_path.lower().endswith('.xlsx')
-        if is_excel and not file_path.lower().endswith('.xlsx'):
-            file_path += '.xlsx'
-        elif not is_excel and not file_path.lower().endswith('.csv'):
-            file_path += '.csv'
+        if destination == 'disk':
+            file_path, _selected_filter = QFileDialog.getSaveFileName(
+                self._widget, "Export Report", default_name, self._EXPORT_FILTERS[fmt]
+            )
+            if not file_path:
+                return
+            if not file_path.lower().endswith(f'.{fmt}'):
+                file_path += f'.{fmt}'
+        else:
+            # 'app' destination: no save-location prompt, write to a temp
+            # file and hand it straight to the OS's default handler --
+            # matches how JobBOSS's own "Application" export destination
+            # behaves (opens directly, doesn't ask where to save first).
+            file_path = str(Path(tempfile.gettempdir()) / default_name)
 
         try:
-            if is_excel:
-                self._export_xlsx(file_path)
-            else:
-                self._export_csv(file_path)
-            self.show_info("Export Successful", f"Report exported to:\n{file_path}")
-            self.log_message(f"Exported report to: {file_path}")
+            getattr(self, self._EXPORT_METHODS_BY_FORMAT[fmt])(file_path)
         except Exception as e:
             self.show_error("Export Failed", f"Failed to export report:\n{str(e)}")
+            return
+
+        if destination == 'app':
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(file_path)):
+                self.show_error(
+                    "Couldn't Open File",
+                    f"The report was exported, but no default program could be found to open it:\n{file_path}",
+                )
+            self.log_message(f"Exported report and opened: {file_path}")
+        else:
+            self.show_info("Export Successful", f"Report exported to:\n{file_path}")
+            self.log_message(f"Exported report to: {file_path}")
 
     def _export_csv(self, file_path: str):
         headers, data_rows = self._export_table_rows()
         safe_rows = [[_neutralize_formula_cell(v) for v in row] for row in data_rows]
+        report_def = REPORTS.get(self._last_report_type)
         # utf-8-sig, not the platform-default encoding (cp1252 on Windows) --
         # a customer name or note containing a character outside cp1252 would
         # otherwise raise UnicodeEncodeError and fail the export; the BOM also
@@ -735,6 +804,69 @@ class ReportingModule(BaseModule):
             writer.writerows(self._export_title_block())
             writer.writerow(headers)
             writer.writerows(safe_rows)
+            if report_def and report_def.footer_lines:
+                writer.writerow([])
+                writer.writerows([[line] for line in report_def.footer_lines])
+
+    def _export_pdf(self, file_path: str):
+        """Render the title block, table, and footer as HTML and print it
+        to a PDF via Qt's own QTextDocument/QPrinter -- no extra dependency
+        beyond the PyQt6 install this app already requires. No formula-
+        injection neutralizing needed here (unlike CSV/xlsx): a PDF has no
+        spreadsheet engine to execute a cell value as a formula, so only
+        HTML-escaping (for the markup itself, e.g. a note containing "<"/"&")
+        applies.
+        """
+        from PyQt6.QtGui import QPageLayout, QTextDocument
+        from PyQt6.QtPrintSupport import QPrinter
+
+        def esc(value) -> str:
+            return html.escape(str(value)) if value not in (None, "") else ""
+
+        title_block = self._export_title_block()
+        headers, data_rows = self._export_table_rows()
+        report_def = REPORTS.get(self._last_report_type)
+
+        highlighted_cells = set()
+        if report_def and report_def.row_highlight:
+            for row_idx, row in enumerate(data_rows):
+                row_dict = dict(zip(report_def.columns, row))
+                highlight_key = report_def.row_highlight(row_dict)
+                if highlight_key and highlight_key in report_def.columns:
+                    highlighted_cells.add((row_idx, report_def.columns.index(highlight_key)))
+
+        parts = ['<html><body style="font-family: sans-serif; font-size: 9pt;">']
+        for i, row in enumerate(title_block):
+            if not row:
+                continue
+            text = " ".join(esc(cell) for cell in row if cell not in (None, ""))
+            style = "font-weight:bold; font-size:13pt;" if i == 0 else "margin:1px 0;"
+            parts.append(f'<p style="{style}">{text}</p>')
+
+        parts.append('<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse; width:100%;">')
+        parts.append('<tr>' + ''.join(f'<th style="background:#dddddd;">{esc(h)}</th>' for h in headers) + '</tr>')
+        for row_idx, row in enumerate(data_rows):
+            cells = []
+            for col_idx, value in enumerate(row):
+                style = ' style="background:#ffcccc;"' if (row_idx, col_idx) in highlighted_cells else ''
+                cells.append(f'<td{style}>{esc(value)}</td>')
+            parts.append('<tr>' + ''.join(cells) + '</tr>')
+        parts.append('</table>')
+
+        if report_def and report_def.footer_lines:
+            parts.append('<p>&nbsp;</p>')
+            for line in report_def.footer_lines:
+                parts.append(f'<p style="font-size:7.5pt; color:#444444;">{esc(line)}</p>')
+        parts.append('</body></html>')
+
+        document = QTextDocument()
+        document.setHtml(''.join(parts))
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        printer.setOutputFileName(file_path)
+        printer.setPageOrientation(QPageLayout.Orientation.Landscape)
+        document.print(printer)
 
     def _export_xlsx(self, file_path: str):
         from openpyxl import Workbook
@@ -816,11 +948,33 @@ class ReportingModule(BaseModule):
             )
             ws.add_table(table)
 
+        # Appended after the Table block (table_ref above was already fixed
+        # to header+data only) and after column-width sizing, so a long
+        # footer line doesn't blow out every column's width.
+        if report_def and report_def.footer_lines:
+            ws.append([])
+            for line in report_def.footer_lines:
+                ws.append([line])
+
         wb.save(file_path)
 
     def cleanup(self):
-        """Cleanup resources"""
+        """Cleanup resources.
+
+        No persistent JobBOSS connection to close here -- experimental.
+        db_integration.connect()/test_connection() each open a pytds
+        connection in their own `with` block and close it before returning,
+        every single call, so there's never a live session held open
+        between calls for this to disconnect. What actually needs cleanup
+        is the background workers: wait for any still in flight (most
+        importantly _connect_worker, since a module teardown mid-connect
+        could otherwise leave a QThread running after its receiver is gone)
+        and reset local state so nothing stale (a green "connected"
+        indicator with no backing worker) survives this module being torn
+        down and rebuilt.
+        """
         workers = (self._connect_worker, self._report_worker, self._customer_worker, self._employee_worker)
         for worker in workers:
             if worker is not None and worker.isRunning():
                 worker.wait(2000)
+        self._db_ready = False
