@@ -727,12 +727,14 @@ class ReportingModule(BaseModule):
         ]
         if report_def and report_def.uses_customer_filter:
             customers = self._last_filters.get('customers')
-            rows.append(["Customers:", ", ".join(customers) if customers else "All"])
+            value = ", ".join(customers) if customers else "All"
+            rows.append(["Customers:", _neutralize_formula_cell(value)])
         if report_def and report_def.uses_employee_filter:
             codes = self._last_filters.get('employees')
             name_by_code = self._employee_name_by_code()
             labels = [name_by_code.get(c, c) for c in codes] if codes else []
-            rows.append(["Employees:", ", ".join(labels) if labels else "All"])
+            value = ", ".join(labels) if labels else "All"
+            rows.append(["Employees:", _neutralize_formula_cell(value)])
         rows.append(["Generated:", generated.strftime('%Y-%m-%d %H:%M:%S') if generated else ""])
         rows.append([])
         return rows

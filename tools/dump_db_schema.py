@@ -35,8 +35,23 @@ import pytds  # noqa: E402
 from openpyxl import Workbook  # noqa: E402
 from openpyxl.styles import Font  # noqa: E402
 
-from experimental.db_integration import _connect_kwargs, is_configured  # noqa: E402
+from experimental.db_integration import _connect_kwargs  # noqa: E402
 from shared.utils import get_config_dir  # noqa: E402
+
+# Table/column identifiers written to the dump are real SQL Server
+# identifiers (can't start with =/+/-/@ as bare, unquoted names), but
+# openpyxl doesn't know that -- neutralize them the same way
+# modules/reporting/module.py's _neutralize_formula_cell() does for report
+# exports, rather than trust that assumption holds for every future caller
+# of this script. A local copy, not an import from that module, so this
+# standalone CLI tool doesn't pull in a PyQt6-based GUI module just for one
+# small function.
+_FORMULA_TRIGGER_CHARS = ('=', '+', '-', '@', '\t', '\r')
+
+
+def _neutralize_formula_cell(value):
+    return f"'{value}" if value and str(value).startswith(_FORMULA_TRIGGER_CHARS) else value
+
 
 _TABLES_QUERY = """
 SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE
@@ -67,26 +82,27 @@ GROUP BY s.name, t.name
 
 
 def _load_settings() -> dict:
-    """JOBBOSS_DB_* env vars win if set; otherwise fall back to JobDocs' own
-    stored settings.json + keyring password, same as the running app uses.
+    """Starts from JobDocs' own stored settings.json (same as the running app
+    uses), if present, then layers any JOBBOSS_DB_* env var on top
+    independently -- so e.g. JOBBOSS_DB_PASS alone (to run this with a
+    different, broader login against the same server) doesn't require also
+    re-specifying HOST/NAME/USER via env vars just to be noticed. main()
+    validates the merged result is actually enough to connect with.
     """
-    env_host = os.environ.get('JOBBOSS_DB_HOST', '').strip()
-    if env_host:
-        return {
-            'jobboss_db_host': env_host,
-            'jobboss_db_port': os.environ.get('JOBBOSS_DB_PORT', '').strip(),
-            'jobboss_db_name': os.environ.get('JOBBOSS_DB_NAME', '').strip(),
-            'jobboss_db_user': os.environ.get('JOBBOSS_DB_USER', '').strip(),
-        }
     settings_file = get_config_dir() / 'settings.json'
-    if not settings_file.exists():
-        raise SystemExit(
-            f"No settings.json at {settings_file} and no JOBBOSS_DB_HOST env var set.\n"
-            f"Either run JobDocs and configure the JobBOSS DB connection in "
-            f"Settings > Advanced Settings first, or set JOBBOSS_DB_HOST/PORT/NAME/USER "
-            f"(+ JOBBOSS_DB_PASS, since the env-var path doesn't go through keyring)."
-        )
-    return json.loads(settings_file.read_text(encoding='utf-8'))
+    settings = json.loads(settings_file.read_text(encoding='utf-8')) if settings_file.exists() else {}
+
+    for key, env_var in (
+        ('jobboss_db_host', 'JOBBOSS_DB_HOST'),
+        ('jobboss_db_port', 'JOBBOSS_DB_PORT'),
+        ('jobboss_db_name', 'JOBBOSS_DB_NAME'),
+        ('jobboss_db_user', 'JOBBOSS_DB_USER'),
+    ):
+        value = os.environ.get(env_var, '').strip()
+        if value:
+            settings[key] = value
+
+    return settings
 
 
 def _get_password(settings: dict) -> str:
@@ -108,16 +124,29 @@ def _autofit(ws):
 
 def main():
     settings = _load_settings()
-    if not is_configured(settings) and not os.environ.get('JOBBOSS_DB_PASS'):
+    # Validated independently from the password -- JOBBOSS_DB_PASS is only
+    # ever a substitute for a missing *password*, never for missing
+    # connection details, so setting it alone must not bypass this check.
+    missing = [
+        key for key in ('jobboss_db_host', 'jobboss_db_name', 'jobboss_db_user')
+        if not (settings.get(key) or '').strip()
+    ]
+    if missing:
         raise SystemExit(
-            "JobBOSS DB connection isn't fully configured (missing host/name/user/password). "
-            "Configure it in JobDocs' Settings, or set JOBBOSS_DB_HOST/PORT/NAME/USER/PASS."
+            f"JobBOSS DB connection isn't fully configured -- missing {', '.join(missing)}. "
+            "Configure it in JobDocs' Settings, or set JOBBOSS_DB_HOST/PORT/NAME/USER."
+        )
+    password = _get_password(settings)
+    if not password:
+        raise SystemExit(
+            "No password available for this connection. Set JOBBOSS_DB_PASS, or configure "
+            "the password in JobDocs' Settings (stored via the OS credential store)."
         )
 
     out_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('jobboss_schema_dump.xlsx')
 
     dsn, connect_kwargs = _connect_kwargs(settings)
-    connect_kwargs['password'] = _get_password(settings)
+    connect_kwargs['password'] = password
     print(f"Connecting to {settings.get('jobboss_db_host')} / {settings.get('jobboss_db_name')} ...")
 
     with pytds.connect(dsn, **connect_kwargs) as conn:
@@ -144,13 +173,17 @@ def main():
     ws_tables.append(["Schema", "Table", "Type", "Approx Rows"])
     for row in tables:
         key = (row['TABLE_SCHEMA'], row['TABLE_NAME'])
-        ws_tables.append([row['TABLE_SCHEMA'], row['TABLE_NAME'], row['TABLE_TYPE'], row_counts.get(key)])
+        ws_tables.append([
+            _neutralize_formula_cell(row['TABLE_SCHEMA']), _neutralize_formula_cell(row['TABLE_NAME']),
+            _neutralize_formula_cell(row['TABLE_TYPE']), row_counts.get(key),
+        ])
 
     ws_cols = wb.create_sheet("Columns")
     ws_cols.append(["Schema", "Table", "Column", "Position", "Data Type", "Max Length", "Nullable"])
     for row in columns:
         ws_cols.append([
-            row['TABLE_SCHEMA'], row['TABLE_NAME'], row['COLUMN_NAME'], row['ORDINAL_POSITION'],
+            _neutralize_formula_cell(row['TABLE_SCHEMA']), _neutralize_formula_cell(row['TABLE_NAME']),
+            _neutralize_formula_cell(row['COLUMN_NAME']), row['ORDINAL_POSITION'],
             row['DATA_TYPE'], row['CHARACTER_MAXIMUM_LENGTH'], row['IS_NULLABLE'],
         ])
 
