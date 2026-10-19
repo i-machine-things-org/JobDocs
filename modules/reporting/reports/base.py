@@ -40,3 +40,8 @@ class ReportDefinition:
     # Shown in the exported title block's "Date Range:" line when uses_dates
     # is True but no date filter was actually applied. None means "N/A".
     date_label_when_unset: Optional[str] = None
+    # Plain-text lines appended after the data rows in CSV/xlsx exports (one
+    # row per line, first column only) -- e.g. Employee Efficiency's formula
+    # summary. None (the default) means no footer. Export-only, not shown in
+    # the on-screen report_table.
+    footer_lines: Optional[List[str]] = None
