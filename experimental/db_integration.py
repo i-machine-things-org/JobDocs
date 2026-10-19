@@ -152,8 +152,8 @@ def test_connection(settings: Dict[str, Any]) -> tuple[bool, str]:
         # stray space, "auto" typed literally, "1433,1434"). _ConnectWorker.run()
         # has no try of its own -- it trusts this function to always return a
         # (bool, str) tuple rather than raise, so an uncaught exception here
-        # would leave finished_ok never emitted and the tab stuck on
-        # "Connecting..." forever (connect_db_btn stays disabled) instead of
+        # would leave finished_ok never emitted and the tab's db_status_
+        # indicator stuck showing "Connecting..." forever instead of
         # showing a clear error.
         return False, "Invalid port -- enter a number or leave Port blank."
     try:
