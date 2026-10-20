@@ -75,7 +75,7 @@ Source tables, confirmed against a full live schema dump (no `Labor_Ticket` tabl
 **Both Setup and Run get `Adj Hrs` / `% Eff`, via one formula, reverse-engineered from real exported data** (not a guess, and not the ECI knowledge-base article's formula -- see why below):
 
 ```
-Adj Hrs = Est Hrs(operation) * Act Hrs(employee, operation) / SUM(Act Hrs, every employee on that operation)
+Adj Hrs = Est Hrs(operation) * Act Hrs(employee, operation) / SUM(Act Hrs, every ACTIVE employee on that operation, within the date range)
 % Eff   = Adj Hrs / Act Hrs(employee, operation) * 100
 ```
 

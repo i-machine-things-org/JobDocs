@@ -466,6 +466,15 @@ class ReportingModule(BaseModule):
         since that's a deliberate user action, not something that just ran
         silently in the background.
         """
+        # Guard against the auto-connect-on-open call racing a quick manual
+        # click of db_status_indicator (now the only way to retry): replacing
+        # self._connect_worker while the old one is still running drops its
+        # only reference (it has no Qt parent), and Qt aborts the process on
+        # "destroyed while thread is still running" once that worker's run()
+        # eventually finishes. Same pattern as _load_customer_list() below.
+        if self._connect_worker is not None and self._connect_worker.isRunning():
+            return
+
         settings = self._jobboss_settings()
         if not is_configured(settings):
             self._db_ready = False

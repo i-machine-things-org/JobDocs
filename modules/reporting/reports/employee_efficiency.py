@@ -22,7 +22,8 @@ superseded by this; see below for why):
 
     Adj Hrs(employee, operation, Setup-or-Run) =
         Est Hrs(operation) * Act Hrs(employee, operation)
-        / SUM(Act Hrs(every employee who logged time on operation))
+        / SUM(Act Hrs(every ACTIVE employee who logged time on operation,
+                       within the date range))
 
     % Eff = Adj Hrs / Act Hrs(employee, operation) * 100
 
@@ -478,7 +479,7 @@ def _fetch_summary(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Di
 # plain-language form as the module docstring's formula, condensed to what a
 # reader of the exported file actually needs, not the full investigation.
 _FORMULA_FOOTER = [
-    "Adj Hrs = Est Hrs (for the operation) x [this employee's Act Hrs / total Act Hrs logged by everyone on that operation]",
+    "Adj Hrs = Est Hrs (for the operation) x [this employee's Act Hrs / total Act Hrs logged by every active employee on that operation, within the picked date range]",
     "% Eff = Adj Hrs / this employee's Act Hrs x 100",
     "Setup and Run are tracked and scored as two separate metrics, never combined into one number. Run alone feeds JobBOSS's official Employee Efficiency score; Setup is scored the same way, just not rolled into it -- use it to catch under/over-bid setup estimates and individual setup performance.",
     "Blank Adj Hrs / % Eff means this operation could not be scored (no comparable hours recorded, or a known JobBOSS exclusion not modeled here).",
