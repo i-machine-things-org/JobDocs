@@ -39,7 +39,48 @@ _FORMULA_TRIGGER_CHARS = ('=', '+', '-', '@', '\t', '\r')
 
 
 def _neutralize_formula_cell(value: str) -> str:
-    return f"'{value}" if value and value.startswith(_FORMULA_TRIGGER_CHARS) else value
+    if not value or not value.startswith(_FORMULA_TRIGGER_CHARS):
+        return value
+    # A plain negative number ("-5.2") is not a formula-injection risk --
+    # only "-"-leading *text* is. Exempting it keeps numeric columns that
+    # can go negative (e.g. a revenue credit) from being corrupted into
+    # text cells; every other trigger char is still unconditionally
+    # neutralized, since none of them are legitimate in a formatted number.
+    if value.startswith('-'):
+        try:
+            float(value)
+            return value
+        except ValueError:
+            pass
+    return f"'{value}"
+
+
+def _numeric_or_text(value: str):
+    """A numeric-looking cell value as a real int/float, or the original
+    string if it isn't one.
+
+    _export_table_rows() pulls everything from report_table as .text() --
+    always a str, even "103.90" -- and openpyxl stores a plain str exactly
+    as given, as a text cell, regardless of its content (unlike Excel's own
+    CSV-open heuristic, which infers numbers from unquoted plain text).
+    Every numeric export column (hours, quantities, % Eff) was landing in
+    Excel as text: the "number stored as text" warning on every cell, and
+    SUM() across the column silently returning 0 since there are no real
+    number cells to add. int() tried first so whole numbers (e.g. Run Qty)
+    don't round-trip display as "5.0". XLSX-only -- CSV has no native type
+    system, so a plain "103.90" there is already correctly inferred as a
+    number when Excel opens the file.
+    """
+    if not value:
+        return value
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
 
 
 # Fill color for whatever cell a report's row_highlight() flags (see
@@ -936,7 +977,7 @@ class ReportingModule(BaseModule):
 
         ws.append(safe_headers)
         for row in data_rows:
-            ws.append(row)
+            ws.append([_numeric_or_text(v) for v in row])
 
         # Same row_highlight() flag as the on-screen report_table
         # (_on_report_rows) -- reapplied here from the exported string values

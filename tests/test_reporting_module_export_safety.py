@@ -15,7 +15,7 @@ reads self._last_filters/_last_report_type/_available_employees/
 _last_generated_at, all plain attributes, never touching a real widget.
 """
 
-from modules.reporting.module import ReportingModule, _neutralize_formula_cell
+from modules.reporting.module import ReportingModule, _neutralize_formula_cell, _numeric_or_text
 
 
 def test_prefixes_equals_sign():
@@ -41,6 +41,44 @@ def test_leaves_blank_untouched():
 def test_dash_in_the_middle_is_not_prefixed():
     # Only a LEADING trigger char matters -- "see dwg - rev 2" is ordinary text.
     assert _neutralize_formula_cell('see dwg - rev 2') == 'see dwg - rev 2'
+
+
+def test_leading_dash_is_not_prefixed_when_it_is_a_real_negative_number():
+    # A plain negative number is not a formula-injection risk -- only
+    # "-"-leading text is. Must stay a clean numeric string so _numeric_or_text
+    # (below) can still convert it to a real Excel number.
+    assert _neutralize_formula_cell('-5.2') == '-5.2'
+    assert _neutralize_formula_cell('-5') == '-5'
+
+
+def test_leading_dash_text_is_still_prefixed():
+    # "-something" is not a valid number -- still a real injection risk.
+    assert _neutralize_formula_cell('-cmd|/c calc') == "'-cmd|/c calc"
+
+
+def test_numeric_or_text_converts_whole_numbers_to_int():
+    assert _numeric_or_text('50') == 50
+    assert isinstance(_numeric_or_text('50'), int)
+
+
+def test_numeric_or_text_converts_decimals_to_float():
+    assert _numeric_or_text('103.90') == 103.90
+    assert isinstance(_numeric_or_text('103.90'), float)
+
+
+def test_numeric_or_text_converts_negative_numbers():
+    assert _numeric_or_text('-5.2') == -5.2
+
+
+def test_numeric_or_text_leaves_blank_as_blank_string():
+    assert _numeric_or_text('') == ''
+
+
+def test_numeric_or_text_leaves_non_numeric_text_untouched():
+    assert _numeric_or_text('BRADKEN') == 'BRADKEN'
+    assert _numeric_or_text('30309') == 30309  # a Job number is also a clean int -- fine to sort/filter numerically
+    assert _numeric_or_text('27172B') == '27172B'  # letter suffix -- stays text
+    assert _numeric_or_text("'=HYPERLINK(evil)") == "'=HYPERLINK(evil)"  # neutralized value stays text
 
 
 def test_title_block_neutralizes_customers_line():
