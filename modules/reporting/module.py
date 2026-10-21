@@ -1,28 +1,33 @@
 """
 Reporting Module - JobBOSS DB reporting (experimental)
 
-Pulls job data straight out of a JobBOSS SQL Server (see
-experimental/db_integration.py) instead of showing placeholder sample data.
-Connection details are configured in Settings > Advanced Settings.
+Pulls job data straight out of a JobBOSS SQL Server instead of showing
+placeholder sample data. Connection details are configured in Settings >
+Advanced Settings. Generic UI glue only -- every report type's query, row
+shape, and filter requirements live in modules/reporting/reports/ (one file
+per report type, see that package's __init__.py for the registry); this
+file has no per-report-type branches, so adding a report type never
+requires editing it.
 """
 
 import sys
 import csv
+import html
+import tempfile
 from datetime import datetime
 from pathlib import Path
-from PyQt6.QtCore import QThread, pyqtSignal, QObject, QEvent, Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import QDate, QThread, pyqtSignal, QObject, QEvent, Qt, QUrl
+from PyQt6.QtGui import QColor, QDesktopServices
 from PyQt6.QtWidgets import (
     QWidget, QTableWidgetItem, QFileDialog, QHeaderView, QAbstractItemView,
     QDateEdit, QCalendarWidget, QDialog, QDialogButtonBox, QListWidget,
-    QListWidgetItem, QPushButton, QVBoxLayout, QHBoxLayout
+    QListWidgetItem, QPushButton, QVBoxLayout, QHBoxLayout, QComboBox, QFormLayout
 )
 from PyQt6 import uic
 
 from core.base_module import BaseModule
-from experimental.db_integration import is_configured, test_connection, fetch_report, fetch_customers
-
-_REPORT_COLUMNS = ('date', 'customer', 'job', 'description', 'status')
+from experimental.db_integration import is_configured, test_connection, fetch_customers, fetch_employees
+from modules.reporting.reports import REPORTS, REPORT_TYPES
 
 # Exported cells (Description/Notes/Customer/PO etc.) are free text sourced
 # from JobBOSS -- neutralize values Excel/CSV readers treat as formula
@@ -37,10 +42,10 @@ def _neutralize_formula_cell(value: str) -> str:
     return f"'{value}" if value and value.startswith(_FORMULA_TRIGGER_CHARS) else value
 
 
-# Job Report: flags a job whose Scheduled End Date has slipped past its
-# Promise Date -- mirrors Report Fixer's Fix & Export red-highlight rule for
-# the same comparison (jobdocs-report-fixer/module.py), reapplied here since
-# Job Report is a from-scratch SQL pull, not that tool's output.
+# Fill color for whatever cell a report's row_highlight() flags (see
+# modules/reporting/reports/base.py) -- currently only Job Report's
+# Scheduled-End-past-Promise-Date flag, mirroring Report Fixer's Fix &
+# Export red-highlight rule for the same comparison.
 _LATE_FILL_COLOR = QColor(255, 204, 204)
 
 # Cap on auto-fit column width (px) -- without it, one row with an unusually
@@ -52,58 +57,41 @@ _LATE_FILL_COLOR = QColor(255, 204, 204)
 _MAX_AUTO_COLUMN_WIDTH = 300
 
 
-def _is_past_promise(sched_end: str, promise_date: str) -> bool:
-    """True if Scheduled End Date is later than Promise Date. Both are
-    'YYYY-MM-DD' strings (or '' if blank) from _rows_from_job_report, so a
-    plain string comparison already sorts correctly -- no need to re-parse
-    into date objects. Either side blank means nothing to compare -> False.
-    """
-    return bool(sched_end and promise_date and sched_end > promise_date)
-
-
-# "Job Report" has far more per-job detail than the other report types' shared
-# five-column layout, so it gets its own wider column set -- report_table's
-# column count is resized to match whichever of these is active (see
-# _update_table_headers()).
-_JOB_REPORT_COLUMNS = (
-    'classification', 'job', 'customer', 'po', 'line', 'drawing', 'part_number',
-    'revision', 'description', 'order_date', 'order_qty', 'sched_end',
-    'promise_date', 'status', 'curr_wc', 'notes',
-)
-_JOB_REPORT_HEADERS = [
-    'Classification', 'Job ID', 'Customer ID', 'Customer PO Number', 'Line',
-    'Drawing', 'Part Number', 'Revision', 'Description', 'Order Date',
-    'Order Qty', 'Scheduled End Date', 'Promise Date', 'Status',
-    'Current Work Center', 'Notes',
-]
-
-
 class _CustomerPickerDialog(QDialog):
-    """Pick zero, one, or several customers for a report filter.
+    """Pick zero, one, or several items for a report filter.
 
-    Zero checked means "All Customers", not "no customers" -- Clear really
-    clears back to All, it doesn't produce an empty/no-match report.
+    Generic (value, label) checklist -- reused for both the Customer picker
+    (value == label, a plain customer name straight off fetch_customers())
+    and the Employee picker (value = the 6-char Employee code the SQL filter
+    actually matches on, label = a human-readable "Name (Code)" display
+    string off fetch_employees()); `title`/`noun` just relabel the dialog
+    for whichever filter opened it.
+
+    Zero checked means "All", not "none" -- Clear really clears back to All,
+    it doesn't produce an empty/no-match report.
     """
 
-    def __init__(self, customers: list, selected: list, parent=None):
+    def __init__(self, items: list, selected: list, parent=None,
+                 title: str = "Select Customers", noun: str = "Customers"):
         super().__init__(parent)
-        self.setWindowTitle("Select Customers")
+        self.setWindowTitle(title)
         self.resize(320, 420)
         layout = QVBoxLayout(self)
 
         self.list_widget = QListWidget()
         selected_set = set(selected)
-        for name in customers:
-            item = QListWidgetItem(name)
+        for value, label in items:
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, value)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked if name in selected_set else Qt.CheckState.Unchecked)
+            item.setCheckState(Qt.CheckState.Checked if value in selected_set else Qt.CheckState.Unchecked)
             self.list_widget.addItem(item)
         layout.addWidget(self.list_widget)
 
         btn_row = QHBoxLayout()
         select_all_btn = QPushButton("Select All")
         select_all_btn.clicked.connect(lambda: self._set_all(Qt.CheckState.Checked))
-        clear_btn = QPushButton("Clear (All Customers)")
+        clear_btn = QPushButton(f"Clear (All {noun})")
         clear_btn.clicked.connect(lambda: self._set_all(Qt.CheckState.Unchecked))
         btn_row.addWidget(select_all_btn)
         btn_row.addWidget(clear_btn)
@@ -119,12 +107,51 @@ class _CustomerPickerDialog(QDialog):
         for i in range(self.list_widget.count()):
             self.list_widget.item(i).setCheckState(state)
 
-    def selected_customers(self) -> list:
+    def selected_values(self) -> list:
         return [
-            self.list_widget.item(i).text()
+            self.list_widget.item(i).data(Qt.ItemDataRole.UserRole)
             for i in range(self.list_widget.count())
             if self.list_widget.item(i).checkState() == Qt.CheckState.Checked
         ]
+
+
+class _ExportOptionsDialog(QDialog):
+    """Format + Destination picker shown before every export, mirroring
+    JobBOSS's own Crystal Reports export dialog (Format / Destination
+    dropdowns) rather than letting the OS Save dialog's filter list be the
+    only format choice. Defaults (Excel / Save to disk) reproduce this
+    module's pre-existing export_report() behavior exactly, so accepting
+    without changing anything is a no-op change for existing users.
+    """
+
+    _FORMATS = [("xlsx", "Excel (.xlsx)"), ("csv", "CSV (.csv)"), ("pdf", "PDF (.pdf)")]
+    _DESTINATIONS = [("disk", "Save to disk"), ("app", "Open with default program")]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Export Report")
+        layout = QFormLayout(self)
+
+        self.format_combo = QComboBox()
+        for value, label in self._FORMATS:
+            self.format_combo.addItem(label, value)
+        layout.addRow("Format:", self.format_combo)
+
+        self.destination_combo = QComboBox()
+        for value, label in self._DESTINATIONS:
+            self.destination_combo.addItem(label, value)
+        layout.addRow("Destination:", self.destination_combo)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def selected_format(self) -> str:
+        return self.format_combo.currentData()
+
+    def selected_destination(self) -> str:
+        return self.destination_combo.currentData()
 
 
 class _DateCalendarPopupFilter(QObject):
@@ -199,6 +226,25 @@ class _CustomerListWorker(QThread):
             self.success.emit(customers)
 
 
+class _EmployeeListWorker(QThread):
+    """Fetches the active employee list to populate the Employee filter picker."""
+
+    success = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def __init__(self, settings: dict):
+        super().__init__()
+        self._settings = settings
+
+    def run(self):
+        try:
+            employees = fetch_employees(self._settings)
+        except Exception as exc:
+            self.error.emit(f"Employee list query failed ({type(exc).__name__})")
+        else:
+            self.success.emit(employees)
+
+
 class _ReportWorker(QThread):
     """Runs one report query off the GUI thread."""
 
@@ -213,7 +259,9 @@ class _ReportWorker(QThread):
 
     def run(self):
         try:
-            rows = fetch_report(self._settings, self._report_type, self._filters)
+            if not is_configured(self._settings):
+                raise RuntimeError("JobBOSS DB is not configured")
+            rows = REPORTS[self._report_type].fetch(self._settings, self._filters)
         except Exception as exc:
             # Only the exception type, not str(exc) -- same rule as
             # experimental/db_integration.py's test_connection().
@@ -233,21 +281,22 @@ class ReportingModule(BaseModule):
         self.report_table = None
         self.report_status_label = None
         self.generate_report_btn = None
-        self.connect_db_btn = None
-        self.disconnect_db_btn = None
-        self.db_status_label = None
+        self.db_status_indicator = None
         self.customer_filter_btn = None
+        self.employee_filter_btn = None
         self.exclude_assemblies_check = None
         self.report_start_date = None
         self.report_end_date = None
-        self._default_table_headers = []
         self._available_customers = []
         self._selected_customers = []
+        self._available_employees = []
+        self._selected_employees = []
 
         self._db_ready = False
         self._connect_worker = None
         self._report_worker = None
         self._customer_worker = None
+        self._employee_worker = None
 
         # Metadata for whatever report is currently in report_table, captured
         # at generate time so Export reflects what was actually run even if
@@ -286,13 +335,18 @@ class ReportingModule(BaseModule):
         self.report_table = widget.report_table
         self.report_status_label = widget.report_status_label
         self.generate_report_btn = widget.generate_report_btn
-        self.connect_db_btn = widget.connect_db_btn
-        self.disconnect_db_btn = widget.disconnect_db_btn
-        self.db_status_label = widget.db_status_label
+        self.db_status_indicator = widget.db_status_indicator
         self.customer_filter_btn = widget.customer_filter_btn
+        self.employee_filter_btn = widget.employee_filter_btn
         self.exclude_assemblies_check = widget.exclude_assemblies_check
         self.report_start_date = widget.report_start_date
         self.report_end_date = widget.report_end_date
+        # End defaults to today, not "(No Filter)" -- "through today" is the
+        # overwhelmingly common upper bound, so this saves a click on every
+        # date-filtered report. Start has no equally obvious default, so it
+        # stays at reporting_tab.ui's "(No Filter)" sentinel (minimumDate)
+        # until the user actually picks one.
+        self.report_end_date.setDate(QDate.currentDate())
 
         self._start_date_popup_filter = _DateCalendarPopupFilter(self.report_start_date, widget)
         self.report_start_date.lineEdit().installEventFilter(self._start_date_popup_filter)
@@ -304,17 +358,27 @@ class ReportingModule(BaseModule):
         self.report_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 
         # Connect signals
-        self.connect_db_btn.clicked.connect(self.connect_to_db)
-        self.disconnect_db_btn.clicked.connect(self.disconnect_from_db)
+        self.db_status_indicator.clicked.connect(self.connect_to_db)
         self.generate_report_btn.clicked.connect(self.generate_report)
         self.customer_filter_btn.clicked.connect(self._open_customer_picker)
+        self.employee_filter_btn.clicked.connect(self._open_employee_picker)
         widget.export_report_btn.clicked.connect(self.export_report)
-        self._default_table_headers = [
-            self.report_table.horizontalHeaderItem(col).text()
-            for col in range(self.report_table.columnCount())
-        ]
+
+        # Populated from the reports registry, not reporting_tab.ui's XML --
+        # adding a report type means adding a file to modules/reporting/reports/,
+        # never touching this .ui file.
+        self.report_type_combo.clear()
+        self.report_type_combo.addItems(REPORT_TYPES)
+
         self.report_type_combo.currentTextChanged.connect(self._on_report_type_changed)
         self._on_report_type_changed(self.report_type_combo.currentText())
+
+        # Auto-connect as soon as the tab is opened -- no manual "Connect"
+        # step anymore. get_widget() caches this QWidget, so _create_widget()
+        # (and this call) only run once per app session; db_status_indicator
+        # is clickable to retry if this attempt fails or the server was
+        # briefly unreachable.
+        self.connect_to_db()
 
         return widget
 
@@ -330,47 +394,37 @@ class ReportingModule(BaseModule):
             self._update_table_headers(report_type)
 
     def _update_filter_enabled_state(self, report_type: str):
-        """Grey out the Customer/Date filters when the selected report type
-        doesn't use them, instead of silently ignoring whatever's typed in.
+        """Grey out the Customer/Employee/Date filters when the selected
+        report type doesn't use them, instead of silently ignoring whatever's
+        set.
         """
-        self.customer_filter_btn.setEnabled(report_type in ("Jobs by Customer", "Job Report"))
-        self.exclude_assemblies_check.setEnabled(report_type == "Job Report")
-        uses_dates = report_type in ("Jobs by Date Range", "Top Customers")
-        self.report_start_date.setEnabled(uses_dates)
-        self.report_end_date.setEnabled(uses_dates)
+        report_def = REPORTS[report_type]
+        self.customer_filter_btn.setEnabled(report_def.uses_customer_filter)
+        self.employee_filter_btn.setEnabled(report_def.uses_employee_filter)
+        self.exclude_assemblies_check.setEnabled(report_def.uses_exclude_assemblies)
+        self.report_start_date.setEnabled(report_def.uses_dates)
+        self.report_end_date.setEnabled(report_def.uses_dates)
 
     def _report_columns(self, report_type: str) -> tuple:
         """The row-dict keys to pull into report_table, in column order, for report_type."""
-        if report_type == "Job Report":
-            return _JOB_REPORT_COLUMNS
-        return _REPORT_COLUMNS
+        return REPORTS[report_type].columns
 
     def _update_table_headers(self, report_type: str):
-        """Relabel the fixed Date/Customer/Job #/Description/Status columns
-        for aggregate reports that repurpose them for different data, instead
-        of showing misleading headers for what's actually in each cell.
-
-        "Job Report" doesn't fit that shared five-column layout at all, so
-        the table is resized to its own wider column set instead -- every
-        other report type resizes it right back to the five-column default.
+        """Apply the headers/column count/resize mode the registered report
+        declares for itself -- every report type owns its own headers now, no
+        shared fallback.
         """
-        if report_type == "Job Report":
-            headers = _JOB_REPORT_HEADERS
-        elif report_type == "Top Customers":
-            headers = ['', 'Customer', 'Job Count', '', 'Gross Revenue']
-        elif report_type == "Job Statistics":
-            headers = ['', '', '', 'Metric', 'Value']
-        else:
-            headers = self._default_table_headers
+        report_def = REPORTS[report_type]
+        headers = report_def.headers
 
         self.report_table.setColumnCount(len(headers))
         for col, label in enumerate(headers):
             self.report_table.setHorizontalHeaderItem(col, QTableWidgetItem(label))
 
-        # Stretch-to-fit reads fine for 5 columns but crams Job Report's 15
+        # Stretch-to-fit reads fine for 5 columns but crams Job Report's 16
         # into illegibly narrow slivers -- Interactive lets the user resize
         # and scroll instead.
-        resize_mode = (QHeaderView.ResizeMode.Interactive if report_type == "Job Report"
+        resize_mode = (QHeaderView.ResizeMode.Interactive if report_def.resize_mode == "interactive"
                        else QHeaderView.ResizeMode.Stretch)
         self.report_table.horizontalHeader().setSectionResizeMode(resize_mode)
 
@@ -400,18 +454,36 @@ class ReportingModule(BaseModule):
     # ==================== Database Connection ====================
 
     def connect_to_db(self):
+        """Test the JobBOSS DB connection and refresh the status indicator.
+
+        Called once automatically when the tab first opens, and again on
+        every click of db_status_indicator itself (the only way to retry,
+        since get_widget() caches this QWidget -- _create_widget() and this
+        initial call only run once per app session). No popup here even
+        when unconfigured/unreachable -- that would fire on every tab open
+        for anyone who hasn't set up DB access yet. generate_report() does
+        its own is_configured() check and shows a real error dialog instead,
+        since that's a deliberate user action, not something that just ran
+        silently in the background.
+        """
+        # Guard against the auto-connect-on-open call racing a quick manual
+        # click of db_status_indicator (now the only way to retry): replacing
+        # self._connect_worker while the old one is still running drops its
+        # only reference (it has no Qt parent), and Qt aborts the process on
+        # "destroyed while thread is still running" once that worker's run()
+        # eventually finishes. Same pattern as _load_customer_list() below.
+        if self._connect_worker is not None and self._connect_worker.isRunning():
+            return
+
         settings = self._jobboss_settings()
         if not is_configured(settings):
-            self.show_error(
-                "Not Configured",
-                "Set the JobBOSS DB connection (Host, Database, Username, Password) "
-                "in Settings > Advanced Settings first."
+            self._db_ready = False
+            self._set_db_status_indicator(
+                "#999", "JobBOSS database not configured -- see Settings > Advanced Settings. Click to retry."
             )
             return
 
-        self.connect_db_btn.setEnabled(False)
-        self.db_status_label.setText("Status: Connecting...")
-        self.db_status_label.setStyleSheet("color: #999;")
+        self._set_db_status_indicator("#999", "Connecting to JobBOSS database...")
 
         self._connect_worker = _ConnectWorker(settings)
         self._connect_worker.finished_ok.connect(self._on_connect_result)
@@ -419,23 +491,19 @@ class ReportingModule(BaseModule):
 
     def _on_connect_result(self, ok: bool, message: str):
         self._db_ready = ok
-        self.connect_db_btn.setEnabled(not ok)
-        self.disconnect_db_btn.setEnabled(ok)
         if ok:
-            self.db_status_label.setText("Status: Connected")
-            self.db_status_label.setStyleSheet("color: green;")
+            self._set_db_status_indicator("#2e8b2e", "Connected to JobBOSS database. Click to re-check.")
             self.log_message("Connected to JobBOSS DB")
             self._load_customer_list()
+            self._load_employee_list()
         else:
-            self.db_status_label.setText(f"Status: {message}")
-            self.db_status_label.setStyleSheet("color: #999;")
+            self._set_db_status_indicator("#c0392b", f"{message} Click to retry.")
 
-    def disconnect_from_db(self):
-        self._db_ready = False
-        self.connect_db_btn.setEnabled(True)
-        self.disconnect_db_btn.setEnabled(False)
-        self.db_status_label.setText("Status: Not connected")
-        self.db_status_label.setStyleSheet("color: #999;")
+    def _set_db_status_indicator(self, color: str, tooltip: str):
+        self.db_status_indicator.setStyleSheet(
+            f"QPushButton {{ background-color: {color}; border-radius: 7px; border: none; }}"
+        )
+        self.db_status_indicator.setToolTip(tooltip)
 
     def _load_customer_list(self):
         """Populate the Customer filter combo from JobBOSS after a successful connect."""
@@ -463,9 +531,12 @@ class ReportingModule(BaseModule):
         self._update_customer_filter_button_text()
 
     def _open_customer_picker(self):
-        dialog = _CustomerPickerDialog(self._available_customers, self._selected_customers, self._widget)
+        items = [(name, name) for name in self._available_customers]
+        dialog = _CustomerPickerDialog(
+            items, self._selected_customers, self._widget,
+            title="Select Customers", noun="Customers")
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._selected_customers = dialog.selected_customers()
+            self._selected_customers = dialog.selected_values()
             self._update_customer_filter_button_text()
 
     def _update_customer_filter_button_text(self):
@@ -477,6 +548,46 @@ class ReportingModule(BaseModule):
         else:
             text = f"Customers: {n} selected"
         self.customer_filter_btn.setText(text)
+
+    def _load_employee_list(self):
+        """Populate the Employee filter picker from JobBOSS after a successful connect."""
+        if self._employee_worker is not None and self._employee_worker.isRunning():
+            return
+        self._employee_worker = _EmployeeListWorker(self._jobboss_settings())
+        self._employee_worker.success.connect(self._on_employees_loaded)
+        self._employee_worker.error.connect(
+            lambda msg: self.log_message(f"Reporting: {msg}")
+        )
+        self._employee_worker.start()
+
+    def _on_employees_loaded(self, employees: list):
+        self._available_employees = employees
+        codes = {e['code'] for e in employees}
+        self._selected_employees = [c for c in self._selected_employees if c in codes]
+        self._update_employee_filter_button_text()
+
+    def _open_employee_picker(self):
+        items = [(e['code'], f"{e['name']} ({e['code']})") for e in self._available_employees]
+        dialog = _CustomerPickerDialog(
+            items, self._selected_employees, self._widget,
+            title="Select Employees", noun="Employees")
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._selected_employees = dialog.selected_values()
+            self._update_employee_filter_button_text()
+
+    def _employee_name_by_code(self) -> dict:
+        return {e['code']: e['name'] for e in self._available_employees}
+
+    def _update_employee_filter_button_text(self):
+        n = len(self._selected_employees)
+        if n == 0:
+            text = "Employees: All"
+        elif n == 1:
+            name = self._employee_name_by_code().get(self._selected_employees[0], self._selected_employees[0])
+            text = f"Employee: {name}"
+        else:
+            text = f"Employees: {n} selected"
+        self.employee_filter_btn.setText(text)
 
     @staticmethod
     def _picked_date(date_edit: QDateEdit):
@@ -490,43 +601,62 @@ class ReportingModule(BaseModule):
     # ==================== Report Generation ====================
 
     def generate_report(self):
-        """Generate a report by querying the JobBOSS DB on a background thread."""
-        if not self._db_ready:
-            self.show_error("Not Connected", "Click \"Connect to Database\" first.")
+        """Generate a report by querying the JobBOSS DB on a background thread.
+
+        One generic filter-building block driven by the report's declared
+        flags (base.ReportDefinition) -- a new report type with any
+        combination of these flags needs no new code here.
+        """
+        # A cheap, synchronous local-settings check, not the _db_ready flag --
+        # that depends on the auto-connect test's async round-trip, which
+        # may still be running or may have failed transiently even though
+        # the DB is reachable now. Letting the real query attempt (below)
+        # be the actual source of truth for reachability means a slow/flaky
+        # first connect doesn't permanently block Generate Report; only a
+        # genuinely unconfigured DB does, which deserves this clear message
+        # instead of _on_report_error()'s generic "(ExceptionType)" text.
+        if not is_configured(self._jobboss_settings()):
+            self.show_error(
+                "Not Configured",
+                "Set the JobBOSS DB connection (Host, Database, Username, Password) "
+                "in Settings > Advanced Settings first."
+            )
             return
 
         report_type = self.report_type_combo.currentText()
+        report_def = REPORTS[report_type]
         filters = {}
 
-        if report_type in ("Jobs by Customer", "Job Report"):
-            if self._selected_customers:
-                filters['customers'] = list(self._selected_customers)
-            if report_type == "Job Report" and self.exclude_assemblies_check.isChecked():
-                filters['exclude_assemblies'] = True
-        elif report_type == "Jobs by Date Range":
+        if report_def.uses_customer_filter and self._selected_customers:
+            filters['customers'] = list(self._selected_customers)
+        if report_def.uses_employee_filter and self._selected_employees:
+            filters['employees'] = list(self._selected_employees)
+        if report_def.uses_exclude_assemblies and self.exclude_assemblies_check.isChecked():
+            filters['exclude_assemblies'] = True
+
+        if report_def.uses_dates:
             start = self._picked_date(self.report_start_date)
             end = self._picked_date(self.report_end_date)
-            if start is None or end is None:
-                self.show_error(
-                    "Invalid Date",
-                    "Pick both a Start Date and End Date (double-click a field, or use its "
-                    "dropdown arrow, to open the calendar)."
-                )
-                return
-            filters['start_date'] = start
-            filters['end_date'] = end
-        elif report_type == "Top Customers":
-            start = self._picked_date(self.report_start_date)
-            end = self._picked_date(self.report_end_date)
-            if (start is None) != (end is None):
-                self.show_error(
-                    "Invalid Date",
-                    "Pick both Start Date and End Date, or leave both as \"(No Filter)\" for all time."
-                )
-                return
-            if start is not None and end is not None:
+            if report_def.dates_required:
+                if start is None or end is None:
+                    self.show_error(
+                        "Invalid Date",
+                        "Pick both a Start Date and End Date (double-click a field, or use its "
+                        "dropdown arrow, to open the calendar)."
+                    )
+                    return
                 filters['start_date'] = start
                 filters['end_date'] = end
+            else:
+                if (start is None) != (end is None):
+                    self.show_error(
+                        "Invalid Date",
+                        "Pick both Start Date and End Date, or leave both as \"(No Filter)\" for all time."
+                    )
+                    return
+                if start is not None and end is not None:
+                    filters['start_date'] = start
+                    filters['end_date'] = end
 
         self.generate_report_btn.setEnabled(False)
         self.report_status_label.setText(f"Running '{report_type}'...")
@@ -547,12 +677,13 @@ class ReportingModule(BaseModule):
         # background, and these rows were produced from whatever was actually
         # sent to the worker at generate_report() time.
         report_type = self._last_report_type
-        columns = self._report_columns(report_type)
+        report_def = REPORTS[report_type]
+        columns = report_def.columns
         # Apply headers for the report type that was actually queried, not
         # whatever the combo currently shows -- otherwise a combo switch
         # while this query was running leaves stale, mismatched headers/
-        # column-count in place and setItem()/the late-highlight lookup below
-        # can silently truncate or index into a None cell.
+        # column-count in place and setItem()/the highlight lookup below can
+        # silently truncate or index into a None cell.
         self._update_table_headers(report_type)
 
         self.report_table.setRowCount(0)
@@ -561,9 +692,9 @@ class ReportingModule(BaseModule):
             self.report_table.insertRow(r)
             for col, key in enumerate(columns):
                 self.report_table.setItem(r, col, QTableWidgetItem(row.get(key, '')))
-            if report_type == "Job Report" and _is_past_promise(row.get('sched_end', ''), row.get('promise_date', '')):
-                sched_col = columns.index('sched_end')
-                self.report_table.item(r, sched_col).setBackground(_LATE_FILL_COLOR)
+            highlight_key = report_def.row_highlight(row) if report_def.row_highlight else None
+            if highlight_key:
+                self.report_table.item(r, columns.index(highlight_key)).setBackground(_LATE_FILL_COLOR)
 
         # Auto-fit columns to their actual content (header + widest cell) now
         # that the table is populated -- Interactive resize mode's default
@@ -590,19 +721,29 @@ class ReportingModule(BaseModule):
         end = self._last_filters.get('end_date')
         if start and end:
             return f"{start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')}"
-        if self._last_report_type == "Top Customers":
-            return "All Time"
+        report_def = REPORTS.get(self._last_report_type)
+        if report_def and report_def.date_label_when_unset:
+            return report_def.date_label_when_unset
         return "N/A"
 
     def _export_title_block(self) -> list:
         generated = self._last_generated_at
-        customers = self._last_filters.get('customers')
+        report_def = REPORTS.get(self._last_report_type)
         rows = [
             ["JobDocs - JobBOSS Reporting"],
             ["Report:", self._last_report_type or ""],
             ["Date Range:", self._date_range_label()],
-            ["Customers:", ", ".join(customers) if customers else "All"],
         ]
+        if report_def and report_def.uses_customer_filter:
+            customers = self._last_filters.get('customers')
+            value = ", ".join(customers) if customers else "All"
+            rows.append(["Customers:", _neutralize_formula_cell(value)])
+        if report_def and report_def.uses_employee_filter:
+            codes = self._last_filters.get('employees')
+            name_by_code = self._employee_name_by_code()
+            labels = [name_by_code.get(c, c) for c in codes] if codes else []
+            value = ", ".join(labels) if labels else "All"
+            rows.append(["Employees:", _neutralize_formula_cell(value)])
         rows.append(["Generated:", generated.strftime('%Y-%m-%d %H:%M:%S') if generated else ""])
         rows.append([])
         return rows
@@ -621,40 +762,68 @@ class ReportingModule(BaseModule):
             ])
         return headers, data_rows
 
+    _EXPORT_FILTERS = {
+        'xlsx': "Excel Files (*.xlsx)",
+        'csv': "CSV Files (*.csv)",
+        'pdf': "PDF Files (*.pdf)",
+    }
+    _EXPORT_METHODS_BY_FORMAT = {
+        'xlsx': '_export_xlsx',
+        'csv': '_export_csv',
+        'pdf': '_export_pdf',
+    }
+
     def export_report(self):
-        """Export report to CSV or Excel (.xlsx)"""
+        """Export report to Excel (.xlsx), CSV, or PDF -- to disk, or opened
+        directly in the OS's default program for that file type.
+        """
         if self.report_table.rowCount() == 0:
             self.show_error("No Data", "Generate a report first before exporting")
             return
 
-        file_path, selected_filter = QFileDialog.getSaveFileName(
-            self._widget,
-            "Export Report",
-            f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            "Excel Files (*.xlsx);;CSV Files (*.csv)"
-        )
-        if not file_path:
+        dialog = _ExportOptionsDialog(self._widget)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
+        fmt = dialog.selected_format()
+        destination = dialog.selected_destination()
+        default_name = f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt}"
 
-        is_excel = 'xlsx' in selected_filter.lower() or file_path.lower().endswith('.xlsx')
-        if is_excel and not file_path.lower().endswith('.xlsx'):
-            file_path += '.xlsx'
-        elif not is_excel and not file_path.lower().endswith('.csv'):
-            file_path += '.csv'
+        if destination == 'disk':
+            file_path, _selected_filter = QFileDialog.getSaveFileName(
+                self._widget, "Export Report", default_name, self._EXPORT_FILTERS[fmt]
+            )
+            if not file_path:
+                return
+            if not file_path.lower().endswith(f'.{fmt}'):
+                file_path += f'.{fmt}'
+        else:
+            # 'app' destination: no save-location prompt, write to a temp
+            # file and hand it straight to the OS's default handler --
+            # matches how JobBOSS's own "Application" export destination
+            # behaves (opens directly, doesn't ask where to save first).
+            file_path = str(Path(tempfile.gettempdir()) / default_name)
 
         try:
-            if is_excel:
-                self._export_xlsx(file_path)
-            else:
-                self._export_csv(file_path)
-            self.show_info("Export Successful", f"Report exported to:\n{file_path}")
-            self.log_message(f"Exported report to: {file_path}")
+            getattr(self, self._EXPORT_METHODS_BY_FORMAT[fmt])(file_path)
         except Exception as e:
             self.show_error("Export Failed", f"Failed to export report:\n{str(e)}")
+            return
+
+        if destination == 'app':
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(file_path)):
+                self.show_error(
+                    "Couldn't Open File",
+                    f"The report was exported, but no default program could be found to open it:\n{file_path}",
+                )
+            self.log_message(f"Exported report and opened: {file_path}")
+        else:
+            self.show_info("Export Successful", f"Report exported to:\n{file_path}")
+            self.log_message(f"Exported report to: {file_path}")
 
     def _export_csv(self, file_path: str):
         headers, data_rows = self._export_table_rows()
         safe_rows = [[_neutralize_formula_cell(v) for v in row] for row in data_rows]
+        report_def = REPORTS.get(self._last_report_type)
         # utf-8-sig, not the platform-default encoding (cp1252 on Windows) --
         # a customer name or note containing a character outside cp1252 would
         # otherwise raise UnicodeEncodeError and fail the export; the BOM also
@@ -664,6 +833,69 @@ class ReportingModule(BaseModule):
             writer.writerows(self._export_title_block())
             writer.writerow(headers)
             writer.writerows(safe_rows)
+            if report_def and report_def.footer_lines:
+                writer.writerow([])
+                writer.writerows([[line] for line in report_def.footer_lines])
+
+    def _export_pdf(self, file_path: str):
+        """Render the title block, table, and footer as HTML and print it
+        to a PDF via Qt's own QTextDocument/QPrinter -- no extra dependency
+        beyond the PyQt6 install this app already requires. No formula-
+        injection neutralizing needed here (unlike CSV/xlsx): a PDF has no
+        spreadsheet engine to execute a cell value as a formula, so only
+        HTML-escaping (for the markup itself, e.g. a note containing "<"/"&")
+        applies.
+        """
+        from PyQt6.QtGui import QPageLayout, QTextDocument
+        from PyQt6.QtPrintSupport import QPrinter
+
+        def esc(value) -> str:
+            return html.escape(str(value)) if value not in (None, "") else ""
+
+        title_block = self._export_title_block()
+        headers, data_rows = self._export_table_rows()
+        report_def = REPORTS.get(self._last_report_type)
+
+        highlighted_cells = set()
+        if report_def and report_def.row_highlight:
+            for row_idx, row in enumerate(data_rows):
+                row_dict = dict(zip(report_def.columns, row))
+                highlight_key = report_def.row_highlight(row_dict)
+                if highlight_key and highlight_key in report_def.columns:
+                    highlighted_cells.add((row_idx, report_def.columns.index(highlight_key)))
+
+        parts = ['<html><body style="font-family: sans-serif; font-size: 9pt;">']
+        for i, row in enumerate(title_block):
+            if not row:
+                continue
+            text = " ".join(esc(cell) for cell in row if cell not in (None, ""))
+            style = "font-weight:bold; font-size:13pt;" if i == 0 else "margin:1px 0;"
+            parts.append(f'<p style="{style}">{text}</p>')
+
+        parts.append('<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse; width:100%;">')
+        parts.append('<tr>' + ''.join(f'<th style="background:#dddddd;">{esc(h)}</th>' for h in headers) + '</tr>')
+        for row_idx, row in enumerate(data_rows):
+            cells = []
+            for col_idx, value in enumerate(row):
+                style = ' style="background:#ffcccc;"' if (row_idx, col_idx) in highlighted_cells else ''
+                cells.append(f'<td{style}>{esc(value)}</td>')
+            parts.append('<tr>' + ''.join(cells) + '</tr>')
+        parts.append('</table>')
+
+        if report_def and report_def.footer_lines:
+            parts.append('<p>&nbsp;</p>')
+            for line in report_def.footer_lines:
+                parts.append(f'<p style="font-size:7.5pt; color:#444444;">{esc(line)}</p>')
+        parts.append('</body></html>')
+
+        document = QTextDocument()
+        document.setHtml(''.join(parts))
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        printer.setOutputFileName(file_path)
+        printer.setPageOrientation(QPageLayout.Orientation.Landscape)
+        document.print(printer)
 
     def _export_xlsx(self, file_path: str):
         from openpyxl import Workbook
@@ -678,8 +910,8 @@ class ReportingModule(BaseModule):
         # cell value starting with "=", so an unprefixed JobBOSS note would
         # become a *real* live formula, not just something Excel's CSV import
         # heuristically treats as one. Safe to do once, upfront: date/numeric
-        # columns never start with a trigger char, so the late-highlight
-        # lookup below (which reads these same data_rows by index) is unaffected.
+        # columns never start with a trigger char, so the highlight lookup
+        # below (which reads these same data_rows by index) is unaffected.
         data_rows = [[_neutralize_formula_cell(v) for v in row] for row in data_rows]
 
         wb = Workbook()
@@ -706,17 +938,22 @@ class ReportingModule(BaseModule):
         for row in data_rows:
             ws.append(row)
 
-        # Same Scheduled-End-past-Promise flag as the on-screen report_table
+        # Same row_highlight() flag as the on-screen report_table
         # (_on_report_rows) -- reapplied here from the exported string values
         # rather than read back off the QTableWidgetItem brushes, so this
-        # stays correct even if someone exports without ever having the tab open.
-        if self._last_report_type == "Job Report" and 'Scheduled End Date' in headers and 'Promise Date' in headers:
-            sched_idx = headers.index('Scheduled End Date')
-            promise_idx = headers.index('Promise Date')
+        # stays correct even if someone exports without ever having the tab
+        # open. Matched by column KEY (zip report_def.columns with the
+        # exported row, same as _on_report_rows), not by header label -- one
+        # shared way to find "which column" instead of two.
+        report_def = REPORTS.get(self._last_report_type)
+        if report_def and report_def.row_highlight and data_rows:
             red_fill = PatternFill(start_color='FFCCCC', end_color='FFCCCC', fill_type='solid')
             for i, row in enumerate(data_rows):
-                if _is_past_promise(row[sched_idx], row[promise_idx]):
-                    ws.cell(row=header_row_idx + 1 + i, column=sched_idx + 1).fill = red_fill
+                row_dict = dict(zip(report_def.columns, row))
+                highlight_key = report_def.row_highlight(row_dict)
+                if highlight_key and highlight_key in report_def.columns:
+                    col_idx = report_def.columns.index(highlight_key)
+                    ws.cell(row=header_row_idx + 1 + i, column=col_idx + 1).fill = red_fill
 
         ws['A1'].font = Font(bold=True, size=12)
         for cell in ws[header_row_idx]:
@@ -740,10 +977,33 @@ class ReportingModule(BaseModule):
             )
             ws.add_table(table)
 
+        # Appended after the Table block (table_ref above was already fixed
+        # to header+data only) and after column-width sizing, so a long
+        # footer line doesn't blow out every column's width.
+        if report_def and report_def.footer_lines:
+            ws.append([])
+            for line in report_def.footer_lines:
+                ws.append([line])
+
         wb.save(file_path)
 
     def cleanup(self):
-        """Cleanup resources"""
-        for worker in (self._connect_worker, self._report_worker, self._customer_worker):
+        """Cleanup resources.
+
+        No persistent JobBOSS connection to close here -- experimental.
+        db_integration.connect()/test_connection() each open a pytds
+        connection in their own `with` block and close it before returning,
+        every single call, so there's never a live session held open
+        between calls for this to disconnect. What actually needs cleanup
+        is the background workers: wait for any still in flight (most
+        importantly _connect_worker, since a module teardown mid-connect
+        could otherwise leave a QThread running after its receiver is gone)
+        and reset local state so nothing stale (a green "connected"
+        indicator with no backing worker) survives this module being torn
+        down and rebuilt.
+        """
+        workers = (self._connect_worker, self._report_worker, self._customer_worker, self._employee_worker)
+        for worker in workers:
             if worker is not None and worker.isRunning():
                 worker.wait(2000)
+        self._db_ready = False

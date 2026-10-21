@@ -42,6 +42,8 @@ ENV/
 Thumbs.db
 
 # Project specific
+*.xlsx
+*.xlx
 *.db
 *.sqlite
 test_output/
