@@ -300,6 +300,26 @@ _OP_TOTALS_CTE = """op_totals AS (
     GROUP BY jot.Job_Operation
 )"""
 
+# Per-employee "% Indirect" (vacation, training, cleanup, etc., time logged
+# against a Work_Center.Type = 'Indirect' work center -- confirmed live:
+# this shop has exactly one, 'INDIRECT', and real time against it is logged
+# the same way as any other operation, via Act_Setup_Hrs/Act_Run_Hrs). The
+# ONLY CTE here that deliberately does NOT filter out Indirect -- it needs
+# both the indirect and non-indirect hours to compute a ratio between them.
+# Not Active-employee-filtered like _OP_TOTALS_CTE: this is a plain
+# per-employee total, not a shared denominator split between coworkers, so
+# there's nothing for an inactive coworker to dilute.
+_INDIRECT_TOTALS_CTE = """indirect_totals AS (
+    SELECT jot.Employee,
+           SUM(CASE WHEN wc.Type = 'Indirect' THEN jot.Act_Setup_Hrs + jot.Act_Run_Hrs ELSE 0 END) AS Indirect_Hrs,
+           SUM(jot.Act_Setup_Hrs + jot.Act_Run_Hrs) AS Total_Hrs
+    FROM Job_Operation_Time jot
+    JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
+    JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
+    WHERE jot.Work_Date BETWEEN %s AND %s AND jot.Rework_Time = 0
+    GROUP BY jot.Employee
+)"""
+
 # op_detail groups by jot.Job_Operation -- the real foreign key, matching
 # Summary's op_rollup -- not the descriptive (Job, Work_Center,
 # Operation_Service) triple used here before. See module docstring
@@ -309,6 +329,7 @@ _OP_TOTALS_CTE = """op_totals AS (
 # the GROUP BY -- safe, since Job_Operation determines them uniquely.
 _EMPLOYEE_EFFICIENCY_DETAIL_QUERY = """
 WITH {op_totals},
+{indirect_totals},
 op_detail AS (
     SELECT jot.Employee, jot.Job_Operation, jo.Job, jo.Work_Center, jo.Operation_Service,
            SUM(jot.Act_Setup_Hrs) AS Setup_Act_Hrs, MAX(jo.Est_Setup_Hrs) AS Setup_Est_Hrs,
@@ -327,10 +348,12 @@ SELECT op.Employee, e.First_Name, e.Last_Name, op.Job, op.Work_Center, op.Operat
             THEN op.Setup_Est_Hrs * op.Setup_Act_Hrs / ot.Total_Setup_Act_Hrs END AS Setup_Adj_Hrs,
        op.Run_Act_Hrs, op.Run_Est_Hrs, op.Run_Qty,
        CASE WHEN ot.Total_Run_Act_Hrs > 0
-            THEN op.Run_Est_Hrs * op.Run_Act_Hrs / ot.Total_Run_Act_Hrs END AS Run_Adj_Hrs
+            THEN op.Run_Est_Hrs * op.Run_Act_Hrs / ot.Total_Run_Act_Hrs END AS Run_Adj_Hrs,
+       CASE WHEN it.Total_Hrs > 0 THEN it.Indirect_Hrs / it.Total_Hrs * 100 END AS Indirect_Pct
 FROM op_detail op
 JOIN Employee e ON e.Employee = op.Employee
 JOIN op_totals ot ON ot.Job_Operation = op.Job_Operation
+LEFT JOIN indirect_totals it ON it.Employee = op.Employee
 WHERE e.Status = 'Active'
 ORDER BY e.Last_Name, e.First_Name, op.Job
 """
@@ -345,6 +368,7 @@ ORDER BY e.Last_Name, e.First_Name, op.Job
 # into one blended "Total" -- the real report never does that either.
 _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY = """
 WITH {op_totals},
+{indirect_totals},
 op_rollup AS (
     SELECT jot.Employee, jot.Job_Operation,
            SUM(jot.Act_Setup_Hrs) AS Setup_Act_Hrs, MAX(jo.Est_Setup_Hrs) AS Setup_Est_Hrs,
@@ -371,34 +395,36 @@ SELECT op.Employee, e.Department, e.First_Name, e.Last_Name,
        SUM(op.Setup_Adj_Hrs) AS Setup_Adj_Hrs,
        SUM(op.Run_Act_Hrs) AS Run_Act_Hrs,
        SUM(op.Run_Est_Hrs) AS Run_Est_Hrs,
-       SUM(op.Run_Adj_Hrs) AS Run_Adj_Hrs
+       SUM(op.Run_Adj_Hrs) AS Run_Adj_Hrs,
+       CASE WHEN it.Total_Hrs > 0 THEN it.Indirect_Hrs / it.Total_Hrs * 100 END AS Indirect_Pct
 FROM op_scored op
 JOIN Employee e ON e.Employee = op.Employee
+LEFT JOIN indirect_totals it ON it.Employee = op.Employee
 WHERE e.Status = 'Active' AND {employee_clause}
-GROUP BY op.Employee, e.Department, e.First_Name, e.Last_Name
+GROUP BY op.Employee, e.Department, e.First_Name, e.Last_Name, it.Indirect_Hrs, it.Total_Hrs
 ORDER BY e.Last_Name, e.First_Name
 """
 
 DETAIL_COLUMNS = (
     'employee', 'job', 'work_center', 'department', 'operation',
     'setup_act_hrs', 'setup_est_hrs', 'setup_adj_hrs', 'setup_pct_eff',
-    'run_act_hrs', 'run_est_hrs', 'run_qty', 'run_adj_hrs', 'run_pct_eff',
+    'run_act_hrs', 'run_est_hrs', 'run_qty', 'run_adj_hrs', 'run_pct_eff', 'pct_indirect',
 )
 DETAIL_HEADERS = [
     'Employee', 'Job', 'Work Center', 'Department', 'Operation',
     'Setup Act Hrs', 'Setup Est Hrs', 'Setup Adj Hrs', 'Setup % Eff',
-    'Run Act Hrs', 'Run Est Hrs', 'Run Qty', 'Run Adj Hrs', 'Run % Eff',
+    'Run Act Hrs', 'Run Est Hrs', 'Run Qty', 'Run Adj Hrs', 'Run % Eff', '% Indirect',
 ]
 # Setup and Run are always separate, parallel blocks, never summed into one
 # blended "Total" -- matches Detail, and matches the real report, which
 # never combines them either (Setup isn't part of any combined score).
 SUMMARY_COLUMNS = (
     'employee', 'department', 'setup_act_hrs', 'setup_est_hrs', 'setup_adj_hrs', 'setup_pct_eff',
-    'run_act_hrs', 'run_est_hrs', 'run_adj_hrs', 'run_pct_eff',
+    'run_act_hrs', 'run_est_hrs', 'run_adj_hrs', 'run_pct_eff', 'pct_indirect',
 )
 SUMMARY_HEADERS = [
     'Employee', 'Department', 'Setup Act Hrs', 'Setup Est Hrs', 'Setup Adj Hrs', 'Setup % Eff',
-    'Run Act Hrs', 'Run Est Hrs', 'Run Adj Hrs', 'Run % Eff',
+    'Run Act Hrs', 'Run Est Hrs', 'Run Adj Hrs', 'Run % Eff', '% Indirect',
 ]
 
 
@@ -410,6 +436,14 @@ def _pct_or_blank(numerator: float, denominator: float) -> str:
     if not denominator:
         return ''
     return f"{(numerator / denominator) * 100:.1f}"
+
+
+def _already_pct_or_blank(value) -> str:
+    """A percentage SQL already computed (Indirect_Pct) as a 1-decimal
+    string, or '' if it's None (SQL's CASE returns NULL when Total_Hrs was
+    0 -- no time logged at all in range, not 0% indirect).
+    """
+    return f"{value:.1f}" if value is not None else ''
 
 
 def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
@@ -441,6 +475,7 @@ def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
             'run_qty': str(qty),
             'run_adj_hrs': f"{run_adj:.2f}" if run_adj is not None else '',
             'run_pct_eff': _pct_or_blank(run_adj, run_act) if run_adj is not None else '',
+            'pct_indirect': _already_pct_or_blank(r.get('Indirect_Pct')),
         })
     return rows
 
@@ -468,6 +503,7 @@ def _rows_from_summary(raw_rows: List[dict]) -> List[Dict[str, str]]:
             'run_est_hrs': f"{run_est:.2f}",
             'run_adj_hrs': f"{run_adj:.2f}",
             'run_pct_eff': _pct_or_blank(run_adj, run_act),
+            'pct_indirect': _already_pct_or_blank(r.get('Indirect_Pct')),
         })
     return rows
 
@@ -476,12 +512,14 @@ def _fetch_detail(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Dic
     start = filters['start_date']
     end = filters['end_date']
     employee_clause, employee_params = employee_filter_clause(filters.get('employees'), column='jot.Employee')
-    query = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause=employee_clause)
+    query = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(
+        op_totals=_OP_TOTALS_CTE, indirect_totals=_INDIRECT_TOTALS_CTE, employee_clause=employee_clause)
     # op_totals' date-range placeholders come first in the formatted query
-    # text, then op_detail's own -- params must be supplied in that order.
+    # text, then indirect_totals', then op_detail's own -- params must be
+    # supplied in that order.
     with connect(settings) as conn:
         with conn.cursor() as cur:
-            cur.execute(query, (start, end, start, end) + employee_params)
+            cur.execute(query, (start, end, start, end, start, end) + employee_params)
             return _rows_from_detail(cur.fetchall())
 
 
@@ -489,10 +527,11 @@ def _fetch_summary(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Di
     start = filters['start_date']
     end = filters['end_date']
     employee_clause, employee_params = employee_filter_clause(filters.get('employees'), column='op.Employee')
-    query = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause=employee_clause)
+    query = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(
+        op_totals=_OP_TOTALS_CTE, indirect_totals=_INDIRECT_TOTALS_CTE, employee_clause=employee_clause)
     with connect(settings) as conn:
         with conn.cursor() as cur:
-            cur.execute(query, (start, end, start, end) + employee_params)
+            cur.execute(query, (start, end, start, end, start, end) + employee_params)
             return _rows_from_summary(cur.fetchall())
 
 
@@ -509,6 +548,10 @@ _FORMULA_FOOTER = [
     "setup estimates and individual setup performance.",
     "Blank Adj Hrs / % Eff means this operation could not be scored (no comparable "
     "hours recorded, or a known JobBOSS exclusion not modeled here).",
+    "% Indirect = this employee's total Indirect hours (vacation, training, cleanup, etc.) "
+    "/ their total hours of every kind, within the picked date range x 100. Same value on "
+    "every row for a given employee -- it's a per-employee total, not specific to one job "
+    "or operation.",
 ]
 
 EMPLOYEE_EFFICIENCY_DETAIL = ReportDefinition(

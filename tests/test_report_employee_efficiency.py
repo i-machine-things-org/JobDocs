@@ -22,16 +22,19 @@ Run Act Hrs is 0).
 from modules.reporting.reports import REPORT_TYPES
 from modules.reporting.reports.employee_efficiency import (
     EMPLOYEE_EFFICIENCY_DETAIL, EMPLOYEE_EFFICIENCY_SUMMARY,
-    _EMPLOYEE_EFFICIENCY_DETAIL_QUERY, _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY, _OP_TOTALS_CTE,
+    _EMPLOYEE_EFFICIENCY_DETAIL_QUERY, _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY, _INDIRECT_TOTALS_CTE, _OP_TOTALS_CTE,
     _rows_from_detail, _rows_from_summary,
 )
 
-# Both raw query strings hold {op_totals}/{employee_clause} placeholders
-# (see module docstring on why .format(), not string concatenation) --
-# format them once here with a harmless employee_clause so every other test
-# below can just substring-match the real, fully-assembled SQL.
-_DETAIL_SQL = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause="1=1")
-_SUMMARY_SQL = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause="1=1")
+# Both raw query strings hold {op_totals}/{indirect_totals}/{employee_clause}
+# placeholders (see module docstring on why .format(), not string
+# concatenation) -- format them once here with a harmless employee_clause so
+# every other test below can just substring-match the real, fully-assembled
+# SQL.
+_DETAIL_SQL = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(
+    op_totals=_OP_TOTALS_CTE, indirect_totals=_INDIRECT_TOTALS_CTE, employee_clause="1=1")
+_SUMMARY_SQL = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(
+    op_totals=_OP_TOTALS_CTE, indirect_totals=_INDIRECT_TOTALS_CTE, employee_clause="1=1")
 
 
 def test_both_types_are_registered():
@@ -125,6 +128,35 @@ def test_both_employee_efficiency_types_declare_department_tabs():
     assert EMPLOYEE_EFFICIENCY_SUMMARY.uses_department_tabs is True
 
 
+def test_indirect_totals_cte_does_not_exclude_indirect_work_centers():
+    # Regression guard: this is the one CTE that must NOT filter out
+    # Indirect work centers -- it needs both the indirect and non-indirect
+    # hours to compute a ratio between them. Every other CTE in this module
+    # (_OP_TOTALS_CTE, op_detail, op_rollup) does exclude Indirect via this
+    # exact "wc.Type <> 'Indirect'" exclusion pattern.
+    assert "wc.Type <> 'Indirect'" not in _INDIRECT_TOTALS_CTE
+    assert "wc.Type = 'Indirect'" in _INDIRECT_TOTALS_CTE
+
+
+def test_both_queries_compute_indirect_pct_via_left_join():
+    # LEFT JOIN, not JOIN -- an employee with zero indirect time still has a
+    # row in indirect_totals (grouped by jot.Employee across ALL their time,
+    # not just Indirect), but this guards against a future edit tightening
+    # it to an inner join and silently dropping employees from the report
+    # if indirect_totals ever came up empty for them.
+    for sql in (_DETAIL_SQL, _SUMMARY_SQL):
+        assert "LEFT JOIN indirect_totals it ON it.Employee = op.Employee" in sql
+        assert "CASE WHEN it.Total_Hrs > 0 THEN it.Indirect_Hrs / it.Total_Hrs * 100 END AS Indirect_Pct" in sql
+
+
+def test_summary_groups_by_indirect_totals_columns_not_aggregated():
+    # it.Indirect_Hrs/it.Total_Hrs are selected (via the CASE above) without
+    # an aggregate function in a GROUP BY query -- SQL Server requires them
+    # in the GROUP BY list, same reasoning as e.Department.
+    assert "GROUP BY op.Employee, e.Department, e.First_Name, e.Last_Name, it.Indirect_Hrs, it.Total_Hrs" \
+        in _SUMMARY_SQL
+
+
 def test_op_totals_excludes_inactive_employees():
     # Regression guard: confirmed live -- an inactive employee (***REDACTED***) had
     # real historical hours on an operation an active employee also worked;
@@ -154,6 +186,7 @@ def test_detail_formats_populated_row():
         'Job': '30309', 'Work_Center': 'CNC MILL', 'Department': 'MACHINING', 'Operation_Service': '20',
         'Setup_Act_Hrs': 1.25, 'Setup_Est_Hrs': 1.5, 'Setup_Adj_Hrs': 0.9375,
         'Run_Act_Hrs': 4.0, 'Run_Est_Hrs': 3.75, 'Run_Qty': 50, 'Run_Adj_Hrs': 1.5,
+        'Indirect_Pct': 12.5,
     }]
     rows = _rows_from_detail(raw)
     assert rows == [{
@@ -161,7 +194,7 @@ def test_detail_formats_populated_row():
         'operation': '20', 'setup_act_hrs': '1.25', 'setup_est_hrs': '1.50',
         'setup_adj_hrs': '0.94', 'setup_pct_eff': '75.0',
         'run_act_hrs': '4.00', 'run_est_hrs': '3.75', 'run_qty': '50',
-        'run_adj_hrs': '1.50', 'run_pct_eff': '37.5',
+        'run_adj_hrs': '1.50', 'run_pct_eff': '37.5', 'pct_indirect': '12.5',
     }]
 
 
@@ -236,13 +269,14 @@ def test_detail_blanks_adj_hrs_and_pct_eff_when_sql_returns_null():
 
 
 def test_summary_formats_populated_row():
-    # Department included: Summary's grain is now (Employee, Department) --
-    # see test_summary_grain_includes_department_not_just_employee -- so one
-    # row here means one employee's hours within one department.
+    # Department included: Employee.Department, the employee's own assigned
+    # department (see test_summary_department_does_not_change_the_one_row_
+    # per_employee_grain) -- still one row per employee.
     raw = [{
         'Employee': 'A1234', 'First_Name': 'John', 'Last_Name': 'Smith', 'Department': 'MACHINING',
         'Setup_Act_Hrs': 2.0, 'Setup_Est_Hrs': 2.5, 'Setup_Adj_Hrs': 2.0,
         'Run_Act_Hrs': 10.0, 'Run_Est_Hrs': 9.0, 'Run_Adj_Hrs': 8.0,
+        'Indirect_Pct': 5.5,
     }]
     rows = _rows_from_summary(raw)
     assert rows == [{
@@ -250,6 +284,7 @@ def test_summary_formats_populated_row():
         'setup_adj_hrs': '2.00', 'setup_pct_eff': '100.0',  # 2.0 / 2.0 * 100
         'run_act_hrs': '10.00', 'run_est_hrs': '9.00',
         'run_adj_hrs': '8.00', 'run_pct_eff': '80.0',  # 8.0 / 10.0 * 100
+        'pct_indirect': '5.5',
     }]
 
 
@@ -257,12 +292,12 @@ def test_summary_handles_zero_hours_without_crashing():
     raw = [{
         'Employee': 'B5678', 'First_Name': None, 'Last_Name': None, 'Department': None,
         'Setup_Act_Hrs': None, 'Setup_Est_Hrs': None, 'Setup_Adj_Hrs': None,
-        'Run_Act_Hrs': None, 'Run_Est_Hrs': None, 'Run_Adj_Hrs': None,
+        'Run_Act_Hrs': None, 'Run_Est_Hrs': None, 'Run_Adj_Hrs': None, 'Indirect_Pct': None,
     }]
     rows = _rows_from_summary(raw)
     assert rows == [{
         'employee': 'B5678', 'department': '', 'setup_act_hrs': '0.00', 'setup_est_hrs': '0.00',
         'setup_adj_hrs': '0.00', 'setup_pct_eff': '',
         'run_act_hrs': '0.00', 'run_est_hrs': '0.00',
-        'run_adj_hrs': '0.00', 'run_pct_eff': '',
+        'run_adj_hrs': '0.00', 'run_pct_eff': '', 'pct_indirect': '',
     }]
