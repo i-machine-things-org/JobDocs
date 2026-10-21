@@ -26,7 +26,9 @@ from PyQt6.QtWidgets import (
 from PyQt6 import uic
 
 from core.base_module import BaseModule
-from experimental.db_integration import is_configured, test_connection, fetch_customers, fetch_employees
+from experimental.db_integration import (
+    is_configured, test_connection, fetch_customers, fetch_employees, fetch_departments
+)
 from modules.reporting.reports import REPORTS, REPORT_TYPES
 
 # Exported cells (Description/Notes/Customer/PO etc.) are free text sourced
@@ -286,6 +288,25 @@ class _EmployeeListWorker(QThread):
             self.success.emit(employees)
 
 
+class _DepartmentListWorker(QThread):
+    """Fetches the distinct department list to populate the Department filter picker."""
+
+    success = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def __init__(self, settings: dict):
+        super().__init__()
+        self._settings = settings
+
+    def run(self):
+        try:
+            departments = fetch_departments(self._settings)
+        except Exception as exc:
+            self.error.emit(f"Department list query failed ({type(exc).__name__})")
+        else:
+            self.success.emit(departments)
+
+
 class _ReportWorker(QThread):
     """Runs one report query off the GUI thread."""
 
@@ -325,6 +346,7 @@ class ReportingModule(BaseModule):
         self.db_status_indicator = None
         self.customer_filter_btn = None
         self.employee_filter_btn = None
+        self.department_filter_btn = None
         self.exclude_assemblies_check = None
         self.report_start_date = None
         self.report_end_date = None
@@ -332,12 +354,15 @@ class ReportingModule(BaseModule):
         self._selected_customers = []
         self._available_employees = []
         self._selected_employees = []
+        self._available_departments = []
+        self._selected_departments = []
 
         self._db_ready = False
         self._connect_worker = None
         self._report_worker = None
         self._customer_worker = None
         self._employee_worker = None
+        self._department_worker = None
 
         # Metadata for whatever report is currently in report_table, captured
         # at generate time so Export reflects what was actually run even if
@@ -379,6 +404,7 @@ class ReportingModule(BaseModule):
         self.db_status_indicator = widget.db_status_indicator
         self.customer_filter_btn = widget.customer_filter_btn
         self.employee_filter_btn = widget.employee_filter_btn
+        self.department_filter_btn = widget.department_filter_btn
         self.exclude_assemblies_check = widget.exclude_assemblies_check
         self.report_start_date = widget.report_start_date
         self.report_end_date = widget.report_end_date
@@ -403,6 +429,7 @@ class ReportingModule(BaseModule):
         self.generate_report_btn.clicked.connect(self.generate_report)
         self.customer_filter_btn.clicked.connect(self._open_customer_picker)
         self.employee_filter_btn.clicked.connect(self._open_employee_picker)
+        self.department_filter_btn.clicked.connect(self._open_department_picker)
         widget.export_report_btn.clicked.connect(self.export_report)
 
         # Populated from the reports registry, not reporting_tab.ui's XML --
@@ -442,6 +469,7 @@ class ReportingModule(BaseModule):
         report_def = REPORTS[report_type]
         self.customer_filter_btn.setEnabled(report_def.uses_customer_filter)
         self.employee_filter_btn.setEnabled(report_def.uses_employee_filter)
+        self.department_filter_btn.setEnabled(report_def.uses_department_filter)
         self.exclude_assemblies_check.setEnabled(report_def.uses_exclude_assemblies)
         self.report_start_date.setEnabled(report_def.uses_dates)
         self.report_end_date.setEnabled(report_def.uses_dates)
@@ -537,6 +565,7 @@ class ReportingModule(BaseModule):
             self.log_message("Connected to JobBOSS DB")
             self._load_customer_list()
             self._load_employee_list()
+            self._load_department_list()
         else:
             self._set_db_status_indicator("#c0392b", f"{message} Click to retry.")
 
@@ -630,6 +659,42 @@ class ReportingModule(BaseModule):
             text = f"Employees: {n} selected"
         self.employee_filter_btn.setText(text)
 
+    def _load_department_list(self):
+        """Populate the Department filter picker from JobBOSS after a successful connect."""
+        if self._department_worker is not None and self._department_worker.isRunning():
+            return
+        self._department_worker = _DepartmentListWorker(self._jobboss_settings())
+        self._department_worker.success.connect(self._on_departments_loaded)
+        self._department_worker.error.connect(
+            lambda msg: self.log_message(f"Reporting: {msg}")
+        )
+        self._department_worker.start()
+
+    def _on_departments_loaded(self, departments: list):
+        self._available_departments = departments
+        department_set = set(departments)
+        self._selected_departments = [d for d in self._selected_departments if d in department_set]
+        self._update_department_filter_button_text()
+
+    def _open_department_picker(self):
+        items = [(name, name) for name in self._available_departments]
+        dialog = _CustomerPickerDialog(
+            items, self._selected_departments, self._widget,
+            title="Select Departments", noun="Departments")
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._selected_departments = dialog.selected_values()
+            self._update_department_filter_button_text()
+
+    def _update_department_filter_button_text(self):
+        n = len(self._selected_departments)
+        if n == 0:
+            text = "Departments: All"
+        elif n == 1:
+            text = f"Department: {self._selected_departments[0]}"
+        else:
+            text = f"Departments: {n} selected"
+        self.department_filter_btn.setText(text)
+
     @staticmethod
     def _picked_date(date_edit: QDateEdit):
         """The QDate as a Python date, or None if still at the "(No Filter)"
@@ -672,6 +737,8 @@ class ReportingModule(BaseModule):
             filters['customers'] = list(self._selected_customers)
         if report_def.uses_employee_filter and self._selected_employees:
             filters['employees'] = list(self._selected_employees)
+        if report_def.uses_department_filter and self._selected_departments:
+            filters['departments'] = list(self._selected_departments)
         if report_def.uses_exclude_assemblies and self.exclude_assemblies_check.isChecked():
             filters['exclude_assemblies'] = True
 
@@ -785,6 +852,10 @@ class ReportingModule(BaseModule):
             labels = [name_by_code.get(c, c) for c in codes] if codes else []
             value = ", ".join(labels) if labels else "All"
             rows.append(["Employees:", _neutralize_formula_cell(value)])
+        if report_def and report_def.uses_department_filter:
+            departments = self._last_filters.get('departments')
+            value = ", ".join(departments) if departments else "All"
+            rows.append(["Departments:", _neutralize_formula_cell(value)])
         rows.append(["Generated:", generated.strftime('%Y-%m-%d %H:%M:%S') if generated else ""])
         rows.append([])
         return rows
@@ -1043,7 +1114,10 @@ class ReportingModule(BaseModule):
         indicator with no backing worker) survives this module being torn
         down and rebuilt.
         """
-        workers = (self._connect_worker, self._report_worker, self._customer_worker, self._employee_worker)
+        workers = (
+            self._connect_worker, self._report_worker,
+            self._customer_worker, self._employee_worker, self._department_worker,
+        )
         for worker in workers:
             if worker is not None and worker.isRunning():
                 worker.wait(2000)

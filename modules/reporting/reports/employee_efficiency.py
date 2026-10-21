@@ -251,7 +251,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from experimental.db_integration import connect, employee_filter_clause
+from experimental.db_integration import connect, department_filter_clause, employee_filter_clause
 from modules.reporting.reports.base import ReportDefinition
 
 # op_totals: Act Hrs summed across every ACTIVE employee who logged time on
@@ -299,7 +299,7 @@ op_detail AS (
     JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
     JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
     WHERE jot.Work_Date BETWEEN %s AND %s AND jot.Rework_Time = 0
-          AND (wc.Type IS NULL OR wc.Type <> 'Indirect') AND {employee_clause}
+          AND (wc.Type IS NULL OR wc.Type <> 'Indirect') AND {employee_clause} AND {department_clause}
     GROUP BY jot.Employee, jot.Job_Operation, jo.Job, jo.Work_Center, jo.Operation_Service
 )
 SELECT op.Employee, e.First_Name, e.Last_Name, op.Job, op.Work_Center, op.Operation_Service,
@@ -324,6 +324,12 @@ ORDER BY e.Last_Name, e.First_Name, op.Job
 # simply contributes nothing, matching "not included" rather than "scored as
 # zero". Setup and Run are kept as separate columns here too, never summed
 # into one blended "Total" -- the real report never does that either.
+# department_clause is applied here, inside op_rollup, not in the outer
+# SELECT's WHERE like employee_clause is -- Department is a property of the
+# operation (via its work center), and by the outer SELECT, rows have
+# already been grouped down to one per Employee with no Job_Operation/
+# Work_Center left to filter on. Filtering here instead means "only roll up
+# operations in this department", which is what the picker should mean.
 _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY = """
 WITH {op_totals},
 op_rollup AS (
@@ -334,7 +340,7 @@ op_rollup AS (
     JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
     JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
     WHERE jot.Work_Date BETWEEN %s AND %s AND jot.Rework_Time = 0
-          AND (wc.Type IS NULL OR wc.Type <> 'Indirect')
+          AND (wc.Type IS NULL OR wc.Type <> 'Indirect') AND {department_clause}
     GROUP BY jot.Employee, jot.Job_Operation
 ),
 op_scored AS (
@@ -454,24 +460,31 @@ def _rows_from_summary(raw_rows: List[dict]) -> List[Dict[str, str]]:
 def _fetch_detail(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Dict[str, str]]:
     start = filters['start_date']
     end = filters['end_date']
-    clause, employee_params = employee_filter_clause(filters.get('employees'), column='jot.Employee')
-    query = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause=clause)
+    employee_clause, employee_params = employee_filter_clause(filters.get('employees'), column='jot.Employee')
+    department_clause, department_params = department_filter_clause(filters.get('departments'), column='wc.Department')
+    query = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(
+        op_totals=_OP_TOTALS_CTE, employee_clause=employee_clause, department_clause=department_clause)
     # op_totals' date-range placeholders come first in the formatted query
     # text, then op_detail's own -- params must be supplied in that order.
     with connect(settings) as conn:
         with conn.cursor() as cur:
-            cur.execute(query, (start, end, start, end) + employee_params)
+            cur.execute(query, (start, end, start, end) + employee_params + department_params)
             return _rows_from_detail(cur.fetchall())
 
 
 def _fetch_summary(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Dict[str, str]]:
     start = filters['start_date']
     end = filters['end_date']
-    clause, employee_params = employee_filter_clause(filters.get('employees'), column='op.Employee')
-    query = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause=clause)
+    employee_clause, employee_params = employee_filter_clause(filters.get('employees'), column='op.Employee')
+    department_clause, department_params = department_filter_clause(filters.get('departments'), column='wc.Department')
+    query = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(
+        op_totals=_OP_TOTALS_CTE, employee_clause=employee_clause, department_clause=department_clause)
     with connect(settings) as conn:
         with conn.cursor() as cur:
-            cur.execute(query, (start, end, start, end) + employee_params)
+            # department_params come before employee_params here -- op_rollup's
+            # department_clause is inside the WITH block (filled in first by
+            # position), the outer SELECT's employee_clause comes after it.
+            cur.execute(query, (start, end, start, end) + department_params + employee_params)
             return _rows_from_summary(cur.fetchall())
 
 
@@ -499,6 +512,7 @@ EMPLOYEE_EFFICIENCY_DETAIL = ReportDefinition(
     uses_dates=True,
     dates_required=True,
     uses_employee_filter=True,
+    uses_department_filter=True,
     footer_lines=_FORMULA_FOOTER,
 )
 EMPLOYEE_EFFICIENCY_SUMMARY = ReportDefinition(
@@ -510,5 +524,6 @@ EMPLOYEE_EFFICIENCY_SUMMARY = ReportDefinition(
     uses_dates=True,
     dates_required=True,
     uses_employee_filter=True,
+    uses_department_filter=True,
     footer_lines=_FORMULA_FOOTER,
 )

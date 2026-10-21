@@ -32,6 +32,7 @@ class ReportDefinition:
     dates_required: bool = False
     uses_customer_filter: bool = False
     uses_employee_filter: bool = False
+    uses_department_filter: bool = False
     uses_exclude_assemblies: bool = False
     # Given one formatted row dict, return the column KEY to highlight red
     # (e.g. 'sched_end'), or None. None (the default) means this report never

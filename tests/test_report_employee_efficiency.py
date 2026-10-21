@@ -21,16 +21,20 @@ Run Act Hrs is 0).
 
 from modules.reporting.reports import REPORT_TYPES
 from modules.reporting.reports.employee_efficiency import (
+    EMPLOYEE_EFFICIENCY_DETAIL, EMPLOYEE_EFFICIENCY_SUMMARY,
     _EMPLOYEE_EFFICIENCY_DETAIL_QUERY, _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY, _OP_TOTALS_CTE,
     _rows_from_detail, _rows_from_summary,
 )
 
-# Both raw query strings hold {op_totals}/{employee_clause} placeholders
-# (see module docstring on why .format(), not string concatenation) --
-# format them once here with a harmless employee_clause so every other test
-# below can just substring-match the real, fully-assembled SQL.
-_DETAIL_SQL = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause="1=1")
-_SUMMARY_SQL = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause="1=1")
+# Both raw query strings hold {op_totals}/{employee_clause}/{department_clause}
+# placeholders (see module docstring on why .format(), not string
+# concatenation) -- format them once here with harmless employee_clause/
+# department_clause values so every other test below can just substring-match
+# the real, fully-assembled SQL.
+_DETAIL_SQL = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(
+    op_totals=_OP_TOTALS_CTE, employee_clause="1=1", department_clause="1=1")
+_SUMMARY_SQL = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(
+    op_totals=_OP_TOTALS_CTE, employee_clause="1=1", department_clause="1=1")
 
 
 def test_both_types_are_registered():
@@ -91,6 +95,33 @@ def test_op_totals_denominator_is_not_employee_filtered():
     # The raw (unformatted) query templates carry {employee_clause} only in
     # op_detail/op_rollup, never in _OP_TOTALS_CTE itself.
     assert "{employee_clause}" not in _OP_TOTALS_CTE
+
+
+def test_op_totals_denominator_is_not_department_filtered():
+    # Regression guard: unlike the employee filter, department filtering
+    # doesn't risk circularity (an operation belongs to exactly one
+    # department, so filtering the denominator by department would never
+    # change which rows it includes for an operation that already passed
+    # the department filter elsewhere) -- but it's still not threaded
+    # through _OP_TOTALS_CTE, keeping the denominator's shape identical
+    # regardless of which filters are applied upstream.
+    assert "{department_clause}" not in _OP_TOTALS_CTE
+
+
+def test_both_queries_apply_department_filter_inside_the_per_operation_cte():
+    # Regression guard: Detail's op_detail CTE and Summary's op_rollup CTE
+    # must each filter on department -- not the outer SELECT, since by the
+    # outer SELECT (especially Summary's, grouped down to one row per
+    # Employee) there's no Job_Operation/Work_Center left to filter on.
+    assert "AND {employee_clause} AND {department_clause}\n    GROUP BY jot.Employee, jot.Job_Operation" \
+        in _EMPLOYEE_EFFICIENCY_DETAIL_QUERY
+    assert "AND {department_clause}\n    GROUP BY jot.Employee, jot.Job_Operation\n)" \
+        in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
+
+
+def test_both_employee_efficiency_types_declare_department_filter():
+    assert EMPLOYEE_EFFICIENCY_DETAIL.uses_department_filter is True
+    assert EMPLOYEE_EFFICIENCY_SUMMARY.uses_department_filter is True
 
 
 def test_op_totals_excludes_inactive_employees():

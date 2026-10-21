@@ -50,6 +50,18 @@ WHERE Status = 'Active'
 ORDER BY Last_Name, First_Name
 """
 
+# Indirect work centers excluded here too (not just in the report queries
+# themselves) -- a "Indirect" department in the picker would be a filter
+# option that can never match any row Employee Efficiency actually shows,
+# since that report already drops Indirect work centers unconditionally.
+_DISTINCT_DEPARTMENTS_QUERY = """
+SELECT DISTINCT Department
+FROM Work_Center
+WHERE Department IS NOT NULL AND Department <> ''
+      AND (Type IS NULL OR Type <> 'Indirect')
+ORDER BY Department
+"""
+
 
 def customer_filter_clause(customers: Optional[List[str]]) -> "tuple[str, tuple]":
     """Build a 'Customer IN (...)' clause plus its matching parameter tuple
@@ -76,6 +88,20 @@ def employee_filter_clause(employees: Optional[List[str]], column: str) -> "tupl
         return "1=1", ()
     placeholders = ", ".join(["%s"] * len(codes))
     return f"{column} IN ({placeholders})", tuple(codes)
+
+
+def department_filter_clause(departments: Optional[List[str]], column: str) -> "tuple[str, tuple]":
+    """Build a '<column> IN (...)' clause plus its matching parameter tuple
+    for however many departments are selected (0 = no filter -- every
+    department). Takes an explicit aliased column, same reason as
+    employee_filter_clause: Employee Efficiency's queries join Work_Center
+    under its own alias, not a bare unaliased table name.
+    """
+    names = [d for d in (departments or []) if d]
+    if not names:
+        return "1=1", ()
+    placeholders = ", ".join(["%s"] * len(names))
+    return f"{column} IN ({placeholders})", tuple(names)
 
 
 def _keyring_key(username: str) -> str:
@@ -174,6 +200,19 @@ def fetch_customers(settings: Dict[str, Any]) -> List[str]:
         with conn.cursor() as cur:
             cur.execute(_DISTINCT_CUSTOMERS_QUERY)
             return [r['Customer'] for r in cur.fetchall() if r.get('Customer')]
+
+
+def fetch_departments(settings: Dict[str, Any]) -> List[str]:
+    """Distinct departments from Work_Center (Indirect work centers excluded
+    -- see _DISTINCT_DEPARTMENTS_QUERY), for populating the Department filter
+    picker on the two Employee Efficiency report types.
+    """
+    if not is_configured(settings):
+        raise RuntimeError("JobBOSS DB is not configured")
+    with connect(settings) as conn:
+        with conn.cursor() as cur:
+            cur.execute(_DISTINCT_DEPARTMENTS_QUERY)
+            return [r['Department'] for r in cur.fetchall() if r.get('Department')]
 
 
 def fetch_employees(settings: Dict[str, Any]) -> List[Dict[str, str]]:
