@@ -26,15 +26,12 @@ from modules.reporting.reports.employee_efficiency import (
     _rows_from_detail, _rows_from_summary,
 )
 
-# Both raw query strings hold {op_totals}/{employee_clause}/{department_clause}
-# placeholders (see module docstring on why .format(), not string
-# concatenation) -- format them once here with harmless employee_clause/
-# department_clause values so every other test below can just substring-match
-# the real, fully-assembled SQL.
-_DETAIL_SQL = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(
-    op_totals=_OP_TOTALS_CTE, employee_clause="1=1", department_clause="1=1")
-_SUMMARY_SQL = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(
-    op_totals=_OP_TOTALS_CTE, employee_clause="1=1", department_clause="1=1")
+# Both raw query strings hold {op_totals}/{employee_clause} placeholders
+# (see module docstring on why .format(), not string concatenation) --
+# format them once here with a harmless employee_clause so every other test
+# below can just substring-match the real, fully-assembled SQL.
+_DETAIL_SQL = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause="1=1")
+_SUMMARY_SQL = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause="1=1")
 
 
 def test_both_types_are_registered():
@@ -97,31 +94,30 @@ def test_op_totals_denominator_is_not_employee_filtered():
     assert "{employee_clause}" not in _OP_TOTALS_CTE
 
 
-def test_op_totals_denominator_is_not_department_filtered():
-    # Regression guard: unlike the employee filter, department filtering
-    # doesn't risk circularity (an operation belongs to exactly one
-    # department, so filtering the denominator by department would never
-    # change which rows it includes for an operation that already passed
-    # the department filter elsewhere) -- but it's still not threaded
-    # through _OP_TOTALS_CTE, keeping the denominator's shape identical
-    # regardless of which filters are applied upstream.
-    assert "{department_clause}" not in _OP_TOTALS_CTE
+def test_both_queries_select_department_but_never_filter_on_it():
+    # Department is an export-split option (base.ReportDefinition.
+    # uses_department_tabs), not a query filter -- every department's rows
+    # are always fetched. Both queries must select wc.Department somewhere,
+    # and neither raw template may carry a department-filter placeholder.
+    assert "wc.Department" in _EMPLOYEE_EFFICIENCY_DETAIL_QUERY
+    assert "wc.Department" in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
+    assert "department_clause" not in _EMPLOYEE_EFFICIENCY_DETAIL_QUERY
+    assert "department_clause" not in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
 
 
-def test_both_queries_apply_department_filter_inside_the_per_operation_cte():
-    # Regression guard: Detail's op_detail CTE and Summary's op_rollup CTE
-    # must each filter on department -- not the outer SELECT, since by the
-    # outer SELECT (especially Summary's, grouped down to one row per
-    # Employee) there's no Job_Operation/Work_Center left to filter on.
-    assert "AND {employee_clause} AND {department_clause}\n    GROUP BY jot.Employee, jot.Job_Operation" \
-        in _EMPLOYEE_EFFICIENCY_DETAIL_QUERY
-    assert "AND {department_clause}\n    GROUP BY jot.Employee, jot.Job_Operation\n)" \
-        in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
+def test_summary_grain_includes_department_not_just_employee():
+    # Regression guard: unlike the old Summary (one row per employee,
+    # Setup/Run summed across every operation they touched regardless of
+    # department), the outer SELECT now groups by (Employee, Department) --
+    # required for the "By Department" export split to mean anything for
+    # Summary: each tab needs an employee's hours already confined to that
+    # department, not the same cross-department total repeated everywhere.
+    assert "GROUP BY op.Employee, op.Department, e.First_Name, e.Last_Name" in _SUMMARY_SQL
 
 
-def test_both_employee_efficiency_types_declare_department_filter():
-    assert EMPLOYEE_EFFICIENCY_DETAIL.uses_department_filter is True
-    assert EMPLOYEE_EFFICIENCY_SUMMARY.uses_department_filter is True
+def test_both_employee_efficiency_types_declare_department_tabs():
+    assert EMPLOYEE_EFFICIENCY_DETAIL.uses_department_tabs is True
+    assert EMPLOYEE_EFFICIENCY_SUMMARY.uses_department_tabs is True
 
 
 def test_op_totals_excludes_inactive_employees():
@@ -150,13 +146,13 @@ def test_detail_formats_populated_row():
     # total -> Adj = 1.5 * 1.25/2.0 = 0.9375, % Eff = 0.9375/1.25*100 = 75.0.
     raw = [{
         'Employee': 'A1234', 'First_Name': 'John', 'Last_Name': 'Smith',
-        'Job': '30309', 'Work_Center': 'CNC MILL', 'Operation_Service': '20',
+        'Job': '30309', 'Work_Center': 'CNC MILL', 'Department': 'MACHINING', 'Operation_Service': '20',
         'Setup_Act_Hrs': 1.25, 'Setup_Est_Hrs': 1.5, 'Setup_Adj_Hrs': 0.9375,
         'Run_Act_Hrs': 4.0, 'Run_Est_Hrs': 3.75, 'Run_Qty': 50, 'Run_Adj_Hrs': 1.5,
     }]
     rows = _rows_from_detail(raw)
     assert rows == [{
-        'employee': 'John Smith', 'job': '30309', 'work_center': 'CNC MILL',
+        'employee': 'John Smith', 'job': '30309', 'work_center': 'CNC MILL', 'department': 'MACHINING',
         'operation': '20', 'setup_act_hrs': '1.25', 'setup_est_hrs': '1.50',
         'setup_adj_hrs': '0.94', 'setup_pct_eff': '75.0',
         'run_act_hrs': '4.00', 'run_est_hrs': '3.75', 'run_qty': '50',
@@ -235,14 +231,17 @@ def test_detail_blanks_adj_hrs_and_pct_eff_when_sql_returns_null():
 
 
 def test_summary_formats_populated_row():
+    # Department included: Summary's grain is now (Employee, Department) --
+    # see test_summary_grain_includes_department_not_just_employee -- so one
+    # row here means one employee's hours within one department.
     raw = [{
-        'Employee': 'A1234', 'First_Name': 'John', 'Last_Name': 'Smith',
+        'Employee': 'A1234', 'First_Name': 'John', 'Last_Name': 'Smith', 'Department': 'MACHINING',
         'Setup_Act_Hrs': 2.0, 'Setup_Est_Hrs': 2.5, 'Setup_Adj_Hrs': 2.0,
         'Run_Act_Hrs': 10.0, 'Run_Est_Hrs': 9.0, 'Run_Adj_Hrs': 8.0,
     }]
     rows = _rows_from_summary(raw)
     assert rows == [{
-        'employee': 'John Smith', 'setup_act_hrs': '2.00', 'setup_est_hrs': '2.50',
+        'employee': 'John Smith', 'department': 'MACHINING', 'setup_act_hrs': '2.00', 'setup_est_hrs': '2.50',
         'setup_adj_hrs': '2.00', 'setup_pct_eff': '100.0',  # 2.0 / 2.0 * 100
         'run_act_hrs': '10.00', 'run_est_hrs': '9.00',
         'run_adj_hrs': '8.00', 'run_pct_eff': '80.0',  # 8.0 / 10.0 * 100
@@ -251,13 +250,13 @@ def test_summary_formats_populated_row():
 
 def test_summary_handles_zero_hours_without_crashing():
     raw = [{
-        'Employee': 'B5678', 'First_Name': None, 'Last_Name': None,
+        'Employee': 'B5678', 'First_Name': None, 'Last_Name': None, 'Department': None,
         'Setup_Act_Hrs': None, 'Setup_Est_Hrs': None, 'Setup_Adj_Hrs': None,
         'Run_Act_Hrs': None, 'Run_Est_Hrs': None, 'Run_Adj_Hrs': None,
     }]
     rows = _rows_from_summary(raw)
     assert rows == [{
-        'employee': 'B5678', 'setup_act_hrs': '0.00', 'setup_est_hrs': '0.00',
+        'employee': 'B5678', 'department': '', 'setup_act_hrs': '0.00', 'setup_est_hrs': '0.00',
         'setup_adj_hrs': '0.00', 'setup_pct_eff': '',
         'run_act_hrs': '0.00', 'run_est_hrs': '0.00',
         'run_adj_hrs': '0.00', 'run_pct_eff': '',

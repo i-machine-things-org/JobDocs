@@ -32,8 +32,14 @@ class ReportDefinition:
     dates_required: bool = False
     uses_customer_filter: bool = False
     uses_employee_filter: bool = False
-    uses_department_filter: bool = False
     uses_exclude_assemblies: bool = False
+    # Row dicts carry a 'department' key, and the UI offers a "By Department"
+    # export checkbox: when checked, _export_xlsx() splits the data rows
+    # into one worksheet tab per department instead of one combined sheet.
+    # Export-only (like footer_lines) -- CSV/PDF have no native multi-tab
+    # concept, so they always stay a single flat output regardless of this
+    # checkbox; only xlsx actually splits.
+    uses_department_tabs: bool = False
     # Given one formatted row dict, return the column KEY to highlight red
     # (e.g. 'sched_end'), or None. None (the default) means this report never
     # highlights anything.

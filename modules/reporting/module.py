@@ -16,6 +16,7 @@ import html
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 from PyQt6.QtCore import QDate, QThread, pyqtSignal, QObject, QEvent, Qt, QUrl
 from PyQt6.QtGui import QColor, QDesktopServices
 from PyQt6.QtWidgets import (
@@ -26,9 +27,7 @@ from PyQt6.QtWidgets import (
 from PyQt6 import uic
 
 from core.base_module import BaseModule
-from experimental.db_integration import (
-    is_configured, test_connection, fetch_customers, fetch_employees, fetch_departments
-)
+from experimental.db_integration import is_configured, test_connection, fetch_customers, fetch_employees
 from modules.reporting.reports import REPORTS, REPORT_TYPES
 
 # Exported cells (Description/Notes/Customer/PO etc.) are free text sourced
@@ -83,6 +82,171 @@ def _numeric_or_text(value: str):
         return float(value)
     except ValueError:
         return value
+
+
+def _group_rows_by_department(data_rows: list, department_col: int) -> list:
+    """Group already-exported row lists by their Department column value,
+    preserving first-seen order -- matches the SQL's own ORDER BY, so rows
+    for one department stay in that relative order within their group.
+
+    Backs the "By Department" export checkbox (base.ReportDefinition.
+    uses_department_tabs): _export_xlsx() writes one worksheet tab per
+    group this returns, instead of one combined sheet. A blank Department
+    value (a work center with that column unset in JobBOSS) gets its own
+    group rather than being silently dropped or merged into another one.
+    """
+    groups: dict = {}
+    order = []
+    for row in data_rows:
+        department = row[department_col] or '(No Department)'
+        if department not in groups:
+            groups[department] = []
+            order.append(department)
+        groups[department].append(row)
+    return [(department, groups[department]) for department in order]
+
+
+_INVALID_SHEET_NAME_CHARS = frozenset(':\\/?*[]')
+
+
+def _safe_sheet_name(name: str, used_names: set) -> str:
+    """An Excel-legal worksheet name derived from a Department value.
+
+    Excel worksheet names: <=31 chars, none of : \\ / ? * [ ], and unique
+    within the workbook -- openpyxl raises if two sheets share a title,
+    which truncation/sanitizing could cause even for two distinct
+    department values. Mutates `used_names`, adding whatever name this
+    call actually picks.
+    """
+    cleaned = ''.join('_' if c in _INVALID_SHEET_NAME_CHARS else c for c in (name or '')).strip()
+    base = (cleaned or 'Sheet')[:31]
+    candidate = base
+    n = 2
+    while candidate in used_names:
+        suffix = f"_{n}"
+        candidate = base[:31 - len(suffix)] + suffix
+        n += 1
+    used_names.add(candidate)
+    return candidate
+
+
+def _department_average_row(data_rows: list) -> list:
+    """One extra row for a department's sheet: 'Department Average' in the
+    first column, then the arithmetic mean of each other column that's
+    numeric across every row in this group -- blank for a column that
+    isn't (e.g. Employee/Job/Operation, where there's no sensible average).
+    """
+    if not data_rows:
+        return []
+    width = len(data_rows[0])
+    row = [''] * width
+    row[0] = 'Department Average'
+    for col in range(1, width):
+        values = []
+        for r in data_rows:
+            try:
+                values.append(float(r[col]))
+            except (TypeError, ValueError):
+                values = None
+                break
+        if values:
+            row[col] = round(sum(values) / len(values), 2)
+    return row
+
+
+def _write_xlsx_report_sheet(ws, title_block: list, headers: list, data_rows: list, report_def,
+                             average_row: Optional[list] = None, table_name: str = "ReportTable"):
+    """Write one worksheet's worth of a report export: title block, header
+    row, data rows, row_highlight() fill, bold styling, an Excel Table/
+    AutoFilter, an optional trailing average row, and the report's footer
+    lines -- everything _export_xlsx() used to do inline for its one-and-
+    only sheet. Factored out so the "By Department" checkbox can call this
+    once per department tab instead of once for the whole file; a plain,
+    non-split export is just this called once.
+
+    average_row (e.g. from _department_average_row()) is appended after the
+    Table block, same placement reasoning as footer_lines below -- never
+    part of the Table's own range, so Excel's AutoFilter/sort can't reorder
+    it away from the bottom.
+    """
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.table import Table, TableStyleInfo
+
+    for row in title_block:
+        ws.append(row)
+    header_row_idx = len(title_block) + 1
+
+    # openpyxl's Table requires non-empty, unique headers -- some report
+    # types repurpose blank columns for aggregate data (e.g. Top
+    # Customers), so blanks get a placeholder name here; the on-screen
+    # report_table is unaffected, this only changes what lands in the file.
+    safe_headers = []
+    seen = set()
+    for i, h in enumerate(headers, start=1):
+        name = h.strip() if h and h.strip() else f"Column{i}"
+        if name in seen:
+            name = f"{name}_{i}"
+        seen.add(name)
+        safe_headers.append(name)
+
+    ws.append(safe_headers)
+    for row in data_rows:
+        ws.append([_numeric_or_text(v) for v in row])
+
+    # Same row_highlight() flag as the on-screen report_table
+    # (_on_report_rows) -- reapplied here from the exported string values
+    # rather than read back off the QTableWidgetItem brushes, so this
+    # stays correct even if someone exports without ever having the tab
+    # open. Matched by column KEY (zip report_def.columns with the
+    # exported row, same as _on_report_rows), not by header label -- one
+    # shared way to find "which column" instead of two.
+    if report_def and report_def.row_highlight and data_rows:
+        red_fill = PatternFill(start_color='FFCCCC', end_color='FFCCCC', fill_type='solid')
+        for i, row in enumerate(data_rows):
+            row_dict = dict(zip(report_def.columns, row))
+            highlight_key = report_def.row_highlight(row_dict)
+            if highlight_key and highlight_key in report_def.columns:
+                col_idx = report_def.columns.index(highlight_key)
+                ws.cell(row=header_row_idx + 1 + i, column=col_idx + 1).fill = red_fill
+
+    ws['A1'].font = Font(bold=True, size=12)
+    for cell in ws[header_row_idx]:
+        cell.font = Font(bold=True)
+    for col_cells in ws.columns:
+        width = max((len(str(c.value)) for c in col_cells if c.value is not None), default=0)
+        ws.column_dimensions[col_cells[0].column_letter].width = max(10, min(40, width + 2))
+
+    # Wrap header + data in a real Excel Table with its AutoFilter, so the
+    # exported file opens already sortable/filterable per column in Excel
+    # -- not just a plain value dump. Skipped for a header-only (no data
+    # rows) export: nothing to sort/filter, and Excel's Table requires at
+    # least one row below the header.
+    if len(data_rows) > 0:
+        last_col_letter = get_column_letter(len(safe_headers))
+        table_ref = f"A{header_row_idx}:{last_col_letter}{ws.max_row}"
+        table = Table(displayName=table_name, ref=table_ref)
+        table.tableStyleInfo = TableStyleInfo(
+            name="TableStyleMedium2", showFirstColumn=False, showLastColumn=False,
+            showRowStripes=True, showColumnStripes=False,
+        )
+        ws.add_table(table)
+
+    # Both appended after the Table block (table_ref above was already
+    # fixed to header+data only) and after column-width sizing, so neither
+    # a long average value nor a long footer line blows out every column's
+    # width.
+    if average_row is not None:
+        ws.append([])
+        avg_row_idx = ws.max_row + 1
+        ws.append(average_row)
+        for cell in ws[avg_row_idx]:
+            cell.font = Font(bold=True)
+
+    if report_def and report_def.footer_lines:
+        ws.append([])
+        for line in report_def.footer_lines:
+            ws.append([line])
 
 
 # Fill color for whatever cell a report's row_highlight() flags (see
@@ -288,25 +452,6 @@ class _EmployeeListWorker(QThread):
             self.success.emit(employees)
 
 
-class _DepartmentListWorker(QThread):
-    """Fetches the distinct department list to populate the Department filter picker."""
-
-    success = pyqtSignal(list)
-    error = pyqtSignal(str)
-
-    def __init__(self, settings: dict):
-        super().__init__()
-        self._settings = settings
-
-    def run(self):
-        try:
-            departments = fetch_departments(self._settings)
-        except Exception as exc:
-            self.error.emit(f"Department list query failed ({type(exc).__name__})")
-        else:
-            self.success.emit(departments)
-
-
 class _ReportWorker(QThread):
     """Runs one report query off the GUI thread."""
 
@@ -346,7 +491,7 @@ class ReportingModule(BaseModule):
         self.db_status_indicator = None
         self.customer_filter_btn = None
         self.employee_filter_btn = None
-        self.department_filter_btn = None
+        self.department_split_check = None
         self.exclude_assemblies_check = None
         self.report_start_date = None
         self.report_end_date = None
@@ -354,15 +499,13 @@ class ReportingModule(BaseModule):
         self._selected_customers = []
         self._available_employees = []
         self._selected_employees = []
-        self._available_departments = []
-        self._selected_departments = []
+        self._last_department_split = False
 
         self._db_ready = False
         self._connect_worker = None
         self._report_worker = None
         self._customer_worker = None
         self._employee_worker = None
-        self._department_worker = None
 
         # Metadata for whatever report is currently in report_table, captured
         # at generate time so Export reflects what was actually run even if
@@ -404,7 +547,7 @@ class ReportingModule(BaseModule):
         self.db_status_indicator = widget.db_status_indicator
         self.customer_filter_btn = widget.customer_filter_btn
         self.employee_filter_btn = widget.employee_filter_btn
-        self.department_filter_btn = widget.department_filter_btn
+        self.department_split_check = widget.department_split_check
         self.exclude_assemblies_check = widget.exclude_assemblies_check
         self.report_start_date = widget.report_start_date
         self.report_end_date = widget.report_end_date
@@ -429,7 +572,6 @@ class ReportingModule(BaseModule):
         self.generate_report_btn.clicked.connect(self.generate_report)
         self.customer_filter_btn.clicked.connect(self._open_customer_picker)
         self.employee_filter_btn.clicked.connect(self._open_employee_picker)
-        self.department_filter_btn.clicked.connect(self._open_department_picker)
         widget.export_report_btn.clicked.connect(self.export_report)
 
         # Populated from the reports registry, not reporting_tab.ui's XML --
@@ -469,7 +611,7 @@ class ReportingModule(BaseModule):
         report_def = REPORTS[report_type]
         self.customer_filter_btn.setEnabled(report_def.uses_customer_filter)
         self.employee_filter_btn.setEnabled(report_def.uses_employee_filter)
-        self.department_filter_btn.setEnabled(report_def.uses_department_filter)
+        self.department_split_check.setEnabled(report_def.uses_department_tabs)
         self.exclude_assemblies_check.setEnabled(report_def.uses_exclude_assemblies)
         self.report_start_date.setEnabled(report_def.uses_dates)
         self.report_end_date.setEnabled(report_def.uses_dates)
@@ -565,7 +707,6 @@ class ReportingModule(BaseModule):
             self.log_message("Connected to JobBOSS DB")
             self._load_customer_list()
             self._load_employee_list()
-            self._load_department_list()
         else:
             self._set_db_status_indicator("#c0392b", f"{message} Click to retry.")
 
@@ -659,42 +800,6 @@ class ReportingModule(BaseModule):
             text = f"Employees: {n} selected"
         self.employee_filter_btn.setText(text)
 
-    def _load_department_list(self):
-        """Populate the Department filter picker from JobBOSS after a successful connect."""
-        if self._department_worker is not None and self._department_worker.isRunning():
-            return
-        self._department_worker = _DepartmentListWorker(self._jobboss_settings())
-        self._department_worker.success.connect(self._on_departments_loaded)
-        self._department_worker.error.connect(
-            lambda msg: self.log_message(f"Reporting: {msg}")
-        )
-        self._department_worker.start()
-
-    def _on_departments_loaded(self, departments: list):
-        self._available_departments = departments
-        department_set = set(departments)
-        self._selected_departments = [d for d in self._selected_departments if d in department_set]
-        self._update_department_filter_button_text()
-
-    def _open_department_picker(self):
-        items = [(name, name) for name in self._available_departments]
-        dialog = _CustomerPickerDialog(
-            items, self._selected_departments, self._widget,
-            title="Select Departments", noun="Departments")
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._selected_departments = dialog.selected_values()
-            self._update_department_filter_button_text()
-
-    def _update_department_filter_button_text(self):
-        n = len(self._selected_departments)
-        if n == 0:
-            text = "Departments: All"
-        elif n == 1:
-            text = f"Department: {self._selected_departments[0]}"
-        else:
-            text = f"Departments: {n} selected"
-        self.department_filter_btn.setText(text)
-
     @staticmethod
     def _picked_date(date_edit: QDateEdit):
         """The QDate as a Python date, or None if still at the "(No Filter)"
@@ -737,8 +842,6 @@ class ReportingModule(BaseModule):
             filters['customers'] = list(self._selected_customers)
         if report_def.uses_employee_filter and self._selected_employees:
             filters['employees'] = list(self._selected_employees)
-        if report_def.uses_department_filter and self._selected_departments:
-            filters['departments'] = list(self._selected_departments)
         if report_def.uses_exclude_assemblies and self.exclude_assemblies_check.isChecked():
             filters['exclude_assemblies'] = True
 
@@ -771,6 +874,10 @@ class ReportingModule(BaseModule):
 
         self._last_report_type = report_type
         self._last_filters = filters
+        # Captured at generate time, not read fresh at export time -- the
+        # checkbox can change (or the report type can switch, disabling it)
+        # while this run's results still sit in report_table unexported.
+        self._last_department_split = report_def.uses_department_tabs and self.department_split_check.isChecked()
 
         self._report_worker = _ReportWorker(self._jobboss_settings(), report_type, filters)
         self._report_worker.success.connect(self._on_report_rows)
@@ -852,10 +959,6 @@ class ReportingModule(BaseModule):
             labels = [name_by_code.get(c, c) for c in codes] if codes else []
             value = ", ".join(labels) if labels else "All"
             rows.append(["Employees:", _neutralize_formula_cell(value)])
-        if report_def and report_def.uses_department_filter:
-            departments = self._last_filters.get('departments')
-            value = ", ".join(departments) if departments else "All"
-            rows.append(["Departments:", _neutralize_formula_cell(value)])
         rows.append(["Generated:", generated.strftime('%Y-%m-%d %H:%M:%S') if generated else ""])
         rows.append([])
         return rows
@@ -1011,9 +1114,6 @@ class ReportingModule(BaseModule):
 
     def _export_xlsx(self, file_path: str):
         from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill
-        from openpyxl.utils import get_column_letter
-        from openpyxl.worksheet.table import Table, TableStyleInfo
 
         title_block = self._export_title_block()
         headers, data_rows = self._export_table_rows()
@@ -1025,77 +1125,27 @@ class ReportingModule(BaseModule):
         # columns never start with a trigger char, so the highlight lookup
         # below (which reads these same data_rows by index) is unaffected.
         data_rows = [[_neutralize_formula_cell(v) for v in row] for row in data_rows]
+        report_def = REPORTS.get(self._last_report_type)
+
+        department_col = None
+        if (self._last_department_split and report_def is not None
+                and report_def.uses_department_tabs and 'department' in report_def.columns):
+            department_col = report_def.columns.index('department')
 
         wb = Workbook()
-        ws = wb.active
-        ws.title = "Report"
-        for row in title_block:
-            ws.append(row)
-        header_row_idx = len(title_block) + 1
-
-        # openpyxl's Table requires non-empty, unique headers -- some report
-        # types repurpose blank columns for aggregate data (e.g. Top
-        # Customers), so blanks get a placeholder name here; the on-screen
-        # report_table is unaffected, this only changes what lands in the file.
-        safe_headers = []
-        seen = set()
-        for i, h in enumerate(headers, start=1):
-            name = h.strip() if h and h.strip() else f"Column{i}"
-            if name in seen:
-                name = f"{name}_{i}"
-            seen.add(name)
-            safe_headers.append(name)
-
-        ws.append(safe_headers)
-        for row in data_rows:
-            ws.append([_numeric_or_text(v) for v in row])
-
-        # Same row_highlight() flag as the on-screen report_table
-        # (_on_report_rows) -- reapplied here from the exported string values
-        # rather than read back off the QTableWidgetItem brushes, so this
-        # stays correct even if someone exports without ever having the tab
-        # open. Matched by column KEY (zip report_def.columns with the
-        # exported row, same as _on_report_rows), not by header label -- one
-        # shared way to find "which column" instead of two.
-        report_def = REPORTS.get(self._last_report_type)
-        if report_def and report_def.row_highlight and data_rows:
-            red_fill = PatternFill(start_color='FFCCCC', end_color='FFCCCC', fill_type='solid')
-            for i, row in enumerate(data_rows):
-                row_dict = dict(zip(report_def.columns, row))
-                highlight_key = report_def.row_highlight(row_dict)
-                if highlight_key and highlight_key in report_def.columns:
-                    col_idx = report_def.columns.index(highlight_key)
-                    ws.cell(row=header_row_idx + 1 + i, column=col_idx + 1).fill = red_fill
-
-        ws['A1'].font = Font(bold=True, size=12)
-        for cell in ws[header_row_idx]:
-            cell.font = Font(bold=True)
-        for col_cells in ws.columns:
-            width = max((len(str(c.value)) for c in col_cells if c.value is not None), default=0)
-            ws.column_dimensions[col_cells[0].column_letter].width = max(10, min(40, width + 2))
-
-        # Wrap header + data in a real Excel Table with its AutoFilter, so the
-        # exported file opens already sortable/filterable per column in Excel
-        # -- not just a plain value dump. Skipped for a header-only (no data
-        # rows) export: nothing to sort/filter, and Excel's Table requires at
-        # least one row below the header.
-        if len(data_rows) > 0:
-            last_col_letter = get_column_letter(len(safe_headers))
-            table_ref = f"A{header_row_idx}:{last_col_letter}{ws.max_row}"
-            table = Table(displayName="ReportTable", ref=table_ref)
-            table.tableStyleInfo = TableStyleInfo(
-                name="TableStyleMedium2", showFirstColumn=False, showLastColumn=False,
-                showRowStripes=True, showColumnStripes=False,
-            )
-            ws.add_table(table)
-
-        # Appended after the Table block (table_ref above was already fixed
-        # to header+data only) and after column-width sizing, so a long
-        # footer line doesn't blow out every column's width.
-        if report_def and report_def.footer_lines:
-            ws.append([])
-            for line in report_def.footer_lines:
-                ws.append([line])
+        if department_col is not None:
+            used_sheet_names: set = set()
+            for i, (department, rows) in enumerate(_group_rows_by_department(data_rows, department_col)):
+                ws = wb.active if i == 0 else wb.create_sheet()
+                ws.title = _safe_sheet_name(department, used_sheet_names)
+                table_name = "ReportTable" if i == 0 else f"ReportTable{i + 1}"
+                _write_xlsx_report_sheet(
+                    ws, title_block, headers, rows, report_def,
+                    average_row=_department_average_row(rows), table_name=table_name)
+        else:
+            ws = wb.active
+            ws.title = "Report"
+            _write_xlsx_report_sheet(ws, title_block, headers, data_rows, report_def)
 
         wb.save(file_path)
 
@@ -1114,10 +1164,7 @@ class ReportingModule(BaseModule):
         indicator with no backing worker) survives this module being torn
         down and rebuilt.
         """
-        workers = (
-            self._connect_worker, self._report_worker,
-            self._customer_worker, self._employee_worker, self._department_worker,
-        )
+        workers = (self._connect_worker, self._report_worker, self._customer_worker, self._employee_worker)
         for worker in workers:
             if worker is not None and worker.isRunning():
                 worker.wait(2000)

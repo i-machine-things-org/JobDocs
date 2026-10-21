@@ -195,9 +195,7 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
             once, see modules/reporting/reports/*.py's ReportDefinition
             flags), same pairing as Start/End Date on row 1, so every row
             in this grid fills all 4 columns instead of leaving the right
-            half empty on rows that used to hold just one filter. Department
-            (row 2) has no second filter to pair with yet, so columns 2-3
-            are left empty there rather than forcing an unrelated pairing. -->
+            half empty on rows that used to hold just one filter. -->
        <layout class="QGridLayout" name="filterLayout">
         <item row="0" column="0">
          <widget class="QLabel" name="customerLabel">
@@ -295,17 +293,16 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
           </property>
          </widget>
         </item>
-        <item row="2" column="0">
-         <widget class="QLabel" name="departmentLabel">
+        <item row="2" column="0" colspan="4">
+         <!-- Export-only option, not a filter: every department's rows are
+              always fetched (see modules/reporting/reports/
+              employee_efficiency.py). Checking this just splits the xlsx
+              export into one worksheet tab per department, each with a
+              trailing Department Average row, instead of one combined
+              sheet. No effect on CSV/PDF exports or the on-screen table. -->
+         <widget class="QCheckBox" name="department_split_check">
           <property name="text">
-           <string>Department:</string>
-          </property>
-         </widget>
-        </item>
-        <item row="2" column="1">
-         <widget class="QPushButton" name="department_filter_btn">
-          <property name="text">
-           <string>Departments: All</string>
+           <string>By Department (one Excel tab per department on export)</string>
           </property>
          </widget>
         </item>

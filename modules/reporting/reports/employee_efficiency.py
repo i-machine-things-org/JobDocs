@@ -251,7 +251,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from experimental.db_integration import connect, department_filter_clause, employee_filter_clause
+from experimental.db_integration import connect, employee_filter_clause
 from modules.reporting.reports.base import ReportDefinition
 
 # op_totals: Act Hrs summed across every ACTIVE employee who logged time on
@@ -286,12 +286,16 @@ _OP_TOTALS_CTE = """op_totals AS (
 # Operation_Service) triple used here before. See module docstring
 # ("Grouping bug fix"): that triple isn't unique, and grouping by it
 # silently merged distinct operations that happen to share a display label.
-# Job/Work_Center/Operation_Service are selected alongside Job_Operation in
-# the GROUP BY -- safe, since Job_Operation determines them uniquely.
+# Job/Work_Center/Operation_Service/Department are selected alongside
+# Job_Operation in the GROUP BY -- safe, since Job_Operation determines them
+# uniquely. Department (wc.Department) is carried through purely so the
+# export's "By Department" checkbox (base.ReportDefinition.uses_department_
+# tabs) can split rows into one worksheet tab per department -- it's not a
+# filter, every department's rows are always fetched.
 _EMPLOYEE_EFFICIENCY_DETAIL_QUERY = """
 WITH {op_totals},
 op_detail AS (
-    SELECT jot.Employee, jot.Job_Operation, jo.Job, jo.Work_Center, jo.Operation_Service,
+    SELECT jot.Employee, jot.Job_Operation, jo.Job, jo.Work_Center, jo.Operation_Service, wc.Department,
            SUM(jot.Act_Setup_Hrs) AS Setup_Act_Hrs, MAX(jo.Est_Setup_Hrs) AS Setup_Est_Hrs,
            SUM(jot.Act_Run_Hrs) AS Run_Act_Hrs, MAX(jo.Est_Run_Hrs) AS Run_Est_Hrs,
            CASE WHEN SUM(jot.Act_Run_Hrs) = 0 THEN 0 ELSE SUM(jot.Act_Run_Qty) END AS Run_Qty
@@ -299,10 +303,10 @@ op_detail AS (
     JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
     JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
     WHERE jot.Work_Date BETWEEN %s AND %s AND jot.Rework_Time = 0
-          AND (wc.Type IS NULL OR wc.Type <> 'Indirect') AND {employee_clause} AND {department_clause}
-    GROUP BY jot.Employee, jot.Job_Operation, jo.Job, jo.Work_Center, jo.Operation_Service
+          AND (wc.Type IS NULL OR wc.Type <> 'Indirect') AND {employee_clause}
+    GROUP BY jot.Employee, jot.Job_Operation, jo.Job, jo.Work_Center, jo.Operation_Service, wc.Department
 )
-SELECT op.Employee, e.First_Name, e.Last_Name, op.Job, op.Work_Center, op.Operation_Service,
+SELECT op.Employee, e.First_Name, e.Last_Name, op.Job, op.Work_Center, op.Operation_Service, op.Department,
        op.Setup_Act_Hrs, op.Setup_Est_Hrs,
        CASE WHEN ot.Total_Setup_Act_Hrs > 0
             THEN op.Setup_Est_Hrs * op.Setup_Act_Hrs / ot.Total_Setup_Act_Hrs END AS Setup_Adj_Hrs,
@@ -324,27 +328,34 @@ ORDER BY e.Last_Name, e.First_Name, op.Job
 # simply contributes nothing, matching "not included" rather than "scored as
 # zero". Setup and Run are kept as separate columns here too, never summed
 # into one blended "Total" -- the real report never does that either.
-# department_clause is applied here, inside op_rollup, not in the outer
-# SELECT's WHERE like employee_clause is -- Department is a property of the
-# operation (via its work center), and by the outer SELECT, rows have
-# already been grouped down to one per Employee with no Job_Operation/
-# Work_Center left to filter on. Filtering here instead means "only roll up
-# operations in this department", which is what the picker should mean.
+#
+# Department (wc.Department) changes Summary's grain: the outer SELECT now
+# groups by (Employee, Department), not just Employee -- an employee who
+# logged time in two departments during the date range gets two rows, each
+# summing only that department's operations. This is deliberate, not a
+# side effect: it's what makes the "By Department" export checkbox
+# (base.ReportDefinition.uses_department_tabs) meaningful for Summary --
+# a per-department tab needs each employee's hours already split by
+# department, not one cross-department total repeated on every tab. Carried
+# through op_rollup/op_scored the same safe way Job/Work_Center/
+# Operation_Service are threaded through Detail's op_detail: added to
+# SELECT and GROUP BY at each stage, never changing which Job_Operation
+# rows get merged (Job_Operation already determines Department uniquely).
 _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY = """
 WITH {op_totals},
 op_rollup AS (
-    SELECT jot.Employee, jot.Job_Operation,
+    SELECT jot.Employee, jot.Job_Operation, wc.Department,
            SUM(jot.Act_Setup_Hrs) AS Setup_Act_Hrs, MAX(jo.Est_Setup_Hrs) AS Setup_Est_Hrs,
            SUM(jot.Act_Run_Hrs) AS Run_Act_Hrs, MAX(jo.Est_Run_Hrs) AS Run_Est_Hrs
     FROM Job_Operation_Time jot
     JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
     JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
     WHERE jot.Work_Date BETWEEN %s AND %s AND jot.Rework_Time = 0
-          AND (wc.Type IS NULL OR wc.Type <> 'Indirect') AND {department_clause}
-    GROUP BY jot.Employee, jot.Job_Operation
+          AND (wc.Type IS NULL OR wc.Type <> 'Indirect')
+    GROUP BY jot.Employee, jot.Job_Operation, wc.Department
 ),
 op_scored AS (
-    SELECT op.Employee, op.Setup_Act_Hrs, op.Setup_Est_Hrs, op.Run_Act_Hrs, op.Run_Est_Hrs,
+    SELECT op.Employee, op.Department, op.Setup_Act_Hrs, op.Setup_Est_Hrs, op.Run_Act_Hrs, op.Run_Est_Hrs,
            CASE WHEN ot.Total_Setup_Act_Hrs > 0
                 THEN op.Setup_Est_Hrs * op.Setup_Act_Hrs / ot.Total_Setup_Act_Hrs END AS Setup_Adj_Hrs,
            CASE WHEN ot.Total_Run_Act_Hrs > 0
@@ -352,7 +363,7 @@ op_scored AS (
     FROM op_rollup op
     JOIN op_totals ot ON ot.Job_Operation = op.Job_Operation
 )
-SELECT op.Employee, e.First_Name, e.Last_Name,
+SELECT op.Employee, op.Department, e.First_Name, e.Last_Name,
        SUM(op.Setup_Act_Hrs) AS Setup_Act_Hrs,
        SUM(op.Setup_Est_Hrs) AS Setup_Est_Hrs,
        SUM(op.Setup_Adj_Hrs) AS Setup_Adj_Hrs,
@@ -362,17 +373,17 @@ SELECT op.Employee, e.First_Name, e.Last_Name,
 FROM op_scored op
 JOIN Employee e ON e.Employee = op.Employee
 WHERE e.Status = 'Active' AND {employee_clause}
-GROUP BY op.Employee, e.First_Name, e.Last_Name
+GROUP BY op.Employee, op.Department, e.First_Name, e.Last_Name
 ORDER BY e.Last_Name, e.First_Name
 """
 
 DETAIL_COLUMNS = (
-    'employee', 'job', 'work_center', 'operation',
+    'employee', 'job', 'work_center', 'department', 'operation',
     'setup_act_hrs', 'setup_est_hrs', 'setup_adj_hrs', 'setup_pct_eff',
     'run_act_hrs', 'run_est_hrs', 'run_qty', 'run_adj_hrs', 'run_pct_eff',
 )
 DETAIL_HEADERS = [
-    'Employee', 'Job', 'Work Center', 'Operation',
+    'Employee', 'Job', 'Work Center', 'Department', 'Operation',
     'Setup Act Hrs', 'Setup Est Hrs', 'Setup Adj Hrs', 'Setup % Eff',
     'Run Act Hrs', 'Run Est Hrs', 'Run Qty', 'Run Adj Hrs', 'Run % Eff',
 ]
@@ -380,11 +391,11 @@ DETAIL_HEADERS = [
 # blended "Total" -- matches Detail, and matches the real report, which
 # never combines them either (Setup isn't part of any combined score).
 SUMMARY_COLUMNS = (
-    'employee', 'setup_act_hrs', 'setup_est_hrs', 'setup_adj_hrs', 'setup_pct_eff',
+    'employee', 'department', 'setup_act_hrs', 'setup_est_hrs', 'setup_adj_hrs', 'setup_pct_eff',
     'run_act_hrs', 'run_est_hrs', 'run_adj_hrs', 'run_pct_eff',
 )
 SUMMARY_HEADERS = [
-    'Employee', 'Setup Act Hrs', 'Setup Est Hrs', 'Setup Adj Hrs', 'Setup % Eff',
+    'Employee', 'Department', 'Setup Act Hrs', 'Setup Est Hrs', 'Setup Adj Hrs', 'Setup % Eff',
     'Run Act Hrs', 'Run Est Hrs', 'Run Adj Hrs', 'Run % Eff',
 ]
 
@@ -417,6 +428,7 @@ def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
             'employee': name,
             'job': r.get('Job') or '',
             'work_center': r.get('Work_Center') or '',
+            'department': r.get('Department') or '',
             'operation': r.get('Operation_Service') or '',
             'setup_act_hrs': f"{setup_act:.2f}",
             'setup_est_hrs': f"{setup_est:.2f}",
@@ -445,6 +457,7 @@ def _rows_from_summary(raw_rows: List[dict]) -> List[Dict[str, str]]:
         name = f"{r.get('First_Name') or ''} {r.get('Last_Name') or ''}".strip() or (r.get('Employee') or '')
         rows.append({
             'employee': name,
+            'department': r.get('Department') or '',
             'setup_act_hrs': f"{setup_act:.2f}",
             'setup_est_hrs': f"{setup_est:.2f}",
             'setup_adj_hrs': f"{setup_adj:.2f}",
@@ -461,14 +474,12 @@ def _fetch_detail(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Dic
     start = filters['start_date']
     end = filters['end_date']
     employee_clause, employee_params = employee_filter_clause(filters.get('employees'), column='jot.Employee')
-    department_clause, department_params = department_filter_clause(filters.get('departments'), column='wc.Department')
-    query = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(
-        op_totals=_OP_TOTALS_CTE, employee_clause=employee_clause, department_clause=department_clause)
+    query = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause=employee_clause)
     # op_totals' date-range placeholders come first in the formatted query
     # text, then op_detail's own -- params must be supplied in that order.
     with connect(settings) as conn:
         with conn.cursor() as cur:
-            cur.execute(query, (start, end, start, end) + employee_params + department_params)
+            cur.execute(query, (start, end, start, end) + employee_params)
             return _rows_from_detail(cur.fetchall())
 
 
@@ -476,15 +487,10 @@ def _fetch_summary(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Di
     start = filters['start_date']
     end = filters['end_date']
     employee_clause, employee_params = employee_filter_clause(filters.get('employees'), column='op.Employee')
-    department_clause, department_params = department_filter_clause(filters.get('departments'), column='wc.Department')
-    query = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(
-        op_totals=_OP_TOTALS_CTE, employee_clause=employee_clause, department_clause=department_clause)
+    query = _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY.format(op_totals=_OP_TOTALS_CTE, employee_clause=employee_clause)
     with connect(settings) as conn:
         with conn.cursor() as cur:
-            # department_params come before employee_params here -- op_rollup's
-            # department_clause is inside the WITH block (filled in first by
-            # position), the outer SELECT's employee_clause comes after it.
-            cur.execute(query, (start, end, start, end) + department_params + employee_params)
+            cur.execute(query, (start, end, start, end) + employee_params)
             return _rows_from_summary(cur.fetchall())
 
 
@@ -512,7 +518,7 @@ EMPLOYEE_EFFICIENCY_DETAIL = ReportDefinition(
     uses_dates=True,
     dates_required=True,
     uses_employee_filter=True,
-    uses_department_filter=True,
+    uses_department_tabs=True,
     footer_lines=_FORMULA_FOOTER,
 )
 EMPLOYEE_EFFICIENCY_SUMMARY = ReportDefinition(
@@ -524,6 +530,6 @@ EMPLOYEE_EFFICIENCY_SUMMARY = ReportDefinition(
     uses_dates=True,
     dates_required=True,
     uses_employee_filter=True,
-    uses_department_filter=True,
+    uses_department_tabs=True,
     footer_lines=_FORMULA_FOOTER,
 )
