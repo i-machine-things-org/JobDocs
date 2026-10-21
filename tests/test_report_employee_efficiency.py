@@ -94,25 +94,30 @@ def test_op_totals_denominator_is_not_employee_filtered():
     assert "{employee_clause}" not in _OP_TOTALS_CTE
 
 
-def test_both_queries_select_department_but_never_filter_on_it():
-    # Department is an export-split option (base.ReportDefinition.
-    # uses_department_tabs), not a query filter -- every department's rows
-    # are always fetched. Both queries must select wc.Department somewhere,
-    # and neither raw template may carry a department-filter placeholder.
-    assert "wc.Department" in _EMPLOYEE_EFFICIENCY_DETAIL_QUERY
-    assert "wc.Department" in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
+def test_both_queries_select_department_from_employee_not_work_center():
+    # Department is Employee.Department -- the employee's own assigned
+    # department -- not Work_Center.Department ("where the work happened").
+    # Confirmed live: Employee.Work_Center is NULL for every active employee
+    # on this install, so there's no deriving one from the other; they are
+    # genuinely different columns. It's also an export-split option
+    # (base.ReportDefinition.uses_department_tabs), not a query filter --
+    # every department's rows are always fetched, so neither raw template
+    # may carry a department-filter placeholder.
+    assert "e.Department" in _EMPLOYEE_EFFICIENCY_DETAIL_QUERY
+    assert "e.Department" in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
+    assert "wc.Department" not in _EMPLOYEE_EFFICIENCY_DETAIL_QUERY
+    assert "wc.Department" not in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
     assert "department_clause" not in _EMPLOYEE_EFFICIENCY_DETAIL_QUERY
     assert "department_clause" not in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
 
 
-def test_summary_grain_includes_department_not_just_employee():
-    # Regression guard: unlike the old Summary (one row per employee,
-    # Setup/Run summed across every operation they touched regardless of
-    # department), the outer SELECT now groups by (Employee, Department) --
-    # required for the "By Department" export split to mean anything for
-    # Summary: each tab needs an employee's hours already confined to that
-    # department, not the same cross-department total repeated everywhere.
-    assert "GROUP BY op.Employee, op.Department, e.First_Name, e.Last_Name" in _SUMMARY_SQL
+def test_summary_department_does_not_change_the_one_row_per_employee_grain():
+    # Department is a 1:1 attribute of the employee (not of the operation),
+    # so adding e.Department to the GROUP BY (required by SQL Server
+    # whenever a non-aggregated column is selected) doesn't split a given
+    # employee into multiple rows -- Summary stays one row per employee,
+    # same as before Department existed, just with the column attached.
+    assert "GROUP BY op.Employee, e.Department, e.First_Name, e.Last_Name" in _SUMMARY_SQL
 
 
 def test_both_employee_efficiency_types_declare_department_tabs():

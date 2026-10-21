@@ -245,6 +245,25 @@ view. (The KB article notes Work Center Type doesn't affect the report's
 own calculations -- this exclusion is this module's own choice, to keep
 non-production time out of an employee's hours at all, independent of how
 JobBOSS's canned report happens to treat it.)
+
+**Department comes from Employee.Department -- the employee's own assigned
+department -- not Work_Center.Department.** An earlier version of this
+sourced Department from the work center of each operation (i.e. "where the
+work happened"), which is wrong for this shop: confirmed directly by the
+user that employees are assigned a department as a fixed attribute of the
+employee record, not inferred from whatever work center they happened to
+log time against on a given day. Confirmed live that the two are genuinely
+different columns (Employee.Department has real, populated values like
+"CNC DEPT"/"Assembly shop"/"Office"; Employee.Work_Center is NULL for
+every active employee on this install, so there's no way to derive one
+from the other). Both queries join Employee (already needed for name/
+Status) and select e.Department directly -- Detail's outer SELECT isn't
+grouped, so this needed no GROUP BY change there; Summary's outer SELECT
+is grouped, so e.Department had to be added to its GROUP BY alongside
+e.First_Name/e.Last_Name, but since Department is a 1:1 attribute of the
+employee (not of the operation), this doesn't change Summary's row count
+or grouping at all -- it's the exact same one-row-per-employee result as
+before Department existed, just with the column attached.
 """
 
 from __future__ import annotations
@@ -286,16 +305,12 @@ _OP_TOTALS_CTE = """op_totals AS (
 # Operation_Service) triple used here before. See module docstring
 # ("Grouping bug fix"): that triple isn't unique, and grouping by it
 # silently merged distinct operations that happen to share a display label.
-# Job/Work_Center/Operation_Service/Department are selected alongside
-# Job_Operation in the GROUP BY -- safe, since Job_Operation determines them
-# uniquely. Department (wc.Department) is carried through purely so the
-# export's "By Department" checkbox (base.ReportDefinition.uses_department_
-# tabs) can split rows into one worksheet tab per department -- it's not a
-# filter, every department's rows are always fetched.
+# Job/Work_Center/Operation_Service are selected alongside Job_Operation in
+# the GROUP BY -- safe, since Job_Operation determines them uniquely.
 _EMPLOYEE_EFFICIENCY_DETAIL_QUERY = """
 WITH {op_totals},
 op_detail AS (
-    SELECT jot.Employee, jot.Job_Operation, jo.Job, jo.Work_Center, jo.Operation_Service, wc.Department,
+    SELECT jot.Employee, jot.Job_Operation, jo.Job, jo.Work_Center, jo.Operation_Service,
            SUM(jot.Act_Setup_Hrs) AS Setup_Act_Hrs, MAX(jo.Est_Setup_Hrs) AS Setup_Est_Hrs,
            SUM(jot.Act_Run_Hrs) AS Run_Act_Hrs, MAX(jo.Est_Run_Hrs) AS Run_Est_Hrs,
            CASE WHEN SUM(jot.Act_Run_Hrs) = 0 THEN 0 ELSE SUM(jot.Act_Run_Qty) END AS Run_Qty
@@ -304,9 +319,9 @@ op_detail AS (
     JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
     WHERE jot.Work_Date BETWEEN %s AND %s AND jot.Rework_Time = 0
           AND (wc.Type IS NULL OR wc.Type <> 'Indirect') AND {employee_clause}
-    GROUP BY jot.Employee, jot.Job_Operation, jo.Job, jo.Work_Center, jo.Operation_Service, wc.Department
+    GROUP BY jot.Employee, jot.Job_Operation, jo.Job, jo.Work_Center, jo.Operation_Service
 )
-SELECT op.Employee, e.First_Name, e.Last_Name, op.Job, op.Work_Center, op.Operation_Service, op.Department,
+SELECT op.Employee, e.First_Name, e.Last_Name, op.Job, op.Work_Center, op.Operation_Service, e.Department,
        op.Setup_Act_Hrs, op.Setup_Est_Hrs,
        CASE WHEN ot.Total_Setup_Act_Hrs > 0
             THEN op.Setup_Est_Hrs * op.Setup_Act_Hrs / ot.Total_Setup_Act_Hrs END AS Setup_Adj_Hrs,
@@ -328,23 +343,10 @@ ORDER BY e.Last_Name, e.First_Name, op.Job
 # simply contributes nothing, matching "not included" rather than "scored as
 # zero". Setup and Run are kept as separate columns here too, never summed
 # into one blended "Total" -- the real report never does that either.
-#
-# Department (wc.Department) changes Summary's grain: the outer SELECT now
-# groups by (Employee, Department), not just Employee -- an employee who
-# logged time in two departments during the date range gets two rows, each
-# summing only that department's operations. This is deliberate, not a
-# side effect: it's what makes the "By Department" export checkbox
-# (base.ReportDefinition.uses_department_tabs) meaningful for Summary --
-# a per-department tab needs each employee's hours already split by
-# department, not one cross-department total repeated on every tab. Carried
-# through op_rollup/op_scored the same safe way Job/Work_Center/
-# Operation_Service are threaded through Detail's op_detail: added to
-# SELECT and GROUP BY at each stage, never changing which Job_Operation
-# rows get merged (Job_Operation already determines Department uniquely).
 _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY = """
 WITH {op_totals},
 op_rollup AS (
-    SELECT jot.Employee, jot.Job_Operation, wc.Department,
+    SELECT jot.Employee, jot.Job_Operation,
            SUM(jot.Act_Setup_Hrs) AS Setup_Act_Hrs, MAX(jo.Est_Setup_Hrs) AS Setup_Est_Hrs,
            SUM(jot.Act_Run_Hrs) AS Run_Act_Hrs, MAX(jo.Est_Run_Hrs) AS Run_Est_Hrs
     FROM Job_Operation_Time jot
@@ -352,10 +354,10 @@ op_rollup AS (
     JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
     WHERE jot.Work_Date BETWEEN %s AND %s AND jot.Rework_Time = 0
           AND (wc.Type IS NULL OR wc.Type <> 'Indirect')
-    GROUP BY jot.Employee, jot.Job_Operation, wc.Department
+    GROUP BY jot.Employee, jot.Job_Operation
 ),
 op_scored AS (
-    SELECT op.Employee, op.Department, op.Setup_Act_Hrs, op.Setup_Est_Hrs, op.Run_Act_Hrs, op.Run_Est_Hrs,
+    SELECT op.Employee, op.Setup_Act_Hrs, op.Setup_Est_Hrs, op.Run_Act_Hrs, op.Run_Est_Hrs,
            CASE WHEN ot.Total_Setup_Act_Hrs > 0
                 THEN op.Setup_Est_Hrs * op.Setup_Act_Hrs / ot.Total_Setup_Act_Hrs END AS Setup_Adj_Hrs,
            CASE WHEN ot.Total_Run_Act_Hrs > 0
@@ -363,7 +365,7 @@ op_scored AS (
     FROM op_rollup op
     JOIN op_totals ot ON ot.Job_Operation = op.Job_Operation
 )
-SELECT op.Employee, op.Department, e.First_Name, e.Last_Name,
+SELECT op.Employee, e.Department, e.First_Name, e.Last_Name,
        SUM(op.Setup_Act_Hrs) AS Setup_Act_Hrs,
        SUM(op.Setup_Est_Hrs) AS Setup_Est_Hrs,
        SUM(op.Setup_Adj_Hrs) AS Setup_Adj_Hrs,
@@ -373,7 +375,7 @@ SELECT op.Employee, op.Department, e.First_Name, e.Last_Name,
 FROM op_scored op
 JOIN Employee e ON e.Employee = op.Employee
 WHERE e.Status = 'Active' AND {employee_clause}
-GROUP BY op.Employee, op.Department, e.First_Name, e.Last_Name
+GROUP BY op.Employee, e.Department, e.First_Name, e.Last_Name
 ORDER BY e.Last_Name, e.First_Name
 """
 
