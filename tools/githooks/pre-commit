@@ -1,0 +1,26 @@
+#!/bin/sh
+# Dispatcher for pre_commit_check.py -- a shell script, not a Python
+# shebang, because `#!/usr/bin/env python3` doesn't reliably resolve on
+# every dev machine (e.g. Windows installs where only the `py` launcher
+# is a real interpreter and `python`/`python3` on PATH are empty Microsoft
+# Store redirect stubs that fail instead of running anything). Try the
+# usual interpreter names in order and actually run the check with
+# whichever one works, instead of silently no-op'ing or hard-failing
+# every commit on a machine that just has it named differently.
+set -e
+# Repo root, not this script's own directory -- the installed copy lives
+# at .git/hooks/pre-commit (not version-controlled), but the actual
+# checker only exists once, in the tracked tools/githooks/ directory.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CHECK="$REPO_ROOT/tools/githooks/pre_commit_check.py"
+
+if command -v py >/dev/null 2>&1; then
+    py "$CHECK"
+elif command -v python3 >/dev/null 2>&1; then
+    python3 "$CHECK"
+elif command -v python >/dev/null 2>&1; then
+    python "$CHECK"
+else
+    echo "pre-commit: no Python interpreter found (tried py/python3/python) -- skipping real-data check." >&2
+    exit 0
+fi

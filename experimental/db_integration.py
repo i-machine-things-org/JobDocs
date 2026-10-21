@@ -180,13 +180,13 @@ def fetch_employees(settings: Dict[str, Any]) -> List[Dict[str, str]]:
     """Active employees (code + display name), for populating the Employee
     filter picker on the two Employee Efficiency report types.
 
-    Status = 'Active' mirrors the convention already confirmed for Job.Status
-    on this schema (see modules/reporting/reports/job_report.py's comments),
-    but isn't independently verified for Employee specifically -- the schema
-    dump this was built from has no row data to check the real stored value
-    against. If this schema uses something else here, the picker comes back
-    empty, which is an obviously-broken, easy-to-report state rather than a
-    silently-wrong one.
+    Status = 'Active' confirmed live (not just by convention) against the
+    real JobBOSS Employee Efficiency export: this schema has exactly 26
+    'Active' employees and 215 'Inactive', no ambiguous third status, and
+    26 is exactly the number of employee blocks in JobBOSS's own real
+    export. A different schema could still use something else here, in
+    which case the picker comes back empty -- an obviously-broken,
+    easy-to-report state rather than a silently-wrong one.
     """
     if not is_configured(settings):
         raise RuntimeError("JobBOSS DB is not configured")
