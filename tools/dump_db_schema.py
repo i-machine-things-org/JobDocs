@@ -28,6 +28,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -105,7 +106,7 @@ def _load_settings() -> dict:
     return settings
 
 
-def _get_password(settings: dict) -> str:
+def _get_password(settings: dict) -> Optional[str]:
     env_pass = os.environ.get('JOBBOSS_DB_PASS', '')
     if env_pass:
         return env_pass
@@ -145,7 +146,15 @@ def main():
 
     out_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('jobboss_schema_dump.xlsx')
 
-    dsn, connect_kwargs = _connect_kwargs(settings)
+    try:
+        dsn, connect_kwargs = _connect_kwargs(settings)
+    except ValueError:
+        # int(port_raw) in _connect_kwargs raises on a non-numeric Port (e.g.
+        # a stray space, "auto" typed literally, "1433,1434") -- same failure
+        # mode experimental.db_integration.test_connection() guards against;
+        # this script's own direct call needs the same guard, or a bad Port
+        # value crashes with a raw traceback instead of a clear message.
+        raise SystemExit("Invalid port -- enter a number or leave Port blank.")
     connect_kwargs['password'] = password
     print(f"Connecting to {settings.get('jobboss_db_host')} / {settings.get('jobboss_db_name')} ...")
 

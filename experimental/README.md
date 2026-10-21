@@ -32,7 +32,7 @@ This directory contains experimental and work-in-progress features that are **no
 
 2. In JobDocs, open **Settings > Advanced Settings**, check **Enable experimental features (Reporting)**, then fill in the JobBOSS DB Host / Port / Database / Username / Password fields. Use the exact `Server` value from your SQL Server ODBC DSN for Host -- for a named instance (e.g. `SMI-APP02\JBSQL`), leave Port blank and it resolves automatically via the SQL Browser service, the same way the ODBC driver does for Excel/Power Query.
 3. The password is **not** written to `settings.json`. It's stored in your OS credential store (Windows Credential Manager, macOS Keychain, or Linux Secret Service) via the `keyring` package, under service name `JobDocs`.
-4. On the Reporting tab, click **Connect to Database**, then pick a report type and **Generate Report**.
+4. The Reporting tab connects to the database automatically as soon as it's opened -- a small status indicator in the corner shows green once connected (click it to retry if it's gray/red). Pick a report type and **Generate Report**.
 
 **Exported files are real Excel Tables**: the `.xlsx` export wraps the header + data rows in an Excel Table with its AutoFilter, so every column is sortable/filterable as soon as the file opens in Excel -- not a plain value dump.
 

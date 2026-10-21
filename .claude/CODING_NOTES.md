@@ -4,6 +4,7 @@
 
 ## Python Style & Error Handling
 
+- **An `if`/`elif` chain over related-but-independent fields needs a branch for every combination that can actually occur, or one silently does nothing.** (CodeRabbit, PR #341) Settings dialog's JobBOSS credential save had `if new_password and new_user: save` / `elif new_user changed: carry forward`, with no branch at all for "password entered, username blank" -- that combination just fell through both conditions and the password was silently discarded with zero user-visible feedback, no error, no indication it wasn't stored. When enumerating branches over 2+ independent boolean-ish inputs, explicitly check: is there a combination that reaches neither branch? If so, does falling through silently there actually mean "nothing to do," or does it mean "user action needed and got dropped"?
 - **Hoist helper functions out of methods.** Defining a helper (e.g. `_is_hidden`) inside a method recreates it on every call — move it to module or class level.
 - **Avoid broad `except Exception`.** Catch specific exceptions (`OSError`, `AttributeError`, `shutil.Error`, etc.) so unexpected errors aren't silently masked.
 - **Don't leave silent `except Exception: pass`.** Log at debug/warning level so failures stay traceable without breaking the fallback behavior.

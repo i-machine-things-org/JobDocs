@@ -391,6 +391,12 @@ class SettingsDialog(QDialog):
             try:
                 if new_password and new_user:
                     set_password(new_user, new_password)
+                elif new_password and not new_user:
+                    QMessageBox.warning(
+                        self, "Username Required",
+                        "A JobBOSS username is required to save a password. "
+                        "The password you entered was not stored."
+                    )
                 elif new_user and new_user != self._original_jobboss_user:
                     # Username changed with the password field left blank ("unchanged") --
                     # carry the old username's stored password forward so access isn't
