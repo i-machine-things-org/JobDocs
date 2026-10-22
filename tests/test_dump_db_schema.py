@@ -87,6 +87,27 @@ def test_load_settings_env_vars_work_with_no_settings_json_at_all(tmp_path, monk
     assert settings['jobboss_db_user'] == 'tempuser'
 
 
+def test_load_settings_explicit_empty_port_clears_stored_value(tmp_path, monkeypatch):
+    # JOBBOSS_DB_PORT='' (set, not just unset) must actually clear a stored
+    # named-instance port, e.g. when overriding HOST to point at a different
+    # server whose instance port should be auto-resolved instead of reusing
+    # the old server's explicit port.
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text(json.dumps({
+        'jobboss_db_host': 'sqlserver01', 'jobboss_db_port': '1433',
+        'jobboss_db_name': 'JobBOSS', 'jobboss_db_user': 'jobdocs_ro',
+    }))
+    monkeypatch.setattr(dump_db_schema, 'get_config_dir', lambda: tmp_path)
+    monkeypatch.setenv('JOBBOSS_DB_HOST', 'otherserver\\INSTANCE')
+    monkeypatch.setenv('JOBBOSS_DB_PORT', '')
+    for var in ('JOBBOSS_DB_NAME', 'JOBBOSS_DB_USER'):
+        monkeypatch.delenv(var, raising=False)
+
+    settings = dump_db_schema._load_settings()
+    assert settings['jobboss_db_host'] == 'otherserver\\INSTANCE'
+    assert settings['jobboss_db_port'] == ''
+
+
 def test_load_settings_returns_empty_dict_when_nothing_is_configured(tmp_path, monkeypatch):
     # No exception here -- main() is the one place that validates and raises
     # a friendly SystemExit now, not _load_settings() itself.

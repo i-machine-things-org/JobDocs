@@ -21,6 +21,8 @@ source of truth, not this cache.
 Usage:
     python tools/generate_sensitive_identifiers.py
 """
+import os
+import stat
 import sys
 from pathlib import Path
 
@@ -64,6 +66,15 @@ def main() -> int:
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text('\n'.join(sorted(identifiers)) + '\n', encoding='utf-8')
+    # Owner-only permissions -- this file is real HR data. Effective on
+    # POSIX; on Windows, chmod can only toggle the read-only attribute (no
+    # ACL restriction), so this is a best-effort narrowing there, not a
+    # guarantee against other local accounts -- same caveat as every other
+    # access control on a shared Windows machine without explicit icacls use.
+    try:
+        os.chmod(OUTPUT_PATH, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
     print(f"Wrote {len(identifiers)} identifiers to {OUTPUT_PATH}")
     return 0
 

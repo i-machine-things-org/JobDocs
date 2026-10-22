@@ -40,6 +40,15 @@ class ReportDefinition:
     # concept, so they always stay a single flat output regardless of this
     # checkbox; only xlsx actually splits.
     uses_department_tabs: bool = False
+    # Column KEYS (subset of `columns`) eligible for the "By Department"
+    # export's trailing average row -- restricts _department_average_row()
+    # (modules/reporting/module.py) to genuine metric columns (hours, %,
+    # qty). An identifier column (job/operation/employee) has no sensible
+    # average even when every value in it happens to parse as a number.
+    # Empty tuple (the default) passes no restriction down, meaning no
+    # average row makes sense to compute -- only meaningful alongside
+    # uses_department_tabs.
+    average_columns: Tuple[str, ...] = ()
     # Given one formatted row dict, return the column KEY to highlight red
     # (e.g. 'sched_end'), or None. None (the default) means this report never
     # highlights anything.

@@ -13,6 +13,7 @@ requires editing it.
 import sys
 import csv
 import html
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -56,6 +57,14 @@ def _neutralize_formula_cell(value: str) -> str:
     return f"'{value}"
 
 
+# Deliberately narrower than what int()/float() themselves accept: no
+# exponent notation ("1e5"), no "nan"/"inf"/"infinity" text, no leading "+".
+# float("nan")/float("inf") both succeed in plain Python, which would
+# silently turn a literal text value spelled like one of those words into a
+# special float instead of leaving it as text.
+_SIMPLE_NUMBER_RE = re.compile(r'^-?\d+(\.\d+)?$')
+
+
 def _numeric_or_text(value: str):
     """A numeric-looking cell value as a real int/float, or the original
     string if it isn't one.
@@ -71,17 +80,21 @@ def _numeric_or_text(value: str):
     don't round-trip display as "5.0". XLSX-only -- CSV has no native type
     system, so a plain "103.90" there is already correctly inferred as a
     number when Excel opens the file.
+
+    A whole-number value only converts if it round-trips back to the exact
+    same string: "30309" (a Job number) becomes int 30309 -- fine to sort/
+    filter numerically, and str(30309) == "30309" so nothing is lost -- but
+    "0012345" (a PO/part number with a real leading zero) does NOT round-
+    trip (str(12345) == "12345" != "0012345") and stays text, since int()
+    would otherwise silently discard a digit that's part of the real
+    identifier, not a formatting artifact.
     """
-    if not value:
+    if not value or not _SIMPLE_NUMBER_RE.match(value):
         return value
-    try:
-        return int(value)
-    except ValueError:
-        pass
-    try:
+    if '.' in value:
         return float(value)
-    except ValueError:
-        return value
+    as_int = int(value)
+    return as_int if str(as_int) == value else value
 
 
 def _group_rows_by_department(data_rows: list, department_col: int) -> list:
@@ -130,22 +143,44 @@ def _safe_sheet_name(name: str, used_names: set) -> str:
     return candidate
 
 
-def _department_average_row(data_rows: list) -> list:
+def _department_average_row(data_rows: list, average_columns: Optional[set] = None) -> list:
     """One extra row for a department's sheet: 'Department Average' in the
-    first column, then the arithmetic mean of each other column that's
-    numeric across every row in this group -- blank for a column that
-    isn't (e.g. Employee/Job/Operation, where there's no sensible average).
+    first column, then the arithmetic mean of each other eligible column
+    across every row in this group.
+
+    average_columns restricts averaging to these column INDICES (the real
+    metric columns -- hours, %, qty). None (the default, for callers with
+    no column-type info) means every column is eligible. Restricting
+    matters because an identifier column (job/operation/employee) can be
+    all-numeric by coincidence (e.g. every value in a Job column is a bare
+    number) and would otherwise get a meaningless average -- callers that
+    know their column layout (_export_xlsx, via ReportDefinition.
+    average_columns) should always pass the real metric-column set rather
+    than relying on this default.
+
+    Within an eligible column, a blank cell ('') means "not scoreable" (e.g.
+    an Indirect operation's blank Adj Hrs) and is excluded from that
+    column's average rather than voiding the whole column -- but any OTHER
+    non-numeric value is a genuine anomaly and still blanks the whole
+    column, same as before this function took an average_columns argument.
     """
     if not data_rows:
         return []
     width = len(data_rows[0])
     row = [''] * width
     row[0] = 'Department Average'
-    for col in range(1, width):
+    eligible = (
+        range(1, width) if average_columns is None
+        else sorted(c for c in average_columns if 0 < c < width)
+    )
+    for col in eligible:
         values = []
         for r in data_rows:
+            cell = r[col]
+            if cell == '':
+                continue
             try:
-                values.append(float(r[col]))
+                values.append(float(cell))
             except (TypeError, ValueError):
                 values = None
                 break
@@ -1132,6 +1167,13 @@ class ReportingModule(BaseModule):
                 and report_def.uses_department_tabs and 'department' in report_def.columns):
             department_col = report_def.columns.index('department')
 
+        average_columns = None
+        if report_def is not None and report_def.average_columns:
+            average_columns = {
+                report_def.columns.index(key)
+                for key in report_def.average_columns if key in report_def.columns
+            }
+
         wb = Workbook()
         if department_col is not None:
             used_sheet_names: set = set()
@@ -1141,7 +1183,7 @@ class ReportingModule(BaseModule):
                 table_name = "ReportTable" if i == 0 else f"ReportTable{i + 1}"
                 _write_xlsx_report_sheet(
                     ws, title_block, headers, rows, report_def,
-                    average_row=_department_average_row(rows), table_name=table_name)
+                    average_row=_department_average_row(rows, average_columns), table_name=table_name)
         else:
             ws = wb.active
             ws.title = "Report"

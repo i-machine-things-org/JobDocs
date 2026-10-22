@@ -17,8 +17,11 @@ INFORMATION_SCHEMA/sys.tables rows for anything that login has no permission
 on. Two ways to see everything:
   1. Run this with a login that already has broader access (e.g. your own
      SSMS/DBA login): JOBBOSS_DB_USER=... JOBBOSS_DB_PASS=... python tools/dump_db_schema.py
-  2. Or grant metadata-only visibility to the existing read-only login
-     (does NOT expose any row data, just table/column names and types):
+  2. Or grant metadata-only visibility to the existing read-only login (does
+     NOT expose row data, but DOES expose every object's full definition --
+     table/column names and types, plus the T-SQL source of any view, stored
+     procedure, function, or trigger via sys.sql_modules, which can itself
+     contain sensitive business logic):
          GRANT VIEW DEFINITION ON DATABASE::<your_jobboss_database> TO jobdocs_reporting_ro;
 
 Usage:
@@ -85,10 +88,18 @@ GROUP BY s.name, t.name
 def _load_settings() -> dict:
     """Starts from JobDocs' own stored settings.json (same as the running app
     uses), if present, then layers any JOBBOSS_DB_* env var on top
-    independently -- so e.g. JOBBOSS_DB_PASS alone (to run this with a
-    different, broader login against the same server) doesn't require also
-    re-specifying HOST/NAME/USER via env vars just to be noticed. main()
-    validates the merged result is actually enough to connect with.
+    independently -- so e.g. JOBBOSS_DB_USER + JOBBOSS_DB_PASS together (to
+    run this with a different, broader login against the same server) don't
+    require also re-specifying HOST/NAME via env vars; those still come from
+    the stored settings.json. (JOBBOSS_DB_PASS alone is not enough to switch
+    logins -- the username has to change too, or the new password just gets
+    tried against the still-configured old username.)
+
+    An env var that's SET to an empty string (JOBBOSS_DB_PORT='') overrides
+    the stored value with that emptiness, rather than being treated the same
+    as not setting it at all -- needed to clear a stored named-instance port
+    when overriding just the host. main() validates the merged result is
+    actually enough to connect with.
     """
     settings_file = get_config_dir() / 'settings.json'
     settings = json.loads(settings_file.read_text(encoding='utf-8')) if settings_file.exists() else {}
@@ -99,9 +110,8 @@ def _load_settings() -> dict:
         ('jobboss_db_name', 'JOBBOSS_DB_NAME'),
         ('jobboss_db_user', 'JOBBOSS_DB_USER'),
     ):
-        value = os.environ.get(env_var, '').strip()
-        if value:
-            settings[key] = value
+        if env_var in os.environ:
+            settings[key] = os.environ[env_var].strip()
 
     return settings
 

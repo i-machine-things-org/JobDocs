@@ -77,7 +77,7 @@ def main() -> int:
 
     try:
         diff = subprocess.run(
-            ['git', 'diff', '--cached', '--unified=0'],
+            ['git', 'diff', '--no-color', '--cached', '--unified=0'],
             cwd=_REPO_ROOT, capture_output=True, text=True, check=True,
         ).stdout
     except subprocess.CalledProcessError as exc:

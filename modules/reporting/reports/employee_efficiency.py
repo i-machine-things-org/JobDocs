@@ -670,7 +670,8 @@ def _fetch_summary(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Di
 # reader of the exported file actually needs, not the full investigation.
 _FORMULA_FOOTER = [
     "Adj Hrs = Est Hrs (for the operation) x [this employee's Act Hrs / total Act Hrs "
-    "logged by every active employee on that operation, within the picked date range]",
+    "logged by every employee (active or inactive) on that operation, within the "
+    "picked date range]",
     "% Eff = Adj Hrs / this employee's Act Hrs x 100",
     "Setup and Run are tracked and scored as two separate metrics, never combined into "
     "one number. Run alone feeds JobBOSS's official Employee Efficiency score; Setup is "
@@ -684,6 +685,20 @@ _FORMULA_FOOTER = [
     "or operation.",
 ]
 
+# Everything in DETAIL_COLUMNS/SUMMARY_COLUMNS except the identifier columns
+# (employee/job/work_center/department/operation) -- the only ones with a
+# sensible department-average (see base.ReportDefinition.average_columns and
+# module.py's _department_average_row(), which would otherwise average an
+# identifier column whenever its values happen to all parse as numbers).
+_DETAIL_AVERAGE_COLUMNS = (
+    'setup_act_hrs', 'setup_est_hrs', 'setup_adj_hrs', 'setup_pct_eff',
+    'run_act_hrs', 'run_est_hrs', 'run_qty', 'run_adj_hrs', 'run_pct_eff', 'pct_indirect',
+)
+_SUMMARY_AVERAGE_COLUMNS = (
+    'setup_act_hrs', 'setup_est_hrs', 'setup_adj_hrs', 'setup_pct_eff',
+    'run_act_hrs', 'run_est_hrs', 'run_adj_hrs', 'run_pct_eff', 'pct_indirect',
+)
+
 EMPLOYEE_EFFICIENCY_DETAIL = ReportDefinition(
     name="Employee Efficiency - Detail",
     columns=DETAIL_COLUMNS,
@@ -694,6 +709,7 @@ EMPLOYEE_EFFICIENCY_DETAIL = ReportDefinition(
     dates_required=True,
     uses_employee_filter=True,
     uses_department_tabs=True,
+    average_columns=_DETAIL_AVERAGE_COLUMNS,
     footer_lines=_FORMULA_FOOTER,
 )
 EMPLOYEE_EFFICIENCY_SUMMARY = ReportDefinition(
@@ -706,5 +722,6 @@ EMPLOYEE_EFFICIENCY_SUMMARY = ReportDefinition(
     dates_required=True,
     uses_employee_filter=True,
     uses_department_tabs=True,
+    average_columns=_SUMMARY_AVERAGE_COLUMNS,
     footer_lines=_FORMULA_FOOTER,
 )

@@ -14,13 +14,25 @@ set -e
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 CHECK="$REPO_ROOT/tools/githooks/pre_commit_check.py"
 
-if command -v py >/dev/null 2>&1; then
-    py "$CHECK"
-elif command -v python3 >/dev/null 2>&1; then
-    python3 "$CHECK"
-elif command -v python >/dev/null 2>&1; then
-    python "$CHECK"
+# `command -v` only proves a name resolves on PATH, not that running it
+# actually works -- on Windows, `python3`/`python` can resolve to the
+# Microsoft Store's non-functional redirect stub, which exits with an error
+# instead of running anything. A trivial `-c "import sys"` probe catches
+# that case so a present-but-broken earlier candidate doesn't block `set -e`
+# from ever reaching the next, working one.
+_works() {
+    command -v "$1" >/dev/null 2>&1 && "$1" -c "import sys" >/dev/null 2>&1
+}
+
+if _works py; then
+    PYTHON=py
+elif _works python3; then
+    PYTHON=python3
+elif _works python; then
+    PYTHON=python
 else
-    echo "pre-commit: no Python interpreter found (tried py/python3/python) -- skipping real-data check." >&2
+    echo "pre-commit: no working Python interpreter found (tried py/python3/python) -- skipping real-data check." >&2
     exit 0
 fi
+
+"$PYTHON" "$CHECK"

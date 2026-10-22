@@ -81,6 +81,21 @@ def test_numeric_or_text_leaves_non_numeric_text_untouched():
     assert _numeric_or_text("'=HYPERLINK(evil)") == "'=HYPERLINK(evil)"  # neutralized value stays text
 
 
+def test_numeric_or_text_preserves_leading_zeros_on_identifiers():
+    # A PO/part number like "0012345" must stay text -- int("0012345") == 12345
+    # silently discards a real leading-zero digit, not just a display artifact.
+    assert _numeric_or_text('0012345') == '0012345'
+    assert _numeric_or_text('00') == '00'
+    assert _numeric_or_text('0') == 0  # no leading zero to lose -- converts fine
+
+
+def test_numeric_or_text_rejects_nan_inf_and_exponent_notation():
+    # float() itself happily accepts these -- a literal text value spelled
+    # like one of them must not silently become a special/scientific float.
+    for value in ('nan', 'NaN', 'inf', '-inf', 'Infinity', '1e5'):
+        assert _numeric_or_text(value) == value
+
+
 def test_title_block_neutralizes_customers_line():
     mod = ReportingModule()
     mod._last_report_type = "Job Report"

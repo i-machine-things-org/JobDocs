@@ -90,6 +90,32 @@ def test_department_average_row_empty_input_returns_empty():
     assert _department_average_row([]) == []
 
 
+def test_department_average_row_excludes_blank_cells_without_voiding_the_column():
+    # A blank cell ('') means "not scoreable" (e.g. an Indirect operation's
+    # blank Adj Hrs) -- it must be excluded from the average, not void the
+    # whole column the way a genuine non-numeric anomaly ('N/A') still does.
+    rows = [
+        ['Adams', '10.0', ''],
+        ['Baker', '20.0', '5.0'],
+    ]
+    avg = _department_average_row(rows)
+    assert avg[1] == 15.0
+    assert avg[2] == 5.0  # averaged over just the one real value, not voided
+
+
+def test_department_average_row_restricts_to_average_columns():
+    # Column 1 ('job') is all-numeric by coincidence but excluded from
+    # average_columns -- must stay blank even though it would otherwise
+    # pass the numeric check. Column 2 ('hours') is included and averages.
+    rows = [
+        ['Adams', '30101', '10.0'],
+        ['Baker', '30102', '20.0'],
+    ]
+    avg = _department_average_row(rows, average_columns={2})
+    assert avg[1] == ''
+    assert avg[2] == 15.0
+
+
 def _report_def(**overrides):
     defaults = dict(
         name="Test Report", columns=('employee', 'department', 'hours'),

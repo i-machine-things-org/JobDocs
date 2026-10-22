@@ -48,3 +48,18 @@ def test_footer_lines_when_set_is_a_nonempty_list_of_strings():
             assert all(isinstance(line, str) and line for line in report.footer_lines), (
                 f"{name}: footer_lines must be non-empty strings"
             )
+
+
+def test_average_columns_is_a_subset_of_columns():
+    for name, report in REPORTS.items():
+        unknown = set(report.average_columns) - set(report.columns)
+        assert not unknown, f"{name}: average_columns {unknown} not in columns"
+
+
+def test_average_columns_only_set_alongside_uses_department_tabs():
+    for name, report in REPORTS.items():
+        if report.average_columns:
+            assert report.uses_department_tabs, (
+                f"{name}: average_columns is set but uses_department_tabs=False -- "
+                "it's never read by _export_xlsx() in that case"
+            )

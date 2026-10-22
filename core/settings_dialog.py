@@ -300,8 +300,9 @@ class SettingsDialog(QDialog):
         jobboss_layout.addWidget(self.jobboss_password_edit, 2, 3)
         _jb_vbox.addLayout(jobboss_layout)
         jobboss_info = QLabel(
-            "SELECT-only access to the Job table. The password is stored in your OS "
-            "credential store, not in settings.json. See experimental/README.md."
+            "SELECT-only access to Job, Delivery, Job_Operation, Job_Operation_Time, "
+            "Employee, and Work_Center. The password is stored in your OS credential "
+            "store, not in settings.json. See experimental/README.md."
         )
         jobboss_info.setWordWrap(True)
         jobboss_info.setStyleSheet("color: gray; font-size: 9pt;")
