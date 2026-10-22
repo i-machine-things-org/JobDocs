@@ -762,6 +762,7 @@ EMPLOYEE_EFFICIENCY_DETAIL = ReportDefinition(
     uses_employee_filter=True,
     uses_department_tabs=True,
     average_columns=_DETAIL_AVERAGE_COLUMNS,
+    uses_employee_total_rows=True,
     footer_lines=_FORMULA_FOOTER,
 )
 EMPLOYEE_EFFICIENCY_SUMMARY = ReportDefinition(

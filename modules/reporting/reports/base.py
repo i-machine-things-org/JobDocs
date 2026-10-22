@@ -49,6 +49,15 @@ class ReportDefinition:
     # average row makes sense to compute -- only meaningful alongside
     # uses_department_tabs.
     average_columns: Tuple[str, ...] = ()
+    # xlsx export only (like average_columns): insert an "<Employee> Total"
+    # row plus a blank spacer row after each employee's consecutive block of
+    # rows, matching JobBOSS's own native Detail report layout (one row per
+    # operation, grouped into per-employee blocks each closed out by a total
+    # line). Relies on `fetch`'s own SQL already ordering rows so one
+    # employee's rows are contiguous -- this does not re-sort. Because the
+    # inserted rows break the uniform shape an Excel Table/AutoFilter range
+    # requires, a report with this on does not get wrapped in a Table.
+    uses_employee_total_rows: bool = False
     # Given one formatted row dict, return the column KEY to highlight red
     # (e.g. 'sched_end'), or None. None (the default) means this report never
     # highlights anything.

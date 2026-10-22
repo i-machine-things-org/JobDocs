@@ -189,6 +189,86 @@ def _department_average_row(data_rows: list, average_columns: Optional[set] = No
     return row
 
 
+def _employee_total_rows(data_rows: list, report_def) -> list:
+    """data_rows with an '<Employee> Total' row plus a blank spacer row
+    inserted after each employee's consecutive block, matching JobBOSS's own
+    native Detail report layout (one block per employee, each closed out by
+    a total line). Relies on the rows already being grouped -- the report's
+    own SQL ORDER BY puts one employee's rows together -- this does not
+    re-sort or merge non-contiguous runs of the same employee.
+
+    Within each employee's block, Setup/Run Act Hrs, Est Hrs, and Adj Hrs
+    are each summed only across rows where that block's Adj Hrs is
+    non-blank -- the same "not scoreable, exclude from both sides of the
+    ratio" rule already applied per-cell (module docstring's "When JobBOSS
+    blanks an Adj Hrs cell") and in Summary's own aggregate. % Eff is then
+    the ratio of those sums, not an average of the rows' own % Eff values.
+    % Indirect is a per-employee constant already identical on every one of
+    that employee's rows, so it's copied from the first row rather than
+    re-derived. A no-op (returns data_rows unchanged) if the column shape
+    doesn't actually look like Detail's.
+    """
+    if not data_rows or 'employee' not in report_def.columns:
+        return data_rows
+    col = {name: i for i, name in enumerate(report_def.columns)}
+    blocks = (
+        ('setup_act_hrs', 'setup_est_hrs', 'setup_adj_hrs', 'setup_pct_eff'),
+        ('run_act_hrs', 'run_est_hrs', 'run_adj_hrs', 'run_pct_eff'),
+    )
+    if not all(key in col for block in blocks for key in block):
+        return data_rows
+    emp_idx = col['employee']
+    width = len(data_rows[0])
+
+    def _num(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _total_row(employee: str, group: list) -> list:
+        row = [''] * width
+        row[emp_idx] = f"{employee} Total"
+        for act_key, est_key, adj_key, pct_key in blocks:
+            act_total = est_total = adj_total = 0.0
+            scoreable = False
+            for r in group:
+                if r[col[adj_key]] == '':
+                    continue
+                scoreable = True
+                act_total += _num(r[col[act_key]]) or 0.0
+                est_total += _num(r[col[est_key]]) or 0.0
+                adj_total += _num(r[col[adj_key]]) or 0.0
+            if scoreable:
+                # Strings, not raw floats -- every other cell in data_rows is
+                # a string (same convention _numeric_or_text() downstream
+                # assumes throughout this file), and this matches the same
+                # f"{...:.2f}"/f"{...:.1f}" formatting _rows_from_detail()
+                # already uses for these same columns.
+                row[col[act_key]] = f"{act_total:.2f}"
+                row[col[est_key]] = f"{est_total:.2f}"
+                row[col[adj_key]] = f"{adj_total:.2f}"
+                row[col[pct_key]] = f"{(adj_total / act_total * 100):.1f}" if act_total else ''
+        if 'pct_indirect' in col:
+            row[col['pct_indirect']] = group[0][col['pct_indirect']]
+        return row
+
+    result = []
+    i, n = 0, len(data_rows)
+    while i < n:
+        employee = data_rows[i][emp_idx]
+        j = i
+        while j < n and data_rows[j][emp_idx] == employee:
+            j += 1
+        group = data_rows[i:j]
+        result.extend(group)
+        result.append(_total_row(employee, group))
+        if j < n:
+            result.append([''] * width)
+        i = j
+    return result
+
+
 def _write_xlsx_report_sheet(ws, title_block: list, headers: list, data_rows: list, report_def,
                              average_row: Optional[list] = None, table_name: str = "ReportTable"):
     """Write one worksheet's worth of a report export: title block, header
@@ -256,8 +336,12 @@ def _write_xlsx_report_sheet(ws, title_block: list, headers: list, data_rows: li
     # exported file opens already sortable/filterable per column in Excel
     # -- not just a plain value dump. Skipped for a header-only (no data
     # rows) export: nothing to sort/filter, and Excel's Table requires at
-    # least one row below the header.
-    if len(data_rows) > 0:
+    # least one row below the header. Also skipped when uses_employee_
+    # total_rows inserted Total/blank rows into data_rows -- an Excel Table
+    # range requires every row to be real, uniformly-shaped data, which the
+    # inserted rows aren't.
+    uses_total_rows = bool(report_def and report_def.uses_employee_total_rows)
+    if len(data_rows) > 0 and not uses_total_rows:
         last_col_letter = get_column_letter(len(safe_headers))
         table_ref = f"A{header_row_idx}:{last_col_letter}{ws.max_row}"
         table = Table(displayName=table_name, ref=table_ref)
@@ -1173,6 +1257,8 @@ class ReportingModule(BaseModule):
                 for key in report_def.average_columns if key in report_def.columns
             }
 
+        uses_total_rows = bool(report_def and report_def.uses_employee_total_rows)
+
         wb = Workbook()
         if department_col is not None:
             used_sheet_names: set = set()
@@ -1180,12 +1266,20 @@ class ReportingModule(BaseModule):
                 ws = wb.active if i == 0 else wb.create_sheet()
                 ws.title = _safe_sheet_name(department, used_sheet_names)
                 table_name = "ReportTable" if i == 0 else f"ReportTable{i + 1}"
+                # Average computed from the clean per-operation rows, before
+                # Total/blank rows are interleaved -- those rows would
+                # otherwise double-count already-summed values into the
+                # department's own average.
+                avg_row = _department_average_row(rows, average_columns)
+                sheet_rows = _employee_total_rows(rows, report_def) if uses_total_rows else rows
                 _write_xlsx_report_sheet(
-                    ws, title_block, headers, rows, report_def,
-                    average_row=_department_average_row(rows, average_columns), table_name=table_name)
+                    ws, title_block, headers, sheet_rows, report_def,
+                    average_row=avg_row, table_name=table_name)
         else:
             ws = wb.active
             ws.title = "Report"
+            if uses_total_rows:
+                data_rows = _employee_total_rows(data_rows, report_def)
             _write_xlsx_report_sheet(ws, title_block, headers, data_rows, report_def)
 
         wb.save(file_path)
