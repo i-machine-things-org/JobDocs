@@ -278,6 +278,36 @@ of the existing shared-denominator condition, in the outer `SELECT`'s
 AND op.Run_Est_Hrs > 0` for Run. Deliberately asymmetric -- don't "tidy"
 this into one shared condition for both blocks.
 
+**The blank-cell rule above governs individual cells; Summary's aggregate
+SUM() needs the same exclusion applied to Act/Est Hrs, not just Adj Hrs --
+a real, live bug, found and fixed one session after the rule above was
+first confirmed.** The "Operations without Adj E Hrs are not included"
+footnote already implied this (that's exactly what "145.95 more than their
+own Employee Total" meant), but `op_scored`'s CASE guards originally wrapped
+only `Setup_Adj_Hrs`/`Run_Adj_Hrs` -- `Setup_Act_Hrs`/`Setup_Est_Hrs`/
+`Run_Act_Hrs`/`Run_Est_Hrs` were summed unconditionally from `op_rollup`,
+so an unscoreable operation's real logged Act Hrs still inflated the outer
+SUM() denominator even though its Adj Hrs correctly contributed nothing to
+the numerator. Caught on EMP-J, a real employee with exactly one scoreable
+operation in a short date range (Adj 4 / Act 2.92, matching JobBOSS's real
+Detail export exactly -- 136.99%) plus several Work_Center.Type='Direct'
+monthly overhead-bucket operations (ENGINEER/R&D time logged against a
+non-customer "job" named after the month, e.g. "2026-AUG" -- the same
+month-standing-in-for-Job convention as the Indirect buckets, just not
+flagged Indirect by Work_Center.Type, so _OP_TOTALS_CTE's/op_rollup's
+existing Indirect exclusion doesn't catch it either): Summary showed 0.6%
+(the ~637 real-but-unscoreable overhead hours drowning out the 2.92 real
+scoreable hours in the denominator) where JobBOSS's own report shows
+136.99%. Fixed by wrapping all four columns in the same CASE guards as the
+Adj Hrs columns in `op_scored`, confirmed to reproduce JobBOSS's 136.99%
+exactly once fixed. `Job.Customer IS NULL` was investigated as a cleaner,
+more general exclusion signal for this whole class of non-customer "job"
+but rejected -- it also matches genuine internal/non-billed real work
+(e.g. a machine-install project, a rework placeholder job), which would be
+wrongly excluded too; gating on scoreability (the same condition Adj Hrs
+already uses) has no such false-positive risk since it only ever excludes
+operations that were already contributing nothing to the numerator.
+
 **Three earlier (wrong) Run formulas, all now removed, kept here so none
 get retried:** (1) a naive Est/Act ratio of the Hours columns; (2)
 `Job_Operation.Efficiency_Pct` (confirmed static `100.0` garbage); (3) an
@@ -496,6 +526,24 @@ ORDER BY e.Last_Name, e.First_Name, op.Job
 # also leaves out of its own "Employee Total" row ("Operations without Adj E
 # Hrs are not included"), and because SUM() ignores NULL, NULLing those
 # operations here drops them from the rollup exactly the same way.
+#
+# Critically, the SAME guard is applied to Setup_Act_Hrs/Setup_Est_Hrs/
+# Run_Act_Hrs/Run_Est_Hrs here too, not just the Adj_Hrs columns -- an
+# unscoreable operation's real logged Act Hrs must NOT still flow into the
+# outer SELECT's SUM(Act_Hrs) denominator just because its Adj_Hrs correctly
+# came out NULL. Confirmed as a real, live bug: an employee with one real
+# production operation (Adj 4 / Act 2.92, matching JobBOSS's own Detail
+# export exactly -- 136.99%) plus several Work_Center.Type='Direct' monthly
+# overhead buckets (ENGINEER/R&D time logged against a non-customer "job"
+# named after the month, e.g. "2026-AUG" -- JobBOSS's own month-standing-in-
+# for-Job convention, same idea as the Indirect buckets but not flagged
+# Indirect by Work_Center.Type) showed JobBOSS's real "Employee Total" % at
+# 136.99% (matching the one real operation exactly, since the overhead rows
+# have Est_Run_Hrs = 0 and are excluded) while this query, before this fix,
+# summed those overhead rows' real Act Hrs into the denominator anyway
+# (2.92 real + ~637 overhead = ~640), producing 0.6% -- off by over 200x.
+# Gating Act/Est Hrs the same way Adj_Hrs already is reproduces JobBOSS's
+# 136.99% exactly, confirmed live against that same employee/date range.
 _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY = """
 WITH {op_totals},
 {indirect_totals},
@@ -511,7 +559,15 @@ op_rollup AS (
     GROUP BY jot.Employee, jot.Job_Operation
 ),
 op_scored AS (
-    SELECT op.Employee, op.Setup_Act_Hrs, op.Setup_Est_Hrs, op.Run_Act_Hrs, op.Run_Est_Hrs,
+    SELECT op.Employee,
+           CASE WHEN ot.Total_Setup_Act_Hrs > 0 AND op.Setup_Act_Hrs > 0
+                THEN op.Setup_Act_Hrs END AS Setup_Act_Hrs,
+           CASE WHEN ot.Total_Setup_Act_Hrs > 0 AND op.Setup_Act_Hrs > 0
+                THEN op.Setup_Est_Hrs END AS Setup_Est_Hrs,
+           CASE WHEN ot.Total_Run_Act_Hrs > 0 AND op.Run_Act_Hrs > 0 AND op.Run_Est_Hrs > 0
+                THEN op.Run_Act_Hrs END AS Run_Act_Hrs,
+           CASE WHEN ot.Total_Run_Act_Hrs > 0 AND op.Run_Act_Hrs > 0 AND op.Run_Est_Hrs > 0
+                THEN op.Run_Est_Hrs END AS Run_Est_Hrs,
            CASE WHEN ot.Total_Setup_Act_Hrs > 0 AND op.Setup_Act_Hrs > 0
                 THEN op.Setup_Est_Hrs * op.Setup_Act_Hrs / ot.Total_Setup_Act_Hrs END AS Setup_Adj_Hrs,
            CASE WHEN ot.Total_Run_Act_Hrs > 0 AND op.Run_Act_Hrs > 0 AND op.Run_Est_Hrs > 0
@@ -668,21 +724,17 @@ def _fetch_summary(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Di
 # Printed at the bottom of every exported Detail/Summary file -- the same
 # plain-language form as the module docstring's formula, condensed to what a
 # reader of the exported file actually needs, not the full investigation.
+# Each line is written to a single, unwrapped cell (_write_xlsx_report_sheet
+# just does ws.append([line])) so it visually spills across however many
+# columns its length needs -- kept under ~90 chars/line so that spill stays
+# within column K on a normal-width Detail/Summary sheet instead of running
+# off past the data columns entirely.
 _FORMULA_FOOTER = [
-    "Adj Hrs = Est Hrs (for the operation) x [this employee's Act Hrs / total Act Hrs "
-    "logged by every employee (active or inactive) on that operation, within the "
-    "picked date range]",
-    "% Eff = Adj Hrs / this employee's Act Hrs x 100",
-    "Setup and Run are tracked and scored as two separate metrics, never combined into "
-    "one number. Run alone feeds JobBOSS's official Employee Efficiency score; Setup is "
-    "scored the same way, just not rolled into it -- use it to catch under/over-bid "
-    "setup estimates and individual setup performance.",
-    "Blank Adj Hrs / % Eff means this operation could not be scored (no comparable "
-    "hours recorded, or a known JobBOSS exclusion not modeled here).",
-    "% Indirect = this employee's total Indirect hours (vacation, training, cleanup, etc.) "
-    "/ their total hours of every kind, within the picked date range x 100. Same value on "
-    "every row for a given employee -- it's a per-employee total, not specific to one job "
-    "or operation.",
+    "Adj Hrs = Est Hrs x (own Act Hrs / total Act Hrs on that op, all employees)",
+    "% Eff = Adj Hrs / own Act Hrs x 100",
+    "Setup and Run are scored separately, never combined. Run = JobBOSS's official score.",
+    "Blank Adj Hrs / % Eff = not scoreable (no comparable hours, or a JobBOSS exclusion).",
+    "% Indirect = Indirect hours / total hours x 100, per employee (same on every row).",
 ]
 
 # Everything in DETAIL_COLUMNS/SUMMARY_COLUMNS except the identifier columns

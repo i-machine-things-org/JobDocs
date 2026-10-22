@@ -112,6 +112,27 @@ def test_both_queries_compute_adj_hrs_via_proportional_share():
         assert "Run_Est_Hrs * " in sql and "Run_Act_Hrs / ot.Total_Run_Act_Hrs" in sql
 
 
+def test_summary_excludes_unscoreable_ops_act_hrs_from_aggregate():
+    # Regression guard for a real, live bug: an operation whose Adj_Hrs is
+    # correctly NULLed (unscoreable -- e.g. a monthly ENGINEER/R&D overhead
+    # bucket job, Est_Run_Hrs = 0) must ALSO have its own Act_Hrs/Est_Hrs
+    # excluded from op_scored's columns, not just Adj_Hrs -- otherwise real
+    # logged Act Hrs on an unscoreable op still inflates the outer
+    # SUM(Act_Hrs) denominator even though the numerator correctly ignores
+    # it. Confirmed live: one real employee with one scoreable operation
+    # (Adj 4 / Act 2.92, matching JobBOSS's real export exactly -- 136.99%)
+    # plus several Work_Center.Type='Direct' monthly overhead buckets showed
+    # 0.6% before this guard (denominator diluted by ~637 unscoreable hours)
+    # and 137.0% after -- an exact match to JobBOSS's own "Employee Total".
+    op_scored_start = _SUMMARY_SQL.index("op_scored AS (")
+    op_scored_end = _SUMMARY_SQL.index(")\nSELECT op.Employee, e.Department")
+    op_scored_block = _SUMMARY_SQL[op_scored_start:op_scored_end]
+    assert "THEN op.Setup_Act_Hrs END AS Setup_Act_Hrs" in op_scored_block
+    assert "THEN op.Setup_Est_Hrs END AS Setup_Est_Hrs" in op_scored_block
+    assert "THEN op.Run_Act_Hrs END AS Run_Act_Hrs" in op_scored_block
+    assert "THEN op.Run_Est_Hrs END AS Run_Est_Hrs" in op_scored_block
+
+
 def test_op_totals_denominator_is_not_employee_filtered():
     # Regression guard: the proportional-share denominator must sum Act Hrs
     # across EVERY employee who touched an operation, not just the ones the

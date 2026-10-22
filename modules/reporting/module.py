@@ -980,7 +980,6 @@ class ReportingModule(BaseModule):
         generated = self._last_generated_at
         report_def = REPORTS.get(self._last_report_type)
         rows = [
-            ["JobDocs - JobBOSS Reporting"],
             ["Report:", self._last_report_type or ""],
             ["Date Range:", self._date_range_label()],
         ]
