@@ -269,6 +269,20 @@ def _employee_total_rows(data_rows: list, report_def) -> list:
     return result
 
 
+# A quoted, literal "%" -- NOT Excel's native unquoted "%" format code, which
+# multiplies the stored value by 100 before displaying it. Our % Eff values
+# are already stored in percent-point units (e.g. 136.9 meaning "136.9%"),
+# not as a 0-1 fraction, so the native format would misdisplay 136.9 as
+# "13690%". Rounds to the nearest whole percent for display only -- the full
+# precision value is still what's stored in the cell and used by any
+# formula/SUM() built on top of it in Excel. Matches JobBOSS's own real
+# export exactly: its %Eff cells use the number format `#,##0[$%-409]`, a
+# different-looking but equivalent "integer, literal % suffix, no auto-
+# scaling" format (confirmed by inspecting a real export -- 85% of its %Eff
+# cells store genuine non-integer values under that display mask).
+_PCT_DISPLAY_FORMAT = '0"%"'
+
+
 def _write_xlsx_report_sheet(ws, title_block: list, headers: list, data_rows: list, report_def,
                              average_row: Optional[list] = None, table_name: str = "ReportTable"):
     """Write one worksheet's worth of a report export: title block, header
@@ -305,9 +319,22 @@ def _write_xlsx_report_sheet(ws, title_block: list, headers: list, data_rows: li
         seen.add(name)
         safe_headers.append(name)
 
+    # Column KEYS ending in "_pct_eff" (e.g. setup_pct_eff, run_pct_eff) --
+    # a naming convention shared by Detail and Summary -- get the display
+    # format above. Data-driven by report_def.columns rather than a
+    # hardcoded column letter so it applies to whichever report actually
+    # has these columns, not just Employee Efficiency specifically.
+    pct_eff_cols = (
+        {i for i, key in enumerate(report_def.columns, start=1) if key.endswith('_pct_eff')}
+        if report_def else set()
+    )
+
     ws.append(safe_headers)
     for row in data_rows:
         ws.append([_numeric_or_text(v) for v in row])
+        if pct_eff_cols:
+            for col_idx in pct_eff_cols:
+                ws.cell(row=ws.max_row, column=col_idx).number_format = _PCT_DISPLAY_FORMAT
 
     # Same row_highlight() flag as the on-screen report_table
     # (_on_report_rows) -- reapplied here from the exported string values
@@ -356,11 +383,23 @@ def _write_xlsx_report_sheet(ws, title_block: list, headers: list, data_rows: li
     # a long average value nor a long footer line blows out every column's
     # width.
     if average_row is not None:
+        # ws.max_row is computed from populated cells, not rows appended --
+        # ws.append([]) (the blank spacer) writes no cells at all, so it
+        # does NOT advance max_row even though it does occupy a real row.
+        # Computing avg_row_idx as max_row + 1 right after that append (the
+        # original code here) landed one row too early -- on the blank
+        # spacer, not the average row -- so neither the bold font nor this
+        # number format were ever actually reaching the real average row.
+        # Reading max_row AFTER appending average_row itself sidesteps the
+        # gap entirely, since that row always has real cell content (at
+        # least the "Department Average" label).
         ws.append([])
-        avg_row_idx = ws.max_row + 1
         ws.append(average_row)
+        avg_row_idx = ws.max_row
         for cell in ws[avg_row_idx]:
             cell.font = Font(bold=True)
+        for col_idx in pct_eff_cols:
+            ws.cell(row=avg_row_idx, column=col_idx).number_format = _PCT_DISPLAY_FORMAT
 
     if report_def and report_def.footer_lines:
         ws.append([])

@@ -123,8 +123,8 @@ def test_write_xlsx_report_sheet_skips_excel_table_when_uses_employee_total_rows
     wb = Workbook()
     ws = wb.active
     report_def = _report_def()
-    rows = _employee_total_rows([_row('ALICE', run_act='2.00', run_est='4.00',
-                                       run_adj='4.00', run_pct='200.0')], report_def)
+    rows = _employee_total_rows(
+        [_row('ALICE', run_act='2.00', run_est='4.00', run_adj='4.00', run_pct='200.0')], report_def)
     _write_xlsx_report_sheet(
         ws, title_block=[['Title'], []], headers=list(_COLUMNS),
         data_rows=rows, report_def=report_def, table_name='ReportTable',

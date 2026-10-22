@@ -139,6 +139,26 @@ def test_write_xlsx_report_sheet_includes_average_row_and_table():
     assert ws.tables['ReportTable'] is not None
 
 
+def test_average_row_bold_font_lands_on_the_average_row_not_the_blank_spacer():
+    # Regression guard: ws.max_row is computed from populated cells, so
+    # ws.append([]) (the blank spacer before the average row) doesn't
+    # advance it -- a naive `avg_row_idx = ws.max_row + 1` computed right
+    # after that append lands one row too early, on the spacer itself,
+    # silently never bolding the real average row.
+    wb = Workbook()
+    ws = wb.active
+    data_rows = [['Adams', 'MACHINING', '10.00'], ['Baker', 'MACHINING', '20.00']]
+    _write_xlsx_report_sheet(
+        ws, title_block=[['Title'], []], headers=['Employee', 'Department', 'Hours'],
+        data_rows=data_rows, report_def=_report_def(),
+        average_row=_department_average_row(data_rows),
+    )
+    avg_row = [r for r in ws.iter_rows() if r[0].value == 'Department Average'][0]
+    assert all(cell.font.bold for cell in avg_row)
+    spacer_row = [r for r in ws.iter_rows() if r[0].value is None and r[0].row < avg_row[0].row][-1]
+    assert not any(cell.font.bold for cell in spacer_row)
+
+
 def test_write_xlsx_report_sheet_without_average_row_matches_old_single_sheet_behavior():
     wb = Workbook()
     ws = wb.active
@@ -149,3 +169,46 @@ def test_write_xlsx_report_sheet_without_average_row_matches_old_single_sheet_be
     )
     values = [[cell.value for cell in row] for row in ws.iter_rows()]
     assert all('Department Average' not in row for row in values)
+
+
+def test_pct_eff_columns_get_percent_display_format():
+    # Our % Eff values are stored in percent-point units (136.9 meaning
+    # "136.9%"), not Excel's native 0-1 fraction -- so the format must be a
+    # quoted literal '0"%"', not the unquoted '%' code (which would multiply
+    # by 100 and misdisplay 136.9 as "13690%"). Matches JobBOSS's own real
+    # export: integer display, full precision still the stored value.
+    report_def = _report_def(
+        columns=('employee', 'setup_pct_eff', 'hours'),
+        headers=['Employee', 'Setup % Eff', 'Hours'],
+    )
+    wb = Workbook()
+    ws = wb.active
+    _write_xlsx_report_sheet(
+        ws, title_block=[['Title'], []], headers=report_def.headers,
+        data_rows=[['Adams', '136.9', '10.00']], report_def=report_def,
+    )
+    data_row = list(ws.iter_rows())[-1]
+    pct_cell, hours_cell = data_row[1], data_row[2]
+    assert pct_cell.value == 136.9
+    assert pct_cell.number_format == '0"%"'
+    # Only the _pct_eff column gets it -- an ordinary numeric column (Hours)
+    # must not be reinterpreted as a percentage.
+    assert hours_cell.number_format != '0"%"'
+
+
+def test_pct_eff_format_applied_to_average_row_too():
+    report_def = _report_def(
+        columns=('employee', 'department', 'run_pct_eff'),
+        headers=['Employee', 'Department', 'Run % Eff'],
+        average_columns=('run_pct_eff',),
+    )
+    data_rows = [['Adams', 'MACHINING', '50.0'], ['Baker', 'MACHINING', '150.0']]
+    wb = Workbook()
+    ws = wb.active
+    _write_xlsx_report_sheet(
+        ws, title_block=[['Title'], []], headers=report_def.headers,
+        data_rows=data_rows, report_def=report_def,
+        average_row=_department_average_row(data_rows, average_columns={2}),
+    )
+    avg_row = [r for r in ws.iter_rows() if r[0].value == 'Department Average'][0]
+    assert avg_row[2].number_format == '0"%"'
