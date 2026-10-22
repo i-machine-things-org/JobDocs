@@ -22,8 +22,8 @@ superseded by this; see below for why):
 
     Adj Hrs(employee, operation, Setup-or-Run) =
         Est Hrs(operation) * Act Hrs(employee, operation)
-        / SUM(Act Hrs(every ACTIVE employee who logged time on operation,
-                       within the date range))
+        / SUM(Act Hrs(every employee who logged time on operation,
+                       active or not, within the date range))
 
     % Eff = Adj Hrs / Act Hrs(employee, operation) * 100
 
@@ -38,7 +38,7 @@ was unambiguous (no two employees sharing a same-text-labeled operation):
 **Setup matched exactly on 95.8% of rows** (7,094 / 7,407), **Run on 70.2%
 exact + 11.0% within 0.5 hrs** (the remaining gap is explained below, not
 unexplained noise). Independently confirmed at the aggregate level too: for
-one real employee (***REDACTED***), summing this formula's predicted Adj Hrs across
+one real employee (EMP-F), summing this formula's predicted Adj Hrs across
 every one of his operations landed within 1% of JobBOSS's own "Employee
 Total" row for both Setup (1247.74 predicted vs 1239.50 actual) and Run
 (3458.30 predicted vs 3346.62 actual) -- using only the real export's own
@@ -52,7 +52,7 @@ neither gets retried). The proportional-share formula above was found by
 parsing JobBOSS's own real export and solving for what relationship
 actually holds between its own Est/Act/Adj columns -- not by rereading the
 KB article differently. It fixes the two concrete failures that drove this:
-Setup % Eff values like 6200% (KYLE ***REDACTED***) and 1237% (DAVID ***REDACTED***) in an
+Setup % Eff values like 6200% (EMP-I) and 1237% (EMP-H) in an
 earlier Summary export, and the fact that in the real export, 55.2% of all
 rows have a *displayed* "Quantity" of 0 yet still carry a real, nonzero Adj
 E Hrs (e.g. Quantity=0, Adj E Hrs=0.78125) -- which the old Act_Run_Qty-based
@@ -62,62 +62,106 @@ the real driver of Run's Adj Hrs at all.
 **Independently confirmed exact on a second real operation, with two real
 employees.** Job 27652, CNC LATHE OP6 -- queried directly off the live
 database (not re-derived from the export) -- has exactly two contributors:
-***REDACTED*** (Setup Act 1.0, Run Act 2.5) and ***REDACTED*** (Setup Act 1.5, Run Act 1.5),
+EMP-F (Setup Act 1.0, Run Act 2.5) and EMP-G (Setup Act 1.5, Run Act 1.5),
 against a shared Setup Est of 1.25 and Run Est of 1.25. The formula predicts
-***REDACTED***'s Setup Adj as 1.25*1.0/2.5=0.5 and Run Adj as 1.25*2.5/4.0=0.78125;
-***REDACTED***'s Setup Adj as 1.25*1.5/2.5=0.75 and Run Adj as 1.25*1.5/4.0=0.46875.
+EMP-F's Setup Adj as 1.25*1.0/2.5=0.5 and Run Adj as 1.25*2.5/4.0=0.78125;
+EMP-G's Setup Adj as 1.25*1.5/2.5=0.75 and Run Adj as 1.25*1.5/4.0=0.46875.
 All four match JobBOSS's own real exported values exactly, to full float
 precision. This is the strongest confirmation of the formula in this
 module -- two independent employees, both blocks, no rounding.
 
-**Confirmed real bug, now fixed: op_totals must only include Active
-employees.** Found chasing a mismatch on Job 27173H, GRINDERS OP2: querying
-the live database directly (not the export) showed a second contributor,
-***REDACTED***, with real historical Act_Run_Hrs on that operation -- but ***REDACTED***
-doesn't appear anywhere in JobBOSS's own Employee Efficiency export at all,
-because ***REDACTED*** is not an Active employee, and the real report's whole
-population (same as this module's Employee picker, via
-db_integration.fetch_employees()) is Active-employees-only. op_totals used
-to sum Act Hrs across literally every employee in Job_Operation_Time,
-active or not, diluting an active employee's share with an inactive
-coworker's hours the real report never counts at all. Now joins Employee
-and filters Status='Active', matching the population the rest of this
-report already assumes everywhere else.
+**A later "fix" restricting op_totals to Active employees was itself wrong
+-- reverted.** Earlier, chasing a mismatch on Job 27173H, GRINDERS OP2,
+this module added `AND te.Status = 'Active'` to op_totals' join on the
+theory that since an inactive coworker never appears as a row in JobBOSS's
+own export, their hours shouldn't count in the shared denominator either.
+That theory was never actually confirmed against real numbers for 27173H
+itself (see "Two operations investigated to a dead end" below -- that one
+stayed unexplained under every formula tried, active-filtered or not) and
+turned out to be backwards. Confirmed wrong with exact arithmetic on Job
+26734, WELDING OP2 (Job_Operation 145813, Est_Run_Hrs=40): three real
+contributors -- call them EMP-A (Active, 11.0 hrs), EMP-B (Inactive, 5.0
+hrs), EMP-C (Inactive, 25.25 hrs). JobBOSS's real Adj Hrs for EMP-A is
+10.6666666666667. `40 * 11 / (11 + 5 + 25.25)` = `40 * 11 / 41.25` =
+`10.666666666666666` -- matches to full float precision only when the two
+Inactive coworkers' hours ARE included. Excluding them (the since-reverted
+behavior) computed EMP-A's share as `11/11 = 100%`, giving `Adj = 40.0` --
+nearly 4x too high, and this wasn't a one-off: re-checking every one of
+EMP-A's real operations after reverting the filter, 516 of 524 (98.5%) now
+match JobBOSS's real Adj Hrs exactly (previously ~70%, matching the Run
+accuracy figure below, which was measured before this bug was
+introduced). The real report's "Active Employees Only" population (which
+EMPLOYEES get their own row) and the proportional-share DENOMINATOR (whose
+hours get pooled per operation, for employees who DO get a row) are two
+independent things -- confirmed the Active-only *population* side is
+still correct, separately: this schema has exactly 26 Active employees
+and 215 Inactive, no ambiguous third status, and 26 is exactly the number
+of employee blocks in JobBOSS's own real export.
 
-**Two operations investigated to a dead end and deliberately left
-unexplained**, rather than forced into a formula that doesn't fit, because
-each one independently rules out every formula tried so far:
+**Some operations use a flat equal split (Est Hrs / number of employees)
+instead of proportional share -- real, confirmed at scale, but with no
+detectable trigger. NOT modeled here, deliberately.** On a minority of
+operations JobBOSS ignores how much each person logged and gives every
+contributor exactly `Est Hrs / N`. Confirmed on 3,296 distinct real
+operations where `Est/N` matches JobBOSS's own exported Adj Hrs to full
+float precision and the proportional-share value does not: e.g. Job 28804,
+CNC HBM1 OP1.5 (Job_Operation 175276, Est_Run_Hrs=180) has three
+contributors with wildly different Act Hrs -- EMP-D (70.25), EMP-E (30.0),
+EMP-A (7.0, same individual as the WELDING example above) -- yet all three
+get exactly **60** (`180 / 3`). Job 27173H, GRINDERS OP2 (Job_Operation
+160964, Est_Run_Hrs=26.67) is the same shape: two contributors (42.0 and
+6.25 hrs), both given `13.335` = `26.67 / 2` -- which is why it never fit
+the proportional formula (that would have needed a denominator of 84 Act
+Hrs against the 48.25 ever recorded).
 
-- Job 27173H, GRINDERS OP2 (Job_Operation 160964) -- confirmed via direct
-  query to be a single operation, not a hidden duplicate: Est_Run_Hrs=26.67,
-  Est_Required_Qty=80, Act_Run_Qty=2 for ***REDACTED***. Real Adj Hrs = 13.335
-  (=Est/2 exactly), which rules out *every* formula tried: the proportional-
-  share model (this module's own formula) would need a total of 84 Act Hrs
-  across contributors to produce 13.335 from Est=26.67/Act=42 -- but the
-  database has only 48.25 Act Hrs *ever recorded* against this operation,
-  across every employee, active or not, all of history (***REDACTED*** 42 + ***REDACTED***
-  6.25) -- 84 exceeds the maximum possible total, full stop, not an
-  approximation issue. The qty-based KB formula, computed properly this
-  time (Act_Run_Qty * Est_Run_Hrs/Est_Required_Qty = 2 * 26.67/80 = 0.667),
-  misses by 20x. Nothing tried explains this row.
-- Job 27173A, ASSEMBLY/ASSEMBLE (Job_Operation 154332) -- confirmed via
-  direct query to have four real contributors (***REDACTED*** 3.5, ***REDACTED*** 13.5,
-  ***REDACTED*** 4.5, ***REDACTED*** 10.25 Act Run Hrs), two of them active. JobBOSS's
-  export shows the entire Run block blank for ***REDACTED*** here, not a computed
-  value under any formula.
+**An earlier version of this docstring attributed this to jobs predating
+the shop's adoption of JobBOSS's Data Collection module. That explanation
+is disproved by the full data and must not be reinstated without new
+evidence.** Equal-split operations occur in every year on this install,
+including the most recent: 42.1% of 2026's multi-contributor operations
+and 46.2% of 2025's are equal-split, against 44.3% in 2010 and 51.2% in
+2012. It is not an old-data artifact and there is no job-number or date
+cutoff to find.
 
-Both are most likely further instances of the report's own "Operations
-without Adj E Hrs are not included" footnote (see above) -- a real,
-confirmed-material JobBOSS exclusion rule whose exact trigger condition has
-never been recovered, from here or earlier in this investigation. Chasing
-either further would mean guessing a new formula to fit two known
-outliers, which is exactly the mistake this module's history warns
-against; both are left unmodeled rather than forced to fit. The formula
-above remains the best-evidenced one for the general case -- confirmed
-exact on two independent real multi-employee operations (one Setup-heavy,
-one Run-heavy) and ~70-96% exact across thousands of real rows -- these two
-operations are treated as known, documented exceptions to it, not grounds
-to abandon it.
+**What the trigger is NOT** (each checked against the full 143,285-row
+export, so these are closed questions, not untried ideas):
+  - Not any column of `Job_Operation`. Every column was brute-forced for
+    separating power; the best single predictor is `Work_Center`, which is
+    plainly a proxy (26-85% equal-split depending on the work center) and
+    not a rule.
+  - Not the quantity, the run method, or the employee count on their own,
+    though two *necessary* conditions did fall out and both hold with
+    essentially no exceptions: equal split never happens when the
+    operation has no reported quantity (1 equal-split vs 6,467
+    proportional) and never happens when `Run_Method = 'FixedHrs'` (0 vs
+    3,895). Inside the remaining cell (a per-part run method *and* a
+    reported quantity) the split is 3,261 equal vs 3,422 proportional --
+    a coin flip.
+  - Not the time-entry pattern: overlapping work dates, entry counts,
+    who closed the operation, overtime factors, `Entry_Type`,
+    `Operation_Complete` and `Attended_Pct` were all cross-tabbed; none
+    separates the two.
+  - Not recoverable even in principle from the data this module can see:
+    Job 16865 has two labelled operations, `Job_Operation` 50715
+    (equal-split) and 50717 (proportional), that agree on run method
+    family, `Est_Required_Qty` (11), `Run_Qty` (11), `Act_Run_Qty` (11),
+    employee count and status -- the same attribute values land on both
+    sides of the branch.
+
+**Why it is left unimplemented rather than approximated.** Implemented
+with the best available trigger (per-part method + reported quantity, the
+two necessary conditions above), the equal-split path moves overall cell
+agreement by only +0.28 percentage points: it converts ~800 wrong rows to
+right while making a comparable number of currently-correct rows wrong,
+because the trigger is only ~49% precise. A rule that is right half the
+time is worse than a documented omission, and the whole history of this
+module is a warning against fitting a formula to a pattern whose cause
+isn't understood. The residual is quantified instead (see below), so a
+future session with a better signal can pick this up knowing exactly what
+it would buy. JobBOSS's own report source confirms the mechanism exists --
+its Crystal recordset carries an explicit `EmpCount` field (see the
+`LR_EmployeeEfficiency.TTX` note below) -- so the branch is real; only its
+condition is missing.
 
 **Accuracy improves sharply on newer (2026+) data, confirming this is
 mostly historical-data noise, not a formula problem.** Comparing this
@@ -146,13 +190,21 @@ in persistent memory), but any text-based comparison against a real export
 exposed to it. Neither failure mode is specific to this report or fixable
 in SQL -- they're properties of how the shop's data gets entered.
 
+These percentages were measured while the Active-only denominator bug
+above was still in place -- almost certainly an understatement of this
+formula's real accuracy, given the same bug turned a ~70% match rate into
+98.5% for one full employee (516/524 operations) once reverted. Not
+re-run at full scale after the fix (would need redoing this same
+job-number-range comparison from scratch); treat the 90%/97-98.7% figures
+as a floor, not the current number.
+
 **Grouping bug fix (Detail only).** Detail's CTE used to group by the
 *descriptive* columns (Job, Work_Center, Operation_Service) instead of the
 real Job_Operation foreign key -- Summary already grouped correctly, Detail
 didn't. Confirmed wrong directly from JobBOSS's own export: 303 distinct
 (employee, Job, Work_Center, Operation_Service) combinations appear *more
 than once* for the same employee in the real data, with genuinely different
-Est/Act/Adj values each time (e.g. ***REDACTED***'s "13072/ASSEMBLY/ASSEMBLE" appears
+Est/Act/Adj values each time (e.g. EMP-H's "13072/ASSEMBLY/ASSEMBLE" appears
 twice, once with Run Est Hrs 0.5 and once with Run Est Hrs 10 -- two real,
 distinct operations that happen to share a display label, likely a job
 whose routing revisits the same work center at two different steps). Group-
@@ -161,6 +213,26 @@ two unrelated operations' estimates into one nonsensical row. Detail now
 groups by jot.Job_Operation like Summary always did, with Job/Work_Center/
 Operation_Service selected alongside it (safe: Job_Operation determines them
 uniquely, so adding them to GROUP BY doesn't change the grouping grain).
+
+**Detail includes Indirect operations (Summary does not).** Confirmed
+directly against JobBOSS's real export: Indirect time (vacation, training,
+cleanup, etc.) appears as real line items in the real Detail report --
+each Indirect category (TRAINING, CLEAN-UP, MAINTNANCE, ADMIN, etc.) is
+its own Job_Operation per month, with the month itself (e.g. "2026-OCT")
+standing in for Job, confirmed live (`Job_Operation.Job = '2026-OCT'` for
+these). op_detail's own `jo.Job`/`jo.Work_Center`/`jo.Operation_Service`
+columns already carry this through unmodified -- no special-casing needed.
+Est_Setup_Hrs/Est_Run_Hrs are a real stored `0.0` for these rows (not
+`NULL`), but since op_totals (the denominator) still excludes Indirect --
+there's no real "proportional share" concept for non-job time -- the
+`LEFT JOIN op_totals` (not a plain `JOIN`, needed so these rows survive at
+all) leaves `ot.Total_*_Act_Hrs` `NULL` for them, so Setup_Adj_Hrs/
+Run_Adj_Hrs still correctly come out blank, matching the real report's own
+blank Adj Hrs/% Eff for these rows. Summary's op_rollup keeps the
+exclusion -- it's specifically a Setup/Run job-efficiency rollup, and
+including Indirect there would inflate "Act Hrs" with non-job time without
+changing Adj Hrs (still NULL/ignored by SUM()), distorting the Act-vs-Adj
+relationship Summary exists to show.
 
 **The proportional-share denominator is deliberately NOT employee-filtered.**
 `op_totals` (both queries) sums Act Hrs across *every* employee who logged
@@ -182,13 +254,29 @@ Setup and Run are always two independent blocks here too, never blended.
 **"Operations without Adj E Hrs are not included" -- the report's own
 footnote.** Precisely confirmed real in an earlier cross-check (one real
 employee's individual-row Run Act Hrs summed to 145.95 more than their own
-Employee Total). The proportional-share formula above explains this
-naturally: Adj Hrs is undefined (NULL here) whenever SUM(Act Hrs across all
-employees) on an operation is 0 -- the exact condition under which the
-ratio is 0/0, not a guessed exclusion rule. Not independently re-verified
-against the specific blank-cell rows from that earlier export (would need
-to re-run that cross-check against this formula specifically), so treat this
-as the likely explanation, not a fully closed loop.
+Employee Total). The proportional-share formula above explains part of
+this naturally: Adj Hrs is undefined (NULL here) whenever SUM(Act Hrs
+across all employees) on an operation is 0 -- the exact condition under
+which the ratio is 0/0, not a guessed exclusion rule. This covers the
+shared-denominator case but turned out not to be the whole rule -- see
+"When JobBOSS blanks an Adj Hrs cell" immediately below for the complete,
+now fully-confirmed condition.
+
+**When JobBOSS blanks an Adj Hrs cell -- the complete rule, not just the
+shared-denominator case above.** Adj Hrs is blank whenever EITHER the
+shared denominator is 0 (the 0/0 case just described) OR this employee's
+own Act Hrs for that block is 0 -- but Setup and Run are NOT symmetric
+about the second condition. A Setup block still gets a real, printed Adj
+Hrs (including a real `0`) whenever this employee logged real Setup hours,
+even if `Est_Setup_Hrs = 0` -- confirmed on 1,548 real rows where Setup
+Est is 0 but Setup Act is not, and JobBOSS still printed a computed value,
+not a blank. Run is stricter: it ALSO blanks whenever `Est_Run_Hrs = 0`,
+even when the employee logged real Run hours -- confirmed with no
+exception found on 23,185 real rows. Implemented as extra guards on top
+of the existing shared-denominator condition, in the outer `SELECT`'s
+`CASE` expressions: `op.Setup_Act_Hrs > 0` for Setup; `op.Run_Act_Hrs > 0
+AND op.Run_Est_Hrs > 0` for Run. Deliberately asymmetric -- don't "tidy"
+this into one shared condition for both blocks.
 
 **Three earlier (wrong) Run formulas, all now removed, kept here so none
 get retried:** (1) a naive Est/Act ratio of the Hours columns; (2)
@@ -234,17 +322,17 @@ Status = 'Active' (Job_Operation_Time has no status value confirmed to mean
 the only filter applied is the one the real report's own "Active Employees
 Only" checkbox describes, always on for v1 (see db_integration.fetch_employees()).
 
-Indirect time (vacation, training, cleanup, etc.) is excluded from all
-queries via Work_Center.Type <> 'Indirect' -- confirmed directly from this
-shop's own Work Center setup screen: Work_Center has a real Type column
-(Direct/Indirect), and it's the *work center* that's marked Indirect, not
-the job. Joins the Work_Center table (Job_Operation stores the work center
-code but not its Type) for this. Always on, not a checkbox -- indirect time
-counting toward an employee's hours is a correctness bug, not an optional
-view. (The KB article notes Work Center Type doesn't affect the report's
-own calculations -- this exclusion is this module's own choice, to keep
-non-production time out of an employee's hours at all, independent of how
-JobBOSS's canned report happens to treat it.)
+Indirect time (vacation, training, cleanup, etc.) is excluded via
+Work_Center.Type <> 'Indirect' from _OP_TOTALS_CTE and Summary's op_rollup
+(Work_Center has a real Type column, Direct/Indirect, confirmed directly
+from this shop's own Work Center setup screen -- it's the *work center*
+that's marked Indirect, not the job), keeping non-production time out of
+the proportional-share denominator and out of Summary's Setup/Run Act Hrs
+rollup, which is specifically a job-efficiency score. **Detail's own
+op_detail does NOT exclude it** -- confirmed directly against JobBOSS's
+real export that Indirect time appears as real line items in the real
+Detail report (e.g. "2026-OCT / INDIRECT / TRAINING"), not folded away;
+see "Detail includes Indirect operations" below for the full reasoning.
 
 **Department comes from Employee.Department -- the employee's own assigned
 department -- not Work_Center.Department.** An earlier version of this
@@ -273,16 +361,30 @@ from typing import Any, Dict, List
 from experimental.db_integration import connect, employee_filter_clause
 from modules.reporting.reports.base import ReportDefinition
 
-# op_totals: Act Hrs summed across every ACTIVE employee who logged time on
-# an operation, never filtered by the Employee picker -- see module
-# docstring ("deliberately NOT employee-filtered"). This is the shared
-# denominator both queries divide an operation's Est Hrs by. Joins Employee
-# and filters Status='Active' -- confirmed necessary live: an inactive
-# employee (***REDACTED***) had real historical hours on an operation an active
-# employee (***REDACTED***) also worked, inflating Adams's denominator and
-# under-crediting his Adj Hrs, since the real report's whole population is
-# Active-employees-only (same population db_integration.fetch_employees()
-# draws from) and never counts an inactive employee's hours at all.
+# op_totals: Act Hrs summed across EVERY employee (active or not) who
+# logged time on an operation, never filtered by the Employee picker --
+# see module docstring ("deliberately NOT employee-filtered"). This is the
+# shared denominator both queries divide an operation's Est Hrs by.
+#
+# Reverted an Active-only filter here (`JOIN Employee te ... AND
+# te.Status = 'Active'`) that turned out to be wrong, confirmed with exact
+# arithmetic against a real JobBOSS export: Job 26734, WELDING OP2
+# (Job_Operation 145813, Est_Run_Hrs=40) has three real contributors --
+# call them EMP-A (Active, 11.0 hrs), EMP-B (Inactive, 5.0 hrs), EMP-C
+# (Inactive, 25.25 hrs). JobBOSS's own real Adj Hrs for EMP-A is
+# 10.6666666666667. 40 * 11 / (11 + 5 + 25.25) = 40 * 11 / 41.25 =
+# 10.666666666666666 -- matches to full float precision only when
+# Inactive coworkers' hours ARE included in the denominator. Excluding
+# them (the reverted behavior) computed EMP-A's share as 11/11 = 100%,
+# giving Adj = 40.0 -- nearly 4x too high. The real report's "Active
+# Employees Only" population (which
+# EMPLOYEES get their own row in the output) and the proportional-share
+# DENOMINATOR (whose hours get pooled per operation) turned out to be two
+# independent things, not the same population as originally assumed when
+# the Active filter was added (chasing a different, still-unexplained
+# mismatch on Job 27173H -- see "Two operations investigated to a dead
+# end" below; that investigation's own numbers never actually confirmed
+# the Active filter either, in hindsight).
 # Substituted via {op_totals} below (not string concatenation) -- bandit's
 # B608 flags `+`-joined query strings even when every part is a constant;
 # plain .format() placeholders on constant strings don't trigger it (see
@@ -294,9 +396,8 @@ _OP_TOTALS_CTE = """op_totals AS (
     FROM Job_Operation_Time jot
     JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
     JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
-    JOIN Employee te ON te.Employee = jot.Employee
     WHERE jot.Work_Date BETWEEN %s AND %s AND jot.Rework_Time = 0
-          AND (wc.Type IS NULL OR wc.Type <> 'Indirect') AND te.Status = 'Active'
+          AND (wc.Type IS NULL OR wc.Type <> 'Indirect')
     GROUP BY jot.Job_Operation
 )"""
 
@@ -327,6 +428,30 @@ _INDIRECT_TOTALS_CTE = """indirect_totals AS (
 # silently merged distinct operations that happen to share a display label.
 # Job/Work_Center/Operation_Service are selected alongside Job_Operation in
 # the GROUP BY -- safe, since Job_Operation determines them uniquely.
+#
+# Unlike op_rollup (Summary) and _OP_TOTALS_CTE, this does NOT exclude
+# Indirect work centers -- confirmed directly against JobBOSS's own real
+# export that Indirect time (vacation, training, cleanup, etc.) appears as
+# real line items in the real Detail report, not folded away. JobBOSS logs
+# each Indirect category (TRAINING, CLEAN-UP, MAINTNANCE, ADMIN, etc.) as
+# its own Job_Operation per month, with the month itself (e.g. "2026-OCT")
+# standing in for Job -- jo.Job already carries that real value through
+# unmodified, no special-casing needed. Est_Setup_Hrs/Est_Run_Hrs are a
+# real stored 0.0 for these (not NULL) -- harmless, since the LEFT JOIN to
+# op_totals below (which still excludes Indirect -- there's no real
+# "proportional share" concept for non-job time) means ot.Total_*_Act_Hrs
+# is NULL for an Indirect row regardless, so Setup_Adj_Hrs/Run_Adj_Hrs
+# still correctly come out NULL (blank), matching the real report's own
+# blank Adj Hrs/% Eff columns for these rows.
+#
+# The two extra guards in the outer SELECT's CASE expressions
+# (`op.Setup_Act_Hrs > 0`, and `op.Run_Act_Hrs > 0 AND op.Run_Est_Hrs > 0`)
+# are JobBOSS's own blank-cell rules, confirmed exhaustively -- see the module
+# docstring's "When JobBOSS blanks an Adj Hrs cell". They are deliberately
+# asymmetric: Setup has no `Est > 0` guard because the real report DOES print
+# a real 0 for a Setup block with Est_Setup_Hrs = 0 and real logged setup
+# hours (1,548 such rows), whereas Run with Est_Run_Hrs = 0 is always blank
+# (23,185 rows). Don't "tidy" this into one shared condition.
 _EMPLOYEE_EFFICIENCY_DETAIL_QUERY = """
 WITH {op_totals},
 {indirect_totals},
@@ -337,22 +462,20 @@ op_detail AS (
            CASE WHEN SUM(jot.Act_Run_Hrs) = 0 THEN 0 ELSE SUM(jot.Act_Run_Qty) END AS Run_Qty
     FROM Job_Operation_Time jot
     JOIN Job_Operation jo ON jo.Job_Operation = jot.Job_Operation
-    JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center
-    WHERE jot.Work_Date BETWEEN %s AND %s AND jot.Rework_Time = 0
-          AND (wc.Type IS NULL OR wc.Type <> 'Indirect') AND {employee_clause}
+    WHERE jot.Work_Date BETWEEN %s AND %s AND jot.Rework_Time = 0 AND {employee_clause}
     GROUP BY jot.Employee, jot.Job_Operation, jo.Job, jo.Work_Center, jo.Operation_Service
 )
 SELECT op.Employee, e.First_Name, e.Last_Name, op.Job, op.Work_Center, op.Operation_Service, e.Department,
        op.Setup_Act_Hrs, op.Setup_Est_Hrs,
-       CASE WHEN ot.Total_Setup_Act_Hrs > 0
+       CASE WHEN ot.Total_Setup_Act_Hrs > 0 AND op.Setup_Act_Hrs > 0
             THEN op.Setup_Est_Hrs * op.Setup_Act_Hrs / ot.Total_Setup_Act_Hrs END AS Setup_Adj_Hrs,
        op.Run_Act_Hrs, op.Run_Est_Hrs, op.Run_Qty,
-       CASE WHEN ot.Total_Run_Act_Hrs > 0
+       CASE WHEN ot.Total_Run_Act_Hrs > 0 AND op.Run_Act_Hrs > 0 AND op.Run_Est_Hrs > 0
             THEN op.Run_Est_Hrs * op.Run_Act_Hrs / ot.Total_Run_Act_Hrs END AS Run_Adj_Hrs,
        CASE WHEN it.Total_Hrs > 0 THEN it.Indirect_Hrs / it.Total_Hrs * 100 END AS Indirect_Pct
 FROM op_detail op
 JOIN Employee e ON e.Employee = op.Employee
-JOIN op_totals ot ON ot.Job_Operation = op.Job_Operation
+LEFT JOIN op_totals ot ON ot.Job_Operation = op.Job_Operation
 LEFT JOIN indirect_totals it ON it.Employee = op.Employee
 WHERE e.Status = 'Active'
 ORDER BY e.Last_Name, e.First_Name, op.Job
@@ -366,6 +489,13 @@ ORDER BY e.Last_Name, e.First_Name, op.Job
 # simply contributes nothing, matching "not included" rather than "scored as
 # zero". Setup and Run are kept as separate columns here too, never summed
 # into one blended "Total" -- the real report never does that either.
+#
+# op_scored carries the same blank-cell guards as Detail (own Act Hrs > 0,
+# plus Run Est Hrs > 0 for Run). Here they do real arithmetic work rather
+# than just controlling display: an operation JobBOSS leaves blank is one it
+# also leaves out of its own "Employee Total" row ("Operations without Adj E
+# Hrs are not included"), and because SUM() ignores NULL, NULLing those
+# operations here drops them from the rollup exactly the same way.
 _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY = """
 WITH {op_totals},
 {indirect_totals},
@@ -382,9 +512,9 @@ op_rollup AS (
 ),
 op_scored AS (
     SELECT op.Employee, op.Setup_Act_Hrs, op.Setup_Est_Hrs, op.Run_Act_Hrs, op.Run_Est_Hrs,
-           CASE WHEN ot.Total_Setup_Act_Hrs > 0
+           CASE WHEN ot.Total_Setup_Act_Hrs > 0 AND op.Setup_Act_Hrs > 0
                 THEN op.Setup_Est_Hrs * op.Setup_Act_Hrs / ot.Total_Setup_Act_Hrs END AS Setup_Adj_Hrs,
-           CASE WHEN ot.Total_Run_Act_Hrs > 0
+           CASE WHEN ot.Total_Run_Act_Hrs > 0 AND op.Run_Act_Hrs > 0 AND op.Run_Est_Hrs > 0
                 THEN op.Run_Est_Hrs * op.Run_Act_Hrs / ot.Total_Run_Act_Hrs END AS Run_Adj_Hrs
     FROM op_rollup op
     JOIN op_totals ot ON ot.Job_Operation = op.Job_Operation

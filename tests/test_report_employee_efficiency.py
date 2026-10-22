@@ -42,13 +42,37 @@ def test_both_types_are_registered():
     assert "Employee Efficiency - Summary" in REPORT_TYPES
 
 
-def test_both_queries_exclude_indirect_work_centers():
+def test_op_totals_and_summary_rollup_exclude_indirect_work_centers():
     # Regression guard: indirect (non-production) time must never count
-    # toward an employee's hours. It's the WORK CENTER that's marked
-    # Indirect (Work_Center.Type), not the job.
-    for sql in (_DETAIL_SQL, _SUMMARY_SQL):
-        assert "JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center" in sql
-        assert "wc.Type <> 'Indirect'" in sql
+    # toward the proportional-share denominator or Summary's Setup/Run Act
+    # Hrs rollup. It's the WORK CENTER that's marked Indirect
+    # (Work_Center.Type), not the job.
+    assert "JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center" in _OP_TOTALS_CTE
+    assert "wc.Type <> 'Indirect'" in _OP_TOTALS_CTE
+    assert "JOIN Work_Center wc ON wc.Work_Center = jo.Work_Center" in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
+    assert "wc.Type <> 'Indirect'" in _EMPLOYEE_EFFICIENCY_SUMMARY_QUERY
+
+
+def test_detail_does_not_exclude_indirect_work_centers():
+    # Regression guard: unlike op_totals/op_rollup, Detail's own op_detail
+    # CTE must NOT filter out Indirect -- confirmed against JobBOSS's real
+    # export that Indirect time appears as real Detail line items. No
+    # JOIN Work_Center at all in op_detail (jo.Work_Center -- the display
+    # column -- is still selected via Job_Operation directly; nothing left
+    # to filter on once the Type <> 'Indirect' check is gone).
+    op_detail_start = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.index("op_detail AS (")
+    op_detail_end = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY.index(")\nSELECT op.Employee")
+    op_detail_block = _EMPLOYEE_EFFICIENCY_DETAIL_QUERY[op_detail_start:op_detail_end]
+    assert "JOIN Work_Center" not in op_detail_block
+    assert "Indirect" not in op_detail_block
+
+
+def test_detail_left_joins_op_totals_so_indirect_rows_survive():
+    # Regression guard: Indirect Job_Operations have no matching row in
+    # op_totals (which still excludes Indirect) -- a plain JOIN would
+    # silently drop them from Detail's results entirely instead of showing
+    # them with blank Adj Hrs/% Eff, same as the real report.
+    assert "LEFT JOIN op_totals ot ON ot.Job_Operation = op.Job_Operation" in _EMPLOYEE_EFFICIENCY_DETAIL_QUERY
 
 
 def test_both_queries_exclude_rework_time():
@@ -157,13 +181,19 @@ def test_summary_groups_by_indirect_totals_columns_not_aggregated():
         in _SUMMARY_SQL
 
 
-def test_op_totals_excludes_inactive_employees():
-    # Regression guard: confirmed live -- an inactive employee (***REDACTED***) had
-    # real historical hours on an operation an active employee also worked;
-    # including them in the denominator under-credited the active
-    # employee's Adj Hrs, since the real report's population is Active-
-    # employees-only throughout, never a mix.
-    assert "te.Status = 'Active'" in _OP_TOTALS_CTE
+def test_op_totals_does_not_filter_by_employee_status():
+    # Regression guard for a real, shipped-then-reverted bug: op_totals
+    # once filtered to Status='Active', on the theory that the real
+    # report's Active-only row population implied an Active-only
+    # denominator too. Confirmed wrong with exact arithmetic -- Job 26734,
+    # WELDING OP2 (Job_Operation 145813, Est_Run_Hrs=40): three real
+    # contributors, 11.0 / 5.0 / 25.25 Act Hrs, only one of them Active.
+    # JobBOSS's real Adj Hrs for the Active one is 10.6666666666667;
+    # 40*11/41.25 = 10.666666666666666 matches to full float precision
+    # only when the two Inactive coworkers' hours ARE included. No
+    # Employee join/Status filter of any kind belongs in this CTE.
+    assert "Status" not in _OP_TOTALS_CTE
+    assert "JOIN Employee" not in _OP_TOTALS_CTE
 
 
 def test_summary_never_blends_setup_and_run_hours():
@@ -182,7 +212,7 @@ def test_detail_formats_populated_row():
     # % Eff = 1.5/4.0*100 = 37.5. Same shape for Setup: 1.25 of a 2.0-hr
     # total -> Adj = 1.5 * 1.25/2.0 = 0.9375, % Eff = 0.9375/1.25*100 = 75.0.
     raw = [{
-        'Employee': 'A1234', 'First_Name': 'John', 'Last_Name': 'Smith',
+        'Employee': 'A1234', 'First_Name': 'Sample', 'Last_Name': 'Operator',
         'Job': '30309', 'Work_Center': 'CNC MILL', 'Department': 'MACHINING', 'Operation_Service': '20',
         'Setup_Act_Hrs': 1.25, 'Setup_Est_Hrs': 1.5, 'Setup_Adj_Hrs': 0.9375,
         'Run_Act_Hrs': 4.0, 'Run_Est_Hrs': 3.75, 'Run_Qty': 50, 'Run_Adj_Hrs': 1.5,
@@ -190,7 +220,7 @@ def test_detail_formats_populated_row():
     }]
     rows = _rows_from_detail(raw)
     assert rows == [{
-        'employee': 'John Smith', 'job': '30309', 'work_center': 'CNC MILL', 'department': 'MACHINING',
+        'employee': 'Sample Operator', 'job': '30309', 'work_center': 'CNC MILL', 'department': 'MACHINING',
         'operation': '20', 'setup_act_hrs': '1.25', 'setup_est_hrs': '1.50',
         'setup_adj_hrs': '0.94', 'setup_pct_eff': '75.0',
         'run_act_hrs': '4.00', 'run_est_hrs': '3.75', 'run_qty': '50',
@@ -208,13 +238,13 @@ def test_detail_matches_real_two_employee_job_exactly():
     # query would return.
     raw = [
         {
-            'Employee': '***REDACTED***', 'First_Name': 'Andrew', 'Last_Name': 'Adams',
+            'Employee': 'EMPF', 'First_Name': 'Emp', 'Last_Name': 'EMP-F',
             'Job': '27652', 'Work_Center': 'CNC LATHE', 'Operation_Service': 'OP6',
             'Setup_Act_Hrs': 1.0, 'Setup_Est_Hrs': 1.25, 'Setup_Adj_Hrs': 0.5,
             'Run_Act_Hrs': 2.5, 'Run_Est_Hrs': 1.25, 'Run_Qty': 0, 'Run_Adj_Hrs': 0.78125,
         },
         {
-            'Employee': '***REDACTED***', 'First_Name': 'Ryan', 'Last_Name': 'Wilmoth',
+            'Employee': 'EMP-G', 'First_Name': 'Emp', 'Last_Name': 'G',
             'Job': '27652', 'Work_Center': 'CNC LATHE', 'Operation_Service': 'OP6',
             'Setup_Act_Hrs': 1.5, 'Setup_Est_Hrs': 1.25, 'Setup_Adj_Hrs': 0.75,
             'Run_Act_Hrs': 1.5, 'Run_Est_Hrs': 1.25, 'Run_Qty': 0, 'Run_Adj_Hrs': 0.46875,
@@ -254,7 +284,7 @@ def test_detail_blanks_adj_hrs_and_pct_eff_when_sql_returns_null():
     # see module docstring's NULL-propagation note). Act Hrs must still show
     # as a real number; Adj Hrs/% Eff must blank, not show "0.00"/"0.0".
     raw = [{
-        'Employee': '***REDACTED***', 'First_Name': 'Tyler', 'Last_Name': 'Smith',
+        'Employee': 'EMPH', 'First_Name': 'H', 'Last_Name': 'Operator',
         'Job': '29718', 'Work_Center': 'CNC HMC', 'Operation_Service': 'OP6',
         'Setup_Act_Hrs': 2.0, 'Setup_Est_Hrs': 1.5, 'Setup_Adj_Hrs': None,
         'Run_Act_Hrs': 10.0, 'Run_Est_Hrs': 1.75, 'Run_Qty': 5629, 'Run_Adj_Hrs': None,
@@ -273,14 +303,14 @@ def test_summary_formats_populated_row():
     # department (see test_summary_department_does_not_change_the_one_row_
     # per_employee_grain) -- still one row per employee.
     raw = [{
-        'Employee': 'A1234', 'First_Name': 'John', 'Last_Name': 'Smith', 'Department': 'MACHINING',
+        'Employee': 'A1234', 'First_Name': 'Sample', 'Last_Name': 'Operator', 'Department': 'MACHINING',
         'Setup_Act_Hrs': 2.0, 'Setup_Est_Hrs': 2.5, 'Setup_Adj_Hrs': 2.0,
         'Run_Act_Hrs': 10.0, 'Run_Est_Hrs': 9.0, 'Run_Adj_Hrs': 8.0,
         'Indirect_Pct': 5.5,
     }]
     rows = _rows_from_summary(raw)
     assert rows == [{
-        'employee': 'John Smith', 'department': 'MACHINING', 'setup_act_hrs': '2.00', 'setup_est_hrs': '2.50',
+        'employee': 'Sample Operator', 'department': 'MACHINING', 'setup_act_hrs': '2.00', 'setup_est_hrs': '2.50',
         'setup_adj_hrs': '2.00', 'setup_pct_eff': '100.0',  # 2.0 / 2.0 * 100
         'run_act_hrs': '10.00', 'run_est_hrs': '9.00',
         'run_adj_hrs': '8.00', 'run_pct_eff': '80.0',  # 8.0 / 10.0 * 100
