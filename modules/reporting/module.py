@@ -97,6 +97,25 @@ def _numeric_or_text(value: str):
     return as_int if str(as_int) == value else value
 
 
+def _default_export_filename(report_type: Optional[str], fmt: str) -> str:
+    """"JD_<ReportName>.<fmt>" -- e.g. "Job Report" -> "JD_JobReport.xlsx",
+    "Employee Efficiency - Detail" -> "JD_EmployeeEfficiencyDetail.xlsx".
+    Replaces the old timestamp-based "report_20261021_120144.xlsx" name,
+    which told a user nothing about which report a file was without opening
+    it -- especially awkward once several exports pile up in one folder.
+
+    Each run of letters/digits in the report name is title-cased and
+    concatenated (regex split on everything else: spaces, "-", etc.), so
+    capitalization is normalized rather than copied verbatim -- "Jobs by
+    Customer" becomes "JobsByCustomer", not "JobsbyCustomer". Falls back to
+    a plain "Report" name if report_type is somehow unset (export_report()
+    always sets it before this is called, but this stays a safe default
+    rather than crashing on None).
+    """
+    words = re.findall(r'[A-Za-z0-9]+', report_type or '') or ['Report']
+    return f"JD_{''.join(w.capitalize() for w in words)}.{fmt}"
+
+
 def _group_rows_by_department(data_rows: list, department_col: int) -> list:
     """Group already-exported row lists by their Department column value,
     preserving first-seen order -- matches the SQL's own ORDER BY, so rows
@@ -1158,7 +1177,7 @@ class ReportingModule(BaseModule):
             return
         fmt = dialog.selected_format()
         destination = dialog.selected_destination()
-        default_name = f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt}"
+        default_name = _default_export_filename(self._last_report_type, fmt)
 
         if destination == 'disk':
             file_path, _selected_filter = QFileDialog.getSaveFileName(
@@ -1173,7 +1192,15 @@ class ReportingModule(BaseModule):
             # file and hand it straight to the OS's default handler --
             # matches how JobBOSS's own "Application" export destination
             # behaves (opens directly, doesn't ask where to save first).
-            file_path = str(Path(tempfile.gettempdir()) / default_name)
+            # Needs a timestamp suffix here (unlike the Save dialog's
+            # default_name above) -- re-exporting the same report type
+            # twice in a row would otherwise reuse the exact same temp
+            # path, and overwriting it while the first export is still open
+            # in Excel fails with a permission error instead of opening a
+            # fresh copy.
+            stem, _, suffix = default_name.rpartition('.')
+            temp_name = f"{stem}_{datetime.now().strftime('%H%M%S')}.{suffix}"
+            file_path = str(Path(tempfile.gettempdir()) / temp_name)
 
         try:
             getattr(self, self._EXPORT_METHODS_BY_FORMAT[fmt])(file_path)

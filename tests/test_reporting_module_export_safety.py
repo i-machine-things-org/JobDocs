@@ -15,7 +15,9 @@ reads self._last_filters/_last_report_type/_available_employees/
 _last_generated_at, all plain attributes, never touching a real widget.
 """
 
-from modules.reporting.module import ReportingModule, _neutralize_formula_cell, _numeric_or_text
+from modules.reporting.module import (
+    ReportingModule, _default_export_filename, _neutralize_formula_cell, _numeric_or_text,
+)
 
 
 def test_prefixes_equals_sign():
@@ -122,3 +124,22 @@ def test_title_block_leaves_ordinary_customers_untouched():
     rows = mod._export_title_block()
     customers_row = next(r for r in rows if r and r[0] == "Customers:")
     assert customers_row[1] == "BRADKEN, ACME"
+
+
+def test_default_export_filename_matches_report_name():
+    assert _default_export_filename("Job Report", "xlsx") == "JD_JobReport.xlsx"
+    assert _default_export_filename("Top Customers", "csv") == "JD_TopCustomers.csv"
+    assert _default_export_filename("Recent Jobs", "pdf") == "JD_RecentJobs.pdf"
+
+
+def test_default_export_filename_strips_punctuation_and_normalizes_case():
+    # "Employee Efficiency - Detail" -- the dash must not survive, and every
+    # word (including ones that weren't already capitalized, e.g. "by") gets
+    # normalized to title case rather than copied verbatim.
+    assert _default_export_filename("Employee Efficiency - Detail", "xlsx") == "JD_EmployeeEfficiencyDetail.xlsx"
+    assert _default_export_filename("Jobs by Customer", "xlsx") == "JD_JobsByCustomer.xlsx"
+
+
+def test_default_export_filename_falls_back_when_report_type_unset():
+    assert _default_export_filename(None, "xlsx") == "JD_Report.xlsx"
+    assert _default_export_filename("", "xlsx") == "JD_Report.xlsx"
