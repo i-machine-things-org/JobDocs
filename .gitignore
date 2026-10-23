@@ -11,6 +11,11 @@ build[0-9]*/
 .claude/scheduled_tasks.lock
 .github-push-checklist.md
 
+# Real JobBOSS employee identifiers used by the pre-commit hook
+# (tools/githooks/pre-commit) -- this file IS real HR data, generated
+# locally by tools/generate_sensitive_identifiers.py, never committed.
+.claude/sensitive_identifiers.txt
+
 # Python
 __pycache__/
 *.pyc
@@ -42,6 +47,8 @@ ENV/
 Thumbs.db
 
 # Project specific
+*.xlsx
+*.xlx
 *.db
 *.sqlite
 test_output/

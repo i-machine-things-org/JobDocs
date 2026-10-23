@@ -15,6 +15,19 @@ Before taking any action on this project — including edits, commits, or file c
 
 No exceptions.
 
+### No real JobBOSS employee data in commits -- pre-commit hook enforces this
+
+This repo is **public**. Real employee names, codes, or individual hours/efficiency numbers must never be committed -- not in code, comments, docstrings, docs, or tests. If a real example is genuinely useful while debugging against the live DB (e.g. reverse-engineering a report formula), anonymize it before committing: use placeholder labels like `EMP-A`/`EMP-B`, never a real name or employee code. This happened once already (~20 commits on a feature branch before being caught) -- see `.claude/CODING_NOTES.md`'s "Reporting Module" section for the full story.
+
+A pre-commit hook enforces this mechanically: `tools/githooks/pre-commit` (installed at `.git/hooks/pre-commit`) blocks any commit whose staged diff contains a real employee identifier, checked against a local cache at `.claude/sensitive_identifiers.txt` (gitignored -- it's real HR data itself). On a fresh clone or a machine where the hook isn't installed yet:
+
+```bash
+cp tools/githooks/pre-commit .git/hooks/pre-commit   # one-time; .git/hooks/ isn't version-controlled
+python tools/generate_sensitive_identifiers.py        # needs the JobBOSS DB configured; rerun if the roster changes
+```
+
+If the cache is missing, the hook warns and allows the commit rather than blocking everything -- it's a safety net where DB access exists, not a universal guarantee. Don't rely on it alone: anonymize real data as a habit, not because the hook will always catch it.
+
 ### Checking PR review status
 
 `.claude/CODING_NOTES.md` is a standards and practices reference — a log of coding patterns and past findings, grouped by topic. It is **not** the source of truth for PR review status.
