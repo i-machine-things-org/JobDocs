@@ -30,6 +30,76 @@
     <number>5</number>
    </property>
    <item>
+    <layout class="QHBoxLayout" name="dbStatusRow">
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>4</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <spacer name="dbStatusSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>14</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <!-- DB connection status: a small colored-dot indicator in the
+           corner, not a group box with buttons. The DB auto-connects
+           when this tab first opens (ReportingModule._create_widget), so
+           there's no manual Connect/Disconnect step to give controls for.
+           Clickable to retry if the initial auto-connect failed or the
+           server was briefly unreachable, since _create_widget() only
+           runs once per app session (QWidget is cached after first
+           creation) and there'd otherwise be no way to retry without
+           restarting. Color/tooltip set at runtime in
+           ReportingModule._on_connect_result(). -->
+      <widget class="QPushButton" name="db_status_indicator">
+       <property name="toolTip">
+        <string>Database: not connected yet</string>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
+       </property>
+       <property name="cursor">
+        <cursorShape>PointingHandCursor</cursorShape>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>14</width>
+         <height>14</height>
+        </size>
+       </property>
+       <property name="maximumSize">
+        <size>
+         <width>14</width>
+         <height>14</height>
+        </size>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QPushButton { background-color: #999; border-radius: 7px; border: none; }</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
     <widget class="QGroupBox" name="experimentalGroupBox">
      <property name="title">
       <string>Experimental Feature</string>
@@ -68,74 +138,6 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
     </widget>
    </item>
    <item>
-    <widget class="QGroupBox" name="databaseGroupBox">
-     <property name="title">
-      <string>Database Connection</string>
-     </property>
-     <layout class="QVBoxLayout" name="databaseLayout">
-      <property name="spacing">
-       <number>5</number>
-      </property>
-      <property name="leftMargin">
-       <number>5</number>
-      </property>
-      <property name="topMargin">
-       <number>5</number>
-      </property>
-      <property name="rightMargin">
-       <number>5</number>
-      </property>
-      <property name="bottomMargin">
-       <number>5</number>
-      </property>
-      <item>
-       <widget class="QLabel" name="db_status_label">
-        <property name="text">
-         <string>Status: Not connected</string>
-        </property>
-        <property name="styleSheet">
-         <string notr="true">color: #999;</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <layout class="QHBoxLayout" name="dbButtonLayout">
-        <item>
-         <widget class="QPushButton" name="connect_db_btn">
-          <property name="text">
-           <string>Connect to Database</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="disconnect_db_btn">
-          <property name="enabled">
-           <bool>false</bool>
-          </property>
-          <property name="text">
-           <string>Disconnect</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <spacer name="dbButtonSpacer">
-          <property name="orientation">
-           <enum>Qt::Horizontal</enum>
-          </property>
-          <property name="sizeHint" stdset="0">
-           <size>
-            <width>40</width>
-            <height>20</height>
-           </size>
-          </property>
-         </spacer>
-        </item>
-       </layout>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
     <widget class="QGroupBox" name="generateReportsGroupBox">
      <property name="title">
       <string>Generate Reports</string>
@@ -166,32 +168,11 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
          </widget>
         </item>
         <item>
+         <!-- Items populated at runtime from modules.reporting.reports.REPORT_TYPES
+              (ReportingModule._create_widget), not listed here. Adding a
+              report type means adding a file under modules/reporting/reports/,
+              never editing this .ui file. -->
          <widget class="QComboBox" name="report_type_combo">
-          <item>
-           <property name="text">
-            <string>Job Statistics</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Jobs by Customer</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Jobs by Date Range</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Recent Jobs</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Top Customers</string>
-           </property>
-          </item>
          </widget>
         </item>
         <item>
@@ -210,6 +191,11 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
        </layout>
       </item>
       <item>
+       <!-- Customer and Employee share row 0 (no report type uses both at
+            once, see modules/reporting/reports/*.py's ReportDefinition
+            flags), same pairing as Start/End Date on row 1, so every row
+            in this grid fills all 4 columns instead of leaving the right
+            half empty on rows that used to hold just one filter. -->
        <layout class="QGridLayout" name="filterLayout">
         <item row="0" column="0">
          <widget class="QLabel" name="customerLabel">
@@ -219,15 +205,24 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
          </widget>
         </item>
         <item row="0" column="1">
-         <widget class="QComboBox" name="report_customer_combo">
-          <property name="editable">
-           <bool>true</bool>
+         <widget class="QPushButton" name="customer_filter_btn">
+          <property name="text">
+           <string>Customers: All</string>
           </property>
-          <item>
-           <property name="text">
-            <string>All Customers</string>
-           </property>
-          </item>
+         </widget>
+        </item>
+        <item row="0" column="2">
+         <widget class="QLabel" name="employeeLabel">
+          <property name="text">
+           <string>Employee:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="3">
+         <widget class="QPushButton" name="employee_filter_btn">
+          <property name="text">
+           <string>Employees: All</string>
+          </property>
          </widget>
         </item>
         <item row="1" column="0">
@@ -238,9 +233,29 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
          </widget>
         </item>
         <item row="1" column="1">
-         <widget class="QLineEdit" name="report_start_date">
-          <property name="placeholderText">
-           <string>YYYY-MM-DD</string>
+         <widget class="QDateEdit" name="report_start_date">
+          <property name="calendarPopup">
+           <bool>true</bool>
+          </property>
+          <property name="displayFormat">
+           <string>yyyy-MM-dd</string>
+          </property>
+          <property name="specialValueText">
+           <string>(No Filter)</string>
+          </property>
+          <property name="minimumDate">
+           <date>
+            <year>2000</year>
+            <month>1</month>
+            <day>1</day>
+           </date>
+          </property>
+          <property name="date">
+           <date>
+            <year>2000</year>
+            <month>1</month>
+            <day>1</day>
+           </date>
           </property>
          </widget>
         </item>
@@ -252,9 +267,49 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
          </widget>
         </item>
         <item row="1" column="3">
-         <widget class="QLineEdit" name="report_end_date">
-          <property name="placeholderText">
-           <string>YYYY-MM-DD</string>
+         <widget class="QDateEdit" name="report_end_date">
+          <property name="calendarPopup">
+           <bool>true</bool>
+          </property>
+          <property name="displayFormat">
+           <string>yyyy-MM-dd</string>
+          </property>
+          <property name="specialValueText">
+           <string>(No Filter)</string>
+          </property>
+          <property name="minimumDate">
+           <date>
+            <year>2000</year>
+            <month>1</month>
+            <day>1</day>
+           </date>
+          </property>
+          <property name="date">
+           <date>
+            <year>2000</year>
+            <month>1</month>
+            <day>1</day>
+           </date>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="0" colspan="4">
+         <!-- Export-only option, not a filter: every department's rows are
+              always fetched (see modules/reporting/reports/
+              employee_efficiency.py). Checking this just splits the xlsx
+              export into one worksheet tab per department, each with a
+              trailing Department Average row, instead of one combined
+              sheet. No effect on CSV/PDF exports or the on-screen table. -->
+         <widget class="QCheckBox" name="department_split_check">
+          <property name="text">
+           <string>By Department (one Excel tab per department on export)</string>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="0" colspan="4">
+         <widget class="QCheckBox" name="exclude_assemblies_check">
+          <property name="text">
+           <string>Exclude assembly sub-jobs</string>
           </property>
          </widget>
         </item>
@@ -275,7 +330,7 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
         <item>
          <widget class="QPushButton" name="export_report_btn">
           <property name="text">
-           <string>Export to CSV</string>
+           <string>Export Report...</string>
           </property>
          </widget>
         </item>
@@ -353,7 +408,7 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
       <item>
        <widget class="QLabel" name="report_status_label">
         <property name="text">
-         <string>No data loaded. Connect to database and generate a report.</string>
+         <string>No data loaded. Pick a report type and click Generate Report.</string>
         </property>
         <property name="styleSheet">
          <string notr="true">color: #666;</string>

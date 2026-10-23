@@ -1,358 +1,202 @@
 """
-Database Integration Module for JobDocs
-Placeholder code for connecting to JobBOSS, ERP systems, or other SQL databases
+JobBOSS SQL Server access for the Reporting module (experimental).
+
+Mirrors the connection technique already proven in the sibling shop-schedule
+project's jobboss_db.py: pytds (pure-Python TDS client, no ODBC driver to
+install), named-instance port resolution via the SQL Browser service, and
+SELECT-only queries -- pair this with a SQL login that has SELECT-only
+grants, nothing broader. See README.md in this directory for the
+recommended login setup.
+
+Unlike shop-schedule (one device, one gitignored .env), JobDocs is installed
+by many different users against their own JobBOSS server, so connection
+settings come from the Settings dialog instead of environment variables.
+Non-secret fields (host/port/database/username) live in the regular app
+settings dict; the password is never written to settings.json -- it's stored
+in the OS credential store via `keyring`.
+
+This module is shared infrastructure only (credentials, connection, and
+filter-input lookups reused by more than one report type) -- every
+report-specific query, row-formatter, and display column/header set lives
+in modules/reporting/reports/ instead, one file per report type. See that
+package's __init__.py for the registry.
 
 Copyright (c) 2025 JobDocs Contributors
 Licensed under the GNU General Public License v3.0 - see LICENSE file for details
-
-This module provides a foundation for:
-- Connecting to various database types (MSSQL, MySQL, PostgreSQL)
-- Pulling job data from JobBOSS or other ERP systems
-- Triggering JobDocs when new jobs are created
-- Generating reports from job data
-
-IMPORTANT: This is experimental placeholder code. Before using in production:
-1. Implement actual database connection logic (see TODO comments)
-2. Secure password storage (use keyring, not plain text)
-3. Test thoroughly with your specific database schema
-4. Review security considerations in DATABASE_INTEGRATION.md
 """
 
-from typing import Optional, List, Dict, Any, Callable
-from datetime import datetime
-import threading
+from __future__ import annotations
+
+from contextlib import contextmanager
+from typing import Any, Dict, List, Optional
+
+import keyring
+import keyring.errors
+import pytds
+
+KEYRING_SERVICE = 'JobDocs'
+
+_DISTINCT_CUSTOMERS_QUERY = """
+SELECT DISTINCT Customer
+FROM Job
+WHERE Customer IS NOT NULL AND Customer <> ''
+ORDER BY Customer
+"""
+
+_ACTIVE_EMPLOYEES_QUERY = """
+SELECT Employee, First_Name, Last_Name
+FROM Employee
+WHERE Status = 'Active'
+ORDER BY Last_Name, First_Name
+"""
 
 
-class DatabaseConnection:
+def customer_filter_clause(customers: Optional[List[str]]) -> "tuple[str, tuple]":
+    """Build a 'Customer IN (...)' clause plus its matching parameter tuple
+    for however many customers are selected (0 = no filter -- every job/row,
+    not zero of them; 1 or many both use the same IN-list shape).
     """
-    Base class for database connections
+    names = [c for c in (customers or []) if c]
+    if not names:
+        return "1=1", ()
+    placeholders = ", ".join(["%s"] * len(names))
+    return f"Customer IN ({placeholders})", tuple(names)
+
+
+def employee_filter_clause(employees: Optional[List[str]], column: str) -> "tuple[str, tuple]":
+    """Build a '<column> IN (...)' clause plus its matching parameter tuple
+    for however many employees are selected (0 = no filter -- every active
+    employee). Unlike customer_filter_clause's single-table (Job) queries,
+    the Employee Efficiency queries join multiple tables that could all
+    plausibly carry an Employee column, so the caller passes the exact
+    aliased column to disambiguate (e.g. 'jot.Employee').
     """
-
-    def __init__(self, db_type: str, host: str, port: int, database: str,
-                 username: str, password: str):
-        self.db_type = db_type
-        self.host = host
-        self.port = port
-        self.database = database
-        self.username = username
-        self._password = password  # Private attribute to avoid accidental exposure
-        self.connection = None
-
-    def __repr__(self):
-        """String representation that redacts the password"""
-        return (f"{self.__class__.__name__}(db_type={self.db_type!r}, "
-                f"host={self.host!r}, port={self.port}, database={self.database!r}, "
-                f"username={self.username!r}, password='***')")
-
-    def connect(self) -> bool:
-        """
-        Establish connection to database
-
-        Returns:
-            bool: True if connection successful, False otherwise
-
-        TODO: Implement actual database connection
-        Example for MSSQL:
-            import pyodbc
-            conn_str = (
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-                f"SERVER={self.host},{self.port};"
-                f"DATABASE={self.database};"
-                f"UID={self.username};"
-                f"PWD={self._password}"
-            )
-            self.connection = pyodbc.connect(conn_str)
-        """
-        print(f"[PLACEHOLDER] Connecting to {self.db_type} database at {self.host}:{self.port}")
-        # TODO: Implement actual connection logic
-        return False
-
-    def disconnect(self):
-        """Close database connection"""
-        if self.connection:
-            # TODO: Implement actual disconnect
-            # self.connection.close()
-            print("[PLACEHOLDER] Disconnecting from database")
-
-    def test_connection(self) -> tuple[bool, str]:
-        """
-        Test database connection
-
-        Returns:
-            tuple: (success: bool, message: str)
-        """
-        try:
-            if self.connect():
-                self.disconnect()
-                return True, "Connection successful"
-            else:
-                return False, "Connection failed (not implemented)"
-        except Exception as e:
-            return False, f"Connection error: {str(e)}"
+    codes = [e for e in (employees or []) if e]
+    if not codes:
+        return "1=1", ()
+    placeholders = ", ".join(["%s"] * len(codes))
+    return f"{column} IN ({placeholders})", tuple(codes)
 
 
-class JobBOSSIntegration(DatabaseConnection):
-    """
-    Integration with JobBOSS ERP system
+def _keyring_key(username: str) -> str:
+    return f"jobboss_db:{username}"
 
-    JobBOSS typically uses Microsoft SQL Server.
-    Common tables: Job, Customer, Job_Operation, Material_Req, etc.
-    """
 
-    def __init__(self, host: str, port: int, database: str, username: str, password: str):
-        super().__init__("mssql", host, port, database, username, password)
+def set_password(username: str, password: str) -> None:
+    """Store the JobBOSS DB password in the OS credential store."""
+    keyring.set_password(KEYRING_SERVICE, _keyring_key(username), password)
 
-    def get_new_jobs(self, since_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
-        """
-        Retrieve newly created jobs from JobBOSS
 
-        Args:
-            since_date: Get jobs created after this date. If None, get today's jobs.
-
-        Returns:
-            List of job dictionaries with keys:
-                - job_number: str
-                - customer: str
-                - description: str
-                - drawing_numbers: List[str]
-                - created_date: datetime
-
-        TODO: Implement actual query
-        Example SQL for JobBOSS:
-            SELECT
-                j.Job AS job_number,
-                c.Customer AS customer,
-                j.Description AS description,
-                j.Created_Date AS created_date
-            FROM Job j
-            JOIN Customer c ON j.Customer = c.Customer
-            WHERE j.Created_Date >= ?
-            ORDER BY j.Created_Date DESC
-        """
-        print(f"[PLACEHOLDER] Getting new jobs since {since_date}")
-        # TODO: Implement actual query
-        return []
-
-    def get_job_details(self, job_number: str) -> Optional[Dict[str, Any]]:
-        """
-        Get detailed information about a specific job
-
-        Args:
-            job_number: Job number to query
-
-        Returns:
-            Dictionary with job details or None if not found
-        """
-        print(f"[PLACEHOLDER] Getting details for job {job_number}")
-        # TODO: Implement actual query
+def get_password(username: str) -> Optional[str]:
+    """Look up the stored JobBOSS DB password; None if unset or the backend is unavailable."""
+    if not username:
+        return None
+    try:
+        return keyring.get_password(KEYRING_SERVICE, _keyring_key(username))
+    except keyring.errors.KeyringError:
         return None
 
-    def get_drawings_for_job(self, job_number: str) -> List[str]:
-        """
-        Get list of drawing numbers associated with a job
 
-        Args:
-            job_number: Job number to query
-
-        Returns:
-            List of drawing numbers
-        """
-        print(f"[PLACEHOLDER] Getting drawings for job {job_number}")
-        # TODO: Implement actual query
-        return []
+def is_configured(settings: Dict[str, Any]) -> bool:
+    """True if enough settings + a stored password are present to attempt a connection."""
+    host = (settings.get('jobboss_db_host') or '').strip()
+    name = (settings.get('jobboss_db_name') or '').strip()
+    user = (settings.get('jobboss_db_user') or '').strip()
+    return bool(host and name and user and get_password(user))
 
 
-class JobWatcher:
+def _connect_kwargs(settings: Dict[str, Any]):
+    """Build the (dsn, connect_kwargs) pair for pytds.connect(), matching
+    jobboss_db.py's named-instance resolution: a bare host/named-instance
+    string lets pytds resolve the real port via the SQL Browser service;
+    only split off an explicit port if one was actually configured.
     """
-    Monitor database for new jobs and trigger JobDocs
+    host = (settings.get('jobboss_db_host') or '').strip()
+    name = (settings.get('jobboss_db_name') or '').strip()
+    user = (settings.get('jobboss_db_user') or '').strip()
+    port_raw = str(settings.get('jobboss_db_port') or '').strip()
 
-    This can be implemented as:
-    1. A polling service that checks for new jobs periodically
-    2. A database trigger that calls an external script
-    3. An event listener if the database supports it
+    dsn = host
+    connect_kwargs: Dict[str, Any] = {
+        'database': name, 'user': user, 'password': get_password(user),
+        'timeout': 15, 'as_dict': True,
+    }
+    if port_raw:
+        dsn = host.split('\\', 1)[0]
+        connect_kwargs['port'] = int(port_raw)
+    return dsn, connect_kwargs
+
+
+@contextmanager
+def connect(settings: Dict[str, Any]):
+    """Open a pytds connection from the configured settings. Thin wrapper
+    around pytds.connect(*_connect_kwargs(...)) so every report file in
+    modules/reporting/reports/ shares one place for connection setup instead
+    of repeating it.
     """
-
-    def __init__(self, db_connection: DatabaseConnection):
-        self.db = db_connection
-        self.last_check = datetime.now()
-        self._running = False
-        self._lock = threading.Lock()  # Thread safety for concurrent access
-        self._thread = None
-
-    def start_watching(self, interval_seconds: int = 60,
-                       callback: Optional[Callable[[Dict[str, Any]], None]] = None):
-        """
-        Start watching for new jobs
-
-        Args:
-            interval_seconds: How often to check for new jobs
-            callback: Function to call when new job is detected.
-                      Should accept job dict as parameter
-
-        Raises:
-            RuntimeError: If watcher is already running
-
-        TODO: Implement actual polling loop
-        Example implementation:
-            import time
-
-            with self._lock:
-                if self._running:
-                    raise RuntimeError("Watcher is already running")
-                self._running = True
-
-            def poll():
-                while True:
-                    with self._lock:
-                        if not self._running:
-                            break
-                    try:
-                        new_jobs = self.db.get_new_jobs(self.last_check)
-                        for job in new_jobs:
-                            if callback:
-                                callback(job)
-                        self.last_check = datetime.now()
-                    except Exception as e:
-                        print(f"Error in job watcher: {e}")
-                        # Optionally: log error, notify user, or implement retry logic
-                    time.sleep(interval_seconds)
-
-            self._thread = threading.Thread(target=poll, daemon=True)
-            self._thread.start()
-        """
-        print(f"[PLACEHOLDER] Starting job watcher (interval: {interval_seconds}s)")
-        with self._lock:
-            if self._running:
-                raise RuntimeError("Watcher is already running")
-            self._running = True
-
-    def stop_watching(self):
-        """
-        Stop watching for new jobs
-
-        Thread-safe method to stop the watcher and optionally wait for thread cleanup
-        """
-        print("[PLACEHOLDER] Stopping job watcher")
-        with self._lock:
-            self._running = False
-
-        # Optional: Wait for thread to finish (would be needed in real implementation)
-        # if self._thread and self._thread.is_alive():
-        #     self._thread.join(timeout=5.0)
+    dsn, connect_kwargs = _connect_kwargs(settings)
+    with pytds.connect(dsn, **connect_kwargs) as conn:
+        yield conn
 
 
-class ReportGenerator:
+def test_connection(settings: Dict[str, Any]) -> tuple[bool, str]:
+    """Open and immediately close a connection to confirm the configured
+    settings actually reach the JobBOSS SQL Server.
     """
-    Generate reports from job data
+    if not is_configured(settings):
+        return False, "Not configured -- set the JobBOSS DB connection in Settings > Advanced Settings."
+    try:
+        dsn, connect_kwargs = _connect_kwargs(settings)
+    except ValueError:
+        # int(port_raw) in _connect_kwargs raises on a non-numeric Port (e.g. a
+        # stray space, "auto" typed literally, "1433,1434"). _ConnectWorker.run()
+        # has no try of its own -- it trusts this function to always return a
+        # (bool, str) tuple rather than raise, so an uncaught exception here
+        # would leave finished_ok never emitted and the tab's db_status_
+        # indicator stuck showing "Connecting..." forever instead of
+        # showing a clear error.
+        return False, "Invalid port -- enter a number or leave Port blank."
+    try:
+        with pytds.connect(dsn, **connect_kwargs):
+            pass
+    except Exception as exc:
+        # Only the exception type, never str(exc) -- the TDS driver's error text
+        # can echo back connection parameters.
+        return False, f"Connection failed ({type(exc).__name__})"
+    return True, "Connected"
+
+
+def fetch_customers(settings: Dict[str, Any]) -> List[str]:
+    """Distinct customer names from Job, for populating the Customer filter combo."""
+    if not is_configured(settings):
+        raise RuntimeError("JobBOSS DB is not configured")
+    with connect(settings) as conn:
+        with conn.cursor() as cur:
+            cur.execute(_DISTINCT_CUSTOMERS_QUERY)
+            return [r['Customer'] for r in cur.fetchall() if r.get('Customer')]
+
+
+def fetch_employees(settings: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Active employees (code + display name), for populating the Employee
+    filter picker on the two Employee Efficiency report types.
+
+    Status = 'Active' confirmed live (not just by convention) against the
+    real JobBOSS Employee Efficiency export: this schema has exactly 26
+    'Active' employees and 215 'Inactive', no ambiguous third status, and
+    26 is exactly the number of employee blocks in JobBOSS's own real
+    export. A different schema could still use something else here, in
+    which case the picker comes back empty -- an obviously-broken,
+    easy-to-report state rather than a silently-wrong one.
     """
-
-    def __init__(self, db_connection: DatabaseConnection):
-        self.db = db_connection
-
-    def get_jobs_by_customer(self, customer_name: str) -> List[Dict[str, Any]]:
-        """
-        Get all jobs for a specific customer
-
-        Args:
-            customer_name: Customer name to filter by
-
-        Returns:
-            List of job dictionaries
-        """
-        print(f"[PLACEHOLDER] Getting jobs for customer: {customer_name}")
-        # TODO: Implement query
-        return []
-
-    def get_jobs_by_date_range(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
-        """
-        Get jobs created within a date range
-
-        Args:
-            start_date: Start of date range
-            end_date: End of date range
-
-        Returns:
-            List of job dictionaries
-        """
-        print(f"[PLACEHOLDER] Getting jobs from {start_date} to {end_date}")
-        # TODO: Implement query
-        return []
-
-    def get_job_statistics(self) -> Dict[str, Any]:
-        """
-        Get statistics about jobs
-
-        Returns:
-            Dictionary with statistics:
-                - total_jobs: int
-                - jobs_this_month: int
-                - jobs_this_week: int
-                - top_customers: List[tuple(customer, count)]
-        """
-        print("[PLACEHOLDER] Getting job statistics")
-        # TODO: Implement queries
-        return {
-            "total_jobs": 0,
-            "jobs_this_month": 0,
-            "jobs_this_week": 0,
-            "top_customers": []
-        }
-
-
-# Example usage:
-if __name__ == "__main__":
-    import os
-
-    # Example configuration for JobBOSS
-    print("JobDocs Database Integration - Example Usage\n")
-
-    # Create connection using environment variables for secure credential handling
-    # Require JOBBOSS_USER and JOBBOSS_PASSWORD environment variables
-    required = ["JOBBOSS_USER", "JOBBOSS_PASSWORD"]
-    missing = [k for k in required if not os.environ.get(k)]
-    if missing:
-        raise RuntimeError(
-            f"Missing required environment variables: {', '.join(missing)}\n"
-            "Set JOBBOSS_HOST, JOBBOSS_PORT, JOBBOSS_DB, JOBBOSS_USER, JOBBOSS_PASSWORD."
-        )
-
-    jobboss = JobBOSSIntegration(
-        host=os.environ.get("JOBBOSS_HOST", "localhost"),
-        port=int(os.environ.get("JOBBOSS_PORT", "1433")),
-        database=os.environ.get("JOBBOSS_DB", "JobBOSS"),
-        username=os.environ["JOBBOSS_USER"],
-        password=os.environ["JOBBOSS_PASSWORD"],
-    )
-
-    # Test connection
-    success, message = jobboss.test_connection()
-    print(f"Connection test: {message}\n")
-
-    # Get new jobs (placeholder)
-    new_jobs = jobboss.get_new_jobs()
-    print(f"New jobs: {new_jobs}\n")
-
-    # Create job watcher (placeholder)
-    def on_new_job(job):
-        print(f"New job detected: {job}")
-        # TODO: Launch JobDocs GUI with this job data
-
-    watcher = JobWatcher(jobboss)
-    watcher.start_watching(interval_seconds=60, callback=on_new_job)
-
-    # Generate reports (placeholder)
-    reporter = ReportGenerator(jobboss)
-    stats = reporter.get_job_statistics()
-    print(f"Statistics: {stats}")
-
-    print("\n" + "=" * 60)
-    print("TO IMPLEMENT:")
-    print("=" * 60)
-    print("1. Install database driver:")
-    print("   - MSSQL: pip install pyodbc")
-    print("   - MySQL: pip install pymysql")
-    print("   - PostgreSQL: pip install psycopg2-binary")
-    print("\n2. Implement actual SQL queries in each method")
-    print("\n3. Add error handling and connection pooling")
-    print("\n4. Add logging for debugging")
-    print("\n5. Secure password storage (use keyring or environment variables)")
+    if not is_configured(settings):
+        raise RuntimeError("JobBOSS DB is not configured")
+    with connect(settings) as conn:
+        with conn.cursor() as cur:
+            cur.execute(_ACTIVE_EMPLOYEES_QUERY)
+            return [
+                {
+                    'code': r['Employee'],
+                    'name': f"{r.get('First_Name') or ''} {r.get('Last_Name') or ''}".strip() or r['Employee'],
+                }
+                for r in cur.fetchall()
+            ]
