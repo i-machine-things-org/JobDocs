@@ -10,16 +10,21 @@ recommended login setup.
 
 Lives in modules/reporting/ (not a separate top-level `experimental/`
 package, where it used to live) specifically so it's covered by every
-build's existing "always stage the modules/ tree" step -- the earlier
-location was never added to any of the three build file-staging lists
-(Windows installer, Flatpak CI, local Flatpak dev build), so every v0.12.0
-install shipped without this file at all: a Module Loading Error on first
-launch, for every user, regardless of whether they'd enabled the separate
-"experimental_features" Settings toggle that gates this module's *use* (see
-core/module_loader.py) -- that flag is checked only after this file has
-already been imported, so a missing file breaks loading unconditionally.
-Reports (Beta) remaining gated behind that Settings toggle is unrelated to,
-and unaffected by, this move -- this is purely a packaging-reliability fix.
+build's existing "always stage the modules/ tree" step. Two-part history:
+the earlier location was never added to any of the three build file-staging
+lists (Windows installer, Flatpak CI, local Flatpak dev build), so every
+v0.12.0 install shipped without this file at all -- a Module Loading Error
+on first launch, for every user, regardless of whether they'd enabled the
+separate "experimental_features" Settings toggle that gates this module's
+*use* (see core/module_loader.py; that flag is checked only after this file
+has already been imported, so a missing file breaks loading
+unconditionally). v0.12.1 fixed that immediate symptom by adding the old
+`experimental/` path to all three lists; this later move is a separate,
+structural follow-up that removes the need for any build list to know about
+this file's location at all, rather than relying on the same mistake not
+happening again for the next new top-level directory. Reports (Beta)
+remaining gated behind the Settings toggle is unrelated to, and unaffected
+by, either change -- both are purely packaging-reliability fixes.
 
 Unlike shop-schedule (one device, one gitignored .env), JobDocs is installed
 by many different users against their own JobBOSS server, so connection
