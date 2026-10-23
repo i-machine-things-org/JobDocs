@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from experimental.db_integration import connect, customer_filter_clause
+from modules.reporting.db_integration import connect, customer_filter_clause
 from modules.reporting.reports.base import ReportDefinition
 
 # Customer_PO/Customer_PO_LN (not SO_Detail.PO/Line) are the real source for

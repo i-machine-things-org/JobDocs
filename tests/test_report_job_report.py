@@ -2,7 +2,7 @@
 
 Covers _rows_from_job_report() and _is_past_promise(), both pure functions --
 no DB/QApplication needed. The query itself was validated by hand against a
-live JobBOSS schema (see experimental/README.md's "Job Report" section).
+live JobBOSS schema (see modules/reporting/README.md's "Job Report" section).
 """
 
 from datetime import datetime

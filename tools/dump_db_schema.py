@@ -39,7 +39,7 @@ import pytds  # noqa: E402
 from openpyxl import Workbook  # noqa: E402
 from openpyxl.styles import Font  # noqa: E402
 
-from experimental.db_integration import _connect_kwargs  # noqa: E402
+from modules.reporting.db_integration import _connect_kwargs  # noqa: E402
 from shared.utils import get_config_dir  # noqa: E402
 
 # Table/column identifiers written to the dump are real SQL Server
@@ -120,7 +120,7 @@ def _get_password(settings: dict) -> Optional[str]:
     env_pass = os.environ.get('JOBBOSS_DB_PASS', '')
     if env_pass:
         return env_pass
-    from experimental.db_integration import get_password
+    from modules.reporting.db_integration import get_password
     return get_password(settings.get('jobboss_db_user', ''))
 
 
@@ -161,7 +161,7 @@ def main():
     except ValueError:
         # int(port_raw) in _connect_kwargs raises on a non-numeric Port (e.g.
         # a stray space, "auto" typed literally, "1433,1434") -- same failure
-        # mode experimental.db_integration.test_connection() guards against;
+        # mode db_integration.test_connection() guards against;
         # this script's own direct call needs the same guard, or a bad Port
         # value crashes with a raw traceback instead of a clear message.
         raise SystemExit("Invalid port -- enter a number or leave Port blank.")

@@ -1,4 +1,4 @@
-"""Tests for test_connection()'s port-parsing guard in experimental/db_integration.py.
+"""Tests for test_connection()'s port-parsing guard in modules/reporting/db_integration.py.
 
 CodeRabbit finding on PR #341: a non-numeric Port value (a stray space,
 "auto" typed literally, "1433,1434") made int(port_raw) raise ValueError
@@ -18,7 +18,7 @@ from unittest.mock import patch
 # callable named test_* in a test module's namespace as a test case, imported
 # or not, which would otherwise try to collect db_integration's own
 # test_connection() itself and fail resolving its `settings` arg as a fixture.
-from experimental.db_integration import test_connection as jobboss_test_connection
+from modules.reporting.db_integration import test_connection as jobboss_test_connection
 
 
 def _configured_settings(port):
@@ -30,14 +30,14 @@ def _configured_settings(port):
     }
 
 
-@patch('experimental.db_integration.get_password', return_value='fake-password')
+@patch('modules.reporting.db_integration.get_password', return_value='fake-password')
 def test_non_numeric_port_returns_clean_error_not_raise(mock_get_password):
     ok, message = jobboss_test_connection(_configured_settings('not-a-number'))
     assert ok is False
     assert 'port' in message.lower()
 
 
-@patch('experimental.db_integration.get_password', return_value='fake-password')
+@patch('modules.reporting.db_integration.get_password', return_value='fake-password')
 def test_port_with_internal_space_returns_clean_error(mock_get_password):
     # A trailing/leading space alone wouldn't reproduce this (_connect_kwargs
     # already .strip()s port_raw before int()) -- an internal space survives
@@ -47,7 +47,7 @@ def test_port_with_internal_space_returns_clean_error(mock_get_password):
     assert 'port' in message.lower()
 
 
-@patch('experimental.db_integration.get_password', return_value='fake-password')
+@patch('modules.reporting.db_integration.get_password', return_value='fake-password')
 def test_comma_separated_port_returns_clean_error(mock_get_password):
     ok, message = jobboss_test_connection(_configured_settings('1433,1434'))
     assert ok is False

@@ -388,7 +388,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from experimental.db_integration import connect, employee_filter_clause
+from modules.reporting.db_integration import connect, employee_filter_clause
 from modules.reporting.reports.base import ReportDefinition
 
 # op_totals: Act Hrs summed across EVERY employee (active or not) who
