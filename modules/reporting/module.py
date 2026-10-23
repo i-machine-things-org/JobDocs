@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
 from PyQt6 import uic
 
 from core.base_module import BaseModule
-from experimental.db_integration import is_configured, test_connection, fetch_customers, fetch_employees
+from modules.reporting.db_integration import is_configured, test_connection, fetch_customers, fetch_employees
 from modules.reporting.reports import REPORTS, REPORT_TYPES
 
 # Exported cells (Description/Notes/Customer/PO etc.) are free text sourced
@@ -662,7 +662,7 @@ class _ReportWorker(QThread):
             rows = REPORTS[self._report_type].fetch(self._settings, self._filters)
         except Exception as exc:
             # Only the exception type, not str(exc) -- same rule as
-            # experimental/db_integration.py's test_connection().
+            # db_integration.py's test_connection().
             self.error.emit(f"Report query failed ({type(exc).__name__})")
         else:
             self.success.emit(rows)
@@ -1367,7 +1367,7 @@ class ReportingModule(BaseModule):
     def cleanup(self):
         """Cleanup resources.
 
-        No persistent JobBOSS connection to close here -- experimental.
+        No persistent JobBOSS connection to close here --
         db_integration.connect()/test_connection() each open a pytds
         connection in their own `with` block and close it before returning,
         every single call, so there's never a live session held open

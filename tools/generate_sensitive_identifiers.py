@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from experimental.db_integration import connect  # noqa: E402
+from modules.reporting.db_integration import connect  # noqa: E402
 from shared.utils import get_config_dir  # noqa: E402
 
 import json  # noqa: E402

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from experimental.db_integration import connect
+from modules.reporting.db_integration import connect
 from modules.reporting.reports._common import JOB_COLUMNS_SQL, SIMPLE_COLUMNS, SIMPLE_HEADERS, rows_from_jobs
 from modules.reporting.reports.base import ReportDefinition
 

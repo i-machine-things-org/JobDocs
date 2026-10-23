@@ -662,7 +662,7 @@ class JobDocsMainWindow(QMainWindow):
         'jobboss_db_host': '',
         'jobboss_db_port': '',
         'jobboss_db_name': '',
-        'jobboss_db_user': '',  # Password is stored via keyring, not here -- see experimental/db_integration.py
+        'jobboss_db_user': '',  # Password is stored via keyring, not here -- see modules/reporting/db_integration.py
         # 'remote_server_path': '',  # Network path or URL for remote settings sync
         'report_template_path': '',  # Path to Excel template for Report Fixer
         'suppress_bp_link_notification': False,  # Suppress "linked to blueprints" confirmation dialog

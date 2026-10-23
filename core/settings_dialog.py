@@ -302,7 +302,7 @@ class SettingsDialog(QDialog):
         jobboss_info = QLabel(
             "SELECT-only access to Job, Delivery, Job_Operation, Job_Operation_Time, "
             "Employee, and Work_Center. The password is stored in your OS credential "
-            "store, not in settings.json. See experimental/README.md."
+            "store, not in settings.json. See modules/reporting/README.md."
         )
         jobboss_info.setWordWrap(True)
         jobboss_info.setStyleSheet("color: gray; font-size: 9pt;")
@@ -388,7 +388,7 @@ class SettingsDialog(QDialog):
             self.settings['jobboss_db_user'] = new_user
             new_password = self.jobboss_password_edit.text()
             import keyring.errors
-            from experimental.db_integration import get_password, set_password
+            from modules.reporting.db_integration import get_password, set_password
             try:
                 if new_password and new_user:
                     set_password(new_user, new_password)
