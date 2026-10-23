@@ -1,8 +1,6 @@
-# Experimental Features
+# Reporting Module (Reports (Beta))
 
-This directory contains experimental and work-in-progress features that are **not yet ready for production use**.
-
-## Current Experimental Features
+This directory is the Reporting module -- JobBOSS SQL Server integration for the "Reports (Beta)" feature. Still gated behind Settings' "Enable experimental features (Reporting)" toggle and **not yet ready for production use** by default, but the code itself lives here permanently (not a separate staging area pending a future move -- see "Moving to Production" below for what that actually means now).
 
 ### Database Integration
 
@@ -125,19 +123,19 @@ The actual Adj E Hrs / % Eff Crystal Reports formula definition itself was never
 
 ## Contributing
 
-If you'd like to work on experimental features:
+If you'd like to work on this feature:
 
-1. These features are incomplete and may change significantly
+1. It's incomplete and may change significantly
 2. Feel free to contribute improvements
 3. Open an issue before major changes
-4. Consider the feature experimental until moved to main modules/
+4. Consider it experimental (gated behind the Settings toggle) until promoted per below
 
 ## Moving to Production
 
-When an experimental feature is ready:
+The code already lives in its permanent location (`modules/reporting/`, staged in every build like any other module) -- there's no directory to move. "Production-ready" here means flipping the gate, not relocating files:
 
 1. Complete implementation with tests
 2. Add proper error handling
 3. Document usage thoroughly
-4. Move to appropriate location in main codebase
+4. Default the "Enable experimental features (Reporting)" setting to on (or drop the gate for this module specifically), once the remaining known gaps above are resolved
 5. Update CHANGELOG.md

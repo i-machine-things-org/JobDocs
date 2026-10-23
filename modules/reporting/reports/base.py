@@ -1,7 +1,7 @@
 """Shared shape every report type in modules/reporting/reports/ declares once.
 
 Deliberately no PyQt imports here -- this package stays UI-framework-agnostic,
-matching experimental/db_integration.py's existing boundary. resize_mode is a
+matching db_integration.py's existing boundary. resize_mode is a
 plain string ("stretch"/"interactive"); modules/reporting/module.py is the one
 place that translates it to a QHeaderView.ResizeMode value.
 """

@@ -2,7 +2,7 @@
 
 Adding a new report type means writing a new file in this package (a
 ReportDefinition, see base.py) and adding it to _ALL below -- nothing in
-modules/reporting/module.py or experimental/db_integration.py needs to
+modules/reporting/module.py or modules/reporting/db_integration.py needs to
 change.
 """
 

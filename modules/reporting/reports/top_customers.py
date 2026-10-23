@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from experimental.db_integration import connect
+from modules.reporting.db_integration import connect
 from modules.reporting.reports._common import SIMPLE_COLUMNS
 from modules.reporting.reports.base import ReportDefinition
 
