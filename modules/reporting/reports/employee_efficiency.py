@@ -591,13 +591,22 @@ GROUP BY op.Employee, e.Department, e.First_Name, e.Last_Name, it.Indirect_Hrs, 
 ORDER BY e.Last_Name, e.First_Name
 """
 
+# employee_code carries Employee.Employee (the real, stable code) alongside
+# the formatted display name -- not shown for its own sake, but needed by
+# _employee_total_rows() (modules/reporting/module.py), which groups
+# consecutive rows by whatever column it's given. Two different real
+# employees can share an identical formatted "First Last" display name
+# (confirmed live: two such pairs exist in this shop's own Employee table)
+# -- grouping by the display name column alone would silently merge their
+# rows into one wrong combined Total whenever that happens to land them
+# adjacent in the query's own ORDER BY. (CodeRabbit, PR #344)
 DETAIL_COLUMNS = (
-    'employee', 'job', 'work_center', 'department', 'operation',
+    'employee', 'employee_code', 'job', 'work_center', 'department', 'operation',
     'setup_act_hrs', 'setup_est_hrs', 'setup_adj_hrs', 'setup_pct_eff',
     'run_act_hrs', 'run_est_hrs', 'run_qty', 'run_adj_hrs', 'run_pct_eff', 'pct_indirect',
 )
 DETAIL_HEADERS = [
-    'Employee', 'Job', 'Work Center', 'Department', 'Operation',
+    'Employee', 'Employee Code', 'Job', 'Work Center', 'Department', 'Operation',
     'Setup Act Hrs', 'Setup Est Hrs', 'Setup Adj Hrs', 'Setup % Eff',
     'Run Act Hrs', 'Run Est Hrs', 'Run Qty', 'Run Adj Hrs', 'Run % Eff', '% Indirect',
 ]
@@ -648,6 +657,7 @@ def _rows_from_detail(raw_rows: List[dict]) -> List[Dict[str, str]]:
         name = f"{r.get('First_Name') or ''} {r.get('Last_Name') or ''}".strip() or (r.get('Employee') or '')
         rows.append({
             'employee': name,
+            'employee_code': r.get('Employee') or '',
             'job': r.get('Job') or '',
             'work_center': r.get('Work_Center') or '',
             'department': r.get('Department') or '',

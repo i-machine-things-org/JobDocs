@@ -241,7 +241,8 @@ def test_detail_formats_populated_row():
     }]
     rows = _rows_from_detail(raw)
     assert rows == [{
-        'employee': 'Sample Operator', 'job': '30309', 'work_center': 'CNC MILL', 'department': 'MACHINING',
+        'employee': 'Sample Operator', 'employee_code': 'A1234',
+        'job': '30309', 'work_center': 'CNC MILL', 'department': 'MACHINING',
         'operation': '20', 'setup_act_hrs': '1.25', 'setup_est_hrs': '1.50',
         'setup_adj_hrs': '0.94', 'setup_pct_eff': '75.0',
         'run_act_hrs': '4.00', 'run_est_hrs': '3.75', 'run_qty': '50',

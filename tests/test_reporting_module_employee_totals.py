@@ -16,7 +16,7 @@ from modules.reporting.module import _employee_total_rows, _write_xlsx_report_sh
 from modules.reporting.reports.base import ReportDefinition
 
 _COLUMNS = (
-    'employee', 'job', 'work_center', 'department', 'operation',
+    'employee', 'employee_code', 'job', 'work_center', 'department', 'operation',
     'setup_act_hrs', 'setup_est_hrs', 'setup_adj_hrs', 'setup_pct_eff',
     'run_act_hrs', 'run_est_hrs', 'run_qty', 'run_adj_hrs', 'run_pct_eff', 'pct_indirect',
 )
@@ -31,9 +31,14 @@ def _report_def(**overrides):
     return ReportDefinition(**defaults)
 
 
-def _row(employee, setup_act='0.00', setup_est='0.00', setup_adj='', setup_pct='',
+def _row(employee, employee_code=None, setup_act='0.00', setup_est='0.00', setup_adj='', setup_pct='',
          run_act='0.00', run_est='0.00', run_qty='0', run_adj='', run_pct='', pct_indirect='5.0'):
-    return [employee, 'J1', 'MILLS', 'DEPT', 'OP1', setup_act, setup_est, setup_adj, setup_pct,
+    # employee_code defaults to the display name itself -- fine for every
+    # existing test here, which already uses a unique name per employee;
+    # only the duplicate-display-name test below needs to pass a real,
+    # distinct code explicitly.
+    code = employee_code if employee_code is not None else employee
+    return [employee, code, 'J1', 'MILLS', 'DEPT', 'OP1', setup_act, setup_est, setup_adj, setup_pct,
             run_act, run_est, run_qty, run_adj, run_pct, pct_indirect]
 
 
@@ -51,6 +56,30 @@ def test_inserts_total_and_blank_row_between_employees():
     assert out[2] == [''] * len(_COLUMNS)
     assert out[3][0] == 'BOB'
     assert out[4][0] == 'BOB Total'
+
+
+def test_groups_by_employee_code_not_display_name():
+    # Regression guard (CodeRabbit, PR #344): two different real employees
+    # can share an identical formatted display name -- confirmed live, two
+    # such pairs exist in this shop's own Employee table (not reproduced
+    # here verbatim -- real names aren't committed to this repo, see
+    # .claude/CLAUDE.md). Grouping by the 'employee' (display name) column
+    # alone would silently merge their rows into one wrong combined Total
+    # whenever that happens to land them adjacent in the query's own
+    # ORDER BY, exactly the shape here.
+    rows = [
+        _row('SAMPLE OPERATOR', employee_code='SAMP01', run_act='2.00', run_est='4.00',
+             run_adj='4.00', run_pct='200.0'),
+        _row('SAMPLE OPERATOR', employee_code='SAMP02', run_act='1.00', run_est='1.00',
+             run_adj='1.00', run_pct='100.0'),
+    ]
+    out = _employee_total_rows(rows, _report_def())
+    col = {name: i for i, name in enumerate(_COLUMNS)}
+    # Two separate Total rows, one per real employee -- not one combined
+    # "SAMPLE OPERATOR Total" merging both codes' hours together.
+    totals = [r for r in out if r[col['employee']] == 'SAMPLE OPERATOR Total']
+    assert len(totals) == 2
+    assert {t[col['run_act_hrs']] for t in totals} == {'2.00', '1.00'}
 
 
 def test_total_row_sums_act_est_adj_and_recomputes_pct_as_ratio_of_sums():

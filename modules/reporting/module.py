@@ -216,6 +216,11 @@ def _employee_total_rows(data_rows: list, report_def) -> list:
     own SQL ORDER BY puts one employee's rows together -- this does not
     re-sort or merge non-contiguous runs of the same employee.
 
+    Groups by the 'employee_code' column when the report has one, not the
+    displayed 'employee' name column -- two different real employees can
+    share an identical formatted display name, which would otherwise merge
+    their rows into one wrong combined Total.
+
     Within each employee's block, Setup/Run Act Hrs, Est Hrs, and Adj Hrs
     are each summed only across rows where that block's Adj Hrs is
     non-blank -- the same "not scoreable, exclude from both sides of the
@@ -236,7 +241,16 @@ def _employee_total_rows(data_rows: list, report_def) -> list:
     )
     if not all(key in col for block in blocks for key in block):
         return data_rows
-    emp_idx = col['employee']
+    name_idx = col['employee']
+    # Group by the stable employee CODE when available, not the formatted
+    # display name -- two different real employees can share an identical
+    # "First Last" display name (confirmed live: two such pairs exist in
+    # this shop's own Employee table), which would otherwise merge their
+    # rows into one wrong combined Total whenever that happens to land them
+    # adjacent in the query's own ORDER BY. (CodeRabbit, PR #344) Falls back
+    # to the display name only for a report shape with no employee_code
+    # column at all.
+    group_idx = col.get('employee_code', name_idx)
     width = len(data_rows[0])
 
     def _num(value):
@@ -245,9 +259,9 @@ def _employee_total_rows(data_rows: list, report_def) -> list:
         except (TypeError, ValueError):
             return None
 
-    def _total_row(employee: str, group: list) -> list:
+    def _total_row(display_name: str, group: list) -> list:
         row = [''] * width
-        row[emp_idx] = f"{employee} Total"
+        row[name_idx] = f"{display_name} Total"
         for act_key, est_key, adj_key, pct_key in blocks:
             act_total = est_total = adj_total = 0.0
             scoreable = False
@@ -275,13 +289,13 @@ def _employee_total_rows(data_rows: list, report_def) -> list:
     result = []
     i, n = 0, len(data_rows)
     while i < n:
-        employee = data_rows[i][emp_idx]
+        group_key = data_rows[i][group_idx]
         j = i
-        while j < n and data_rows[j][emp_idx] == employee:
+        while j < n and data_rows[j][group_idx] == group_key:
             j += 1
         group = data_rows[i:j]
         result.extend(group)
-        result.append(_total_row(employee, group))
+        result.append(_total_row(group[0][name_idx], group))
         if j < n:
             result.append([''] * width)
         i = j
