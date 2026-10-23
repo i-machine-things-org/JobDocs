@@ -128,6 +128,7 @@
 
 - **Quote shell paths containing special characters.** An unquoted `&` in a path acts as the shell background operator and breaks the command.
 - **Guard destructive `rm -rf` on possibly-empty variables.** Use `${VAR:?message}` so an empty `BUILD_PATH`/`DIST_PATH` fails loudly instead of expanding to `rm -rf /`.
+- **A local staging script that `cp -r`s source into a reused directory without cleaning it first accumulates stale files across repeated runs.** (CodeRabbit, PR #349) `linux/flatpak/build-local.sh` only `mkdir -p`'d its staging dir, never removed it -- a file deleted/renamed upstream (e.g. the old `experimental/` directory) would silently linger in the staged tree from a previous local run, masking the true state of what's actually being built. CI's equivalent step isn't at risk (fresh runner checkout every time, nothing to go stale), but any LOCAL dev script that restages into the same path on every invocation needs an `rm -rf "${VAR:?...}"` before `mkdir -p`, not just when first written.
 - **Check external tool availability before invoking it (e.g. `iscc`).** Don't depend implicitly on the hosted runner's preinstalled toolset; assert or install it explicitly.
 - **Verify integrity of downloaded build dependencies.** Hash-check embeddable runtimes before use; prefer the already-installed system tool over an unverified network installer script (e.g. `get-pip.py`).
 - **Derive version metadata from build variables, not hardcoded literals.** A hardcoded `FILEVERSION` in a `.rc` file drifts from the actual release tag over time.

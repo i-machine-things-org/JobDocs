@@ -8,6 +8,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SRC_DIR="$SCRIPT_DIR/src"
 
 echo "==> Staging source files..."
+# Clean before restaging -- a file removed/renamed upstream (e.g. the old
+# experimental/ directory) would otherwise linger here indefinitely across
+# repeated local runs, masking the true state of what's being built.
+rm -rf "${SRC_DIR:?SRC_DIR is unset}"
 mkdir -p "$SRC_DIR/wheels"
 for item in main.py core modules shared requirements.txt; do
     if [ -e "$REPO_ROOT/$item" ]; then
