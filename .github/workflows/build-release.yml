@@ -105,7 +105,7 @@ jobs:
       - name: Stage app source tree
         shell: pwsh
         run: |
-          $src_items = @('main.py','README.md','core','modules','shared',
+          $src_items = @('main.py','README.md','core','modules','shared','experimental',
                          'JobDocs.iconset','sample_files','requirements.txt')
           New-Item -ItemType Directory -Path app -Force | Out-Null
           foreach ($item in $src_items) {
@@ -236,7 +236,7 @@ jobs:
       - name: Stage source files and download wheels
         run: |
           mkdir -p linux/flatpak/src
-          for item in main.py core modules shared sample_files requirements.txt; do
+          for item in main.py core modules shared experimental sample_files requirements.txt; do
             [ -e "$item" ] && cp -r "$item" linux/flatpak/src/
           done
           pip download --only-binary :all: -d linux/flatpak/src/wheels/ -r requirements.txt

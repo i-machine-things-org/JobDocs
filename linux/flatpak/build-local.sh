@@ -9,7 +9,7 @@ SRC_DIR="$SCRIPT_DIR/src"
 
 echo "==> Staging source files..."
 mkdir -p "$SRC_DIR/wheels"
-for item in main.py core modules shared requirements.txt; do
+for item in main.py core modules shared experimental requirements.txt; do
     if [ -e "$REPO_ROOT/$item" ]; then
         cp -r "$REPO_ROOT/$item" "$SRC_DIR/"
     fi
