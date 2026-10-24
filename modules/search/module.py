@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 # Customer-label prefixes that mark a result as ITAR-controlled. Kept as one
 # constant so every readonly/ITAR-visibility check stays in sync (CODING_NOTES:
 # ITAR / Filter Consistency).
-_ITAR_LABEL_PREFIXES = ('[ITAR] ', '[ITAR-BP] ', '[ITAR Quote] ')
+_ITAR_LABEL_PREFIXES = ('[ITAR] ', '[ITAR-BP] ', '[ITAR-RF] ', '[ITAR Quote] ')
 
 # Temp dirs created to view a file on a read-only (search-only) install
 # without exposing its real path to the external viewer — see
@@ -132,8 +132,8 @@ class SearchWorker(QThread):
 
             self.progress_update.emit(f"Searching {prefix if prefix else 'standard'} directories...")
 
-            # BP and IR dirs use filename search, not job folder structure
-            if prefix in ('BP', 'ITAR-BP', 'IR'):
+            # BP, RF, and IR dirs use filename search, not job folder structure
+            if prefix in ('BP', 'ITAR-BP', 'RF', 'ITAR-RF', 'IR'):
                 self._file_search(base_dir, prefix)
                 continue
 
@@ -277,14 +277,14 @@ class SearchWorker(QThread):
             if self._is_cancelled:
                 break
             self.progress_update.emit(f"Searching {prefix if prefix else 'standard'} directories...")
-            # BP and IR dirs use filename search, not folder name search
-            if prefix in ('BP', 'ITAR-BP', 'IR'):
+            # BP, RF, and IR dirs use filename search, not folder name search
+            if prefix in ('BP', 'ITAR-BP', 'RF', 'ITAR-RF', 'IR'):
                 self._file_search(base_dir, prefix)
             else:
                 self._legacy_recursive_search(base_dir, prefix)
 
     def _file_search(self, base_dir: str, prefix: str):
-        """Search for files by filename within a directory tree (for BP/IR dirs)"""
+        """Search for files by filename within a directory tree (for BP/RF/IR dirs)"""
         try:
             for root, dirs, files in os.walk(base_dir):
                 if self._is_cancelled:
@@ -654,6 +654,7 @@ class SearchModule(BaseModule):
         self.search_all_radio = None
         self.search_strict_radio = None
         self.search_blueprints_check = None
+        self.search_related_files_check = None
         self.mode_row_widget = None
         self.legacy_options_widget = None
         self.search_btn = None
@@ -692,7 +693,11 @@ class SearchModule(BaseModule):
             return
 
         cf_dirs = self._get_customer_files_dirs()
-        bp_dirs = self._get_blueprint_dirs()
+        # Related Files dirs are indexed the same way as Blueprints (kind='bp',
+        # just a different prefix) regardless of the search-time "Also search"
+        # checkbox states -- those only gate which already-indexed prefixes a
+        # given search query includes, not what the background indexer builds.
+        bp_dirs = self._get_blueprint_dirs() + self._get_related_files_dirs()
 
         if not cf_dirs and not bp_dirs:
             return
@@ -787,6 +792,7 @@ class SearchModule(BaseModule):
         self.search_all_radio = widget.search_all_radio
         self.search_strict_radio = widget.search_strict_radio
         self.search_blueprints_check = widget.search_blueprints_check
+        self.search_related_files_check = widget.search_related_files_check
         self.mode_row_widget = widget.mode_row_widget
         self.legacy_options_widget = widget.legacy_options_widget
         self.search_btn = widget.search_btn
@@ -927,12 +933,18 @@ class SearchModule(BaseModule):
 
         strict_mode = self.search_strict_radio.isChecked()
         include_blueprints = self.search_blueprints_check.isChecked()
+        include_related_files = self.search_related_files_check.isChecked()
 
         customer_dirs = self._get_customer_files_dirs()
 
-        # Build blueprint dirs before the customer_dirs guard so a
-        # blueprint-only install (no customer files dir) can still search.
-        bp_dirs = self._get_blueprint_dirs() if include_blueprints else []
+        # Build blueprint/related-files dirs before the customer_dirs guard so
+        # a blueprint-or-related-files-only install (no customer files dir)
+        # can still search.
+        bp_dirs = []
+        if include_blueprints:
+            bp_dirs += self._get_blueprint_dirs()
+        if include_related_files:
+            bp_dirs += self._get_related_files_dirs()
 
         if not customer_dirs and not bp_dirs:
             cf_dir = self.app_context.get_setting('customer_files_dir', '')
@@ -963,7 +975,7 @@ class SearchModule(BaseModule):
         if index_ready:
             if self._search_from_index(
                 search_term, search_customer, search_job,
-                search_desc, search_drawing, include_blueprints,
+                search_desc, search_drawing, include_blueprints, include_related_files,
             ):
                 return
             # Index returned 0 results. Trust it — and skip the slow filesystem
@@ -1002,7 +1014,8 @@ class SearchModule(BaseModule):
         self._worker.start()
 
     def _search_from_index(self, term, search_customer, search_job,
-                           search_desc, search_drawing, include_blueprints) -> bool:
+                           search_desc, search_drawing, include_blueprints,
+                           include_related_files) -> bool:
         """Query the SQLite index and populate results immediately.
 
         Returns True if results were found and displayed, False if the caller
@@ -1014,7 +1027,9 @@ class SearchModule(BaseModule):
             )
             results += self._index.search_quotes(term, search_customer)
             if include_blueprints:
-                results += self._index.search_bp(term)
+                results += self._index.search_bp(term, prefixes=('BP', 'ITAR-BP'))
+            if include_related_files:
+                results += self._index.search_bp(term, prefixes=('RF', 'ITAR-RF'))
         except Exception as exc:
             self._index_failures += 1
             self._index_query_failed = True
@@ -1304,6 +1319,27 @@ class SearchModule(BaseModule):
                 dirs.append((prefix, d))
         return dirs
 
+    def _get_related_files_dirs(self):
+        """Get list of (prefix, path) tuples for related-files directories.
+
+        Files here live outside any job folder entirely (e.g. inspection
+        reports, CAM files) but are named with a part number and revision,
+        the same way Blueprints files are — indexed/searched identically to
+        _get_blueprint_dirs(), just under a separate configured directory and
+        prefix so the two "Also search" checkboxes can be toggled
+        independently. Same ITAR exclusion as _get_customer_files_dirs() on a
+        read-only install — see that docstring.
+        """
+        keys = [('related_files_dir', 'RF')]
+        if not self.app_context.is_readonly():
+            keys.append(('itar_related_files_dir', 'ITAR-RF'))
+        dirs = []
+        for key, prefix in keys:
+            d = self.app_context.get_setting(key, '')
+            if d and os.path.exists(d):
+                dirs.append((prefix, d))
+        return dirs
+
     def _is_within_permitted_roots(self, path: str) -> bool:
         """True if path's canonical location is under a currently non-ITAR
         customer/blueprint root.
@@ -1324,6 +1360,7 @@ class SearchModule(BaseModule):
         real = os.path.normcase(os.path.realpath(path))
         roots = [os.path.realpath(d) for _, d in self._get_customer_files_dirs()]
         roots += [os.path.realpath(d) for _, d in self._get_blueprint_dirs()]
+        roots += [os.path.realpath(d) for _, d in self._get_related_files_dirs()]
         for root in roots:
             root = os.path.normcase(root)
             try:
@@ -1391,7 +1428,10 @@ class SearchModule(BaseModule):
         if 0 <= row < len(self.search_results):
             raw_customer = self.search_results[row]['customer']
             # Strip all known prefixes to get the bare customer name
-            for prefix in ('[ITAR] ', '[ITAR-BP] ', '[BP] ', '[IR] ', '[Quote] ', '[ITAR Quote] '):
+            for prefix in (
+                '[ITAR] ', '[ITAR-BP] ', '[ITAR-RF] ', '[BP] ', '[RF] ', '[IR] ',
+                '[Quote] ', '[ITAR Quote] ',
+            ):
                 raw_customer = raw_customer.replace(prefix, '')
             customer = raw_customer.strip()
 
@@ -1442,14 +1482,88 @@ class SearchModule(BaseModule):
         if row < 0 or row >= len(self.search_results):
             return
 
-        path = self.search_results[row]['path']
+        result = self.search_results[row]
+        path = result['path']
         if not os.path.exists(path):
             item = QTreeWidgetItem(["(folder not found)"])
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             self.folder_tree.addTopLevelItem(item)
+        else:
+            self._populate_tree_level(self.folder_tree.invisibleRootItem(), path)
+
+        self._add_related_files_node(result)
+
+    def _add_related_files_node(self, result: dict):
+        """Add a synthetic "Related Files" node listing files from the
+        configured Related Files directory whose name contains one of this
+        job's drawing/part numbers.
+
+        Those files live outside the job folder entirely (a separately
+        configured directory, indexed/searched like Blueprints — see
+        _get_related_files_dirs()), so _populate_tree_level()'s normal
+        directory listing above never surfaces them. Silently a no-op for
+        non-job results (blueprints/quotes/related-files rows themselves
+        have no 'drawings') and for jobs with no configured related-files
+        directory or no matches.
+        """
+        drawings = result.get('drawings') or []
+        if not drawings:
             return
 
-        self._populate_tree_level(self.folder_tree.invisibleRootItem(), path)
+        raw_customer = result['customer']
+        for prefix in (
+            '[ITAR] ', '[ITAR-BP] ', '[ITAR-RF] ', '[BP] ', '[RF] ', '[IR] ',
+            '[Quote] ', '[ITAR Quote] ',
+        ):
+            raw_customer = raw_customer.replace(prefix, '')
+        customer = raw_customer.strip()
+        if not customer:
+            return
+
+        is_itar = result['customer'].startswith(_ITAR_LABEL_PREFIXES)
+        prefix = 'ITAR-RF' if is_itar else 'RF'
+        matches = self._find_related_files(customer, drawings, prefix)
+        if not matches:
+            return
+
+        readonly = self.app_context.is_readonly()
+        group = QTreeWidgetItem(["Related Files"])
+        for full_path in matches:
+            if readonly and not self._is_within_permitted_roots(full_path):
+                continue
+            child = QTreeWidgetItem([os.path.basename(full_path)])
+            child.setData(0, Qt.ItemDataRole.UserRole, full_path)
+            group.addChild(child)
+
+        if group.childCount() == 0:
+            return
+        self.folder_tree.addTopLevelItem(group)
+        group.setExpanded(True)
+
+    def _find_related_files(self, customer: str, drawings: List[str], prefix: str) -> List[str]:
+        """Return full paths of related-files entries for this customer whose
+        filename contains any of the given drawing/part numbers.
+
+        Queries the SQLite index only — deliberately no live filesystem-walk
+        fallback: unlike the main search box (which hands a live scan off to
+        SearchWorker on a background QThread), this runs inline on the GUI
+        thread from a row-selection signal, and a customer's related-files
+        subtree can be recursive/arbitrarily large. A synchronous os.walk()
+        there risks the exact UI freeze this codebase's QThread-based search
+        workers exist to avoid. If the index hasn't caught up yet (or is
+        unavailable), matches simply don't appear here yet — a soft
+        degradation, not a correctness bug.
+        """
+        if self._index is None:
+            return []
+        try:
+            rows = self._index.find_files_for_drawings(customer, drawings, (prefix,))
+        except sqlite3.Error as exc:
+            logger.warning(
+                "search: find_files_for_drawings failed (%s): %s", type(exc).__name__, exc
+            )
+            return []
+        return [os.path.join(r['dir_path'], r['filename']) for r in rows]
 
     def _populate_tree_level(self, parent_item, dir_path: str):
         """Read one level of dir_path and add children to parent_item.

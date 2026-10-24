@@ -516,6 +516,7 @@ def test_rebuild_search_index_defers_to_a_fresh_worker_once_the_old_one_stops(qa
     module._index = slow_index
     module._get_customer_files_dirs = MagicMock(return_value=[('', str(tmp_path))])
     module._get_blueprint_dirs = MagicMock(return_value=[])
+    module._get_related_files_dirs = MagicMock(return_value=[])
 
     module.start_indexer()
     try:
