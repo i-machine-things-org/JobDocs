@@ -26,7 +26,7 @@ This directory is the Reporting module -- JobBOSS SQL Server integration for the
    GRANT SELECT ON dbo.Work_Center TO jobdocs_reporting_ro;
    ```
 
-   `Delivery`/`Job_Operation` are only needed for Job Report (Promise Date and Current Work Center respectively). `Job_Operation_Time`/`Employee`/`Work_Center` are only needed for the two Employee Efficiency report types. Every other report type reads `Job` alone.
+   `Delivery`/`Job_Operation` are only needed for Job Report (Promise Date/Shipping Instructions and Current Work Center respectively). `Job_Operation_Time`/`Employee`/`Work_Center` are only needed for the two Employee Efficiency report types. Every other report type reads `Job` alone.
 
 2. In JobDocs, open **Settings > Advanced Settings**, check **Enable experimental features (Reporting)**, then fill in the JobBOSS DB Host / Port / Database / Username / Password fields. Use the exact `Server` value from your SQL Server ODBC DSN for Host -- for a named instance (e.g. `SMI-APP02\JBSQL`), leave Port blank and it resolves automatically via the SQL Browser service, the same way the ODBC driver does for Excel/Power Query.
 3. The password is **not** written to `settings.json`. It's stored in your OS credential store (Windows Credential Manager, macOS Keychain, or Linux Secret Service) via the `keyring` package, under service name `JobDocs`.
@@ -49,6 +49,8 @@ Matches the shape of this shop's existing "Job Report" (jobRpt) -- a custom repo
 **Current Work Center**: the work center of each job's earliest non-complete operation (by `Job_Operation.Sequence`) -- the exact "current operation" logic already proven live in the sibling `shop-schedule` project's `jobboss_db.py`, reused here. Unlike that project's `CROSS APPLY` (safe there only because its query starts `FROM Job_Operation` itself, so a matching row is guaranteed), Job Report starts `FROM Job` with no such guarantee -- an `Active` job isn't certain to have a non-complete operation row (not yet routed, or operations closed out of sync with the job header). Uses `OUTER APPLY` instead, so such a job still appears in the report with a blank Current Work Center rather than being silently dropped.
 
 **Late-job highlight**: the Scheduled End Date cell turns red (on screen and in the `.xlsx` export) whenever it's later than that job's Promise Date -- same comparison Report Fixer's Fix & Export used to flag the same condition, reapplied here since Job Report is a fresh SQL pull rather than that tool's output. A blank Scheduled End Date or Promise Date is never flagged (nothing to compare).
+
+**Shipping Instructions**: pulled from `Delivery.Comment`, not `Job.Note_Text`/`Comment` (confirmed live: `Job.Comment` is blank and `Job.Note_Text` holds a short unrelated note, while `Delivery.Comment` holds this shop's actual shipping/NCR instructions text) -- read from the same per-job `Delivery` row already resolved for Promise Date above, so a job with multiple `Delivery` rows gets instructions from that same soonest-open-or-latest row rather than a separately-resolved one.
 
 **Filters**: Customer picker (checklist, zero = All) and "Exclude assembly sub-jobs" (filters on `Assembly_Level = 0`, i.e. `Top_Lvl_Job == Job`, to drop component jobs like "30274A" under a parent "30274").
 

@@ -24,6 +24,7 @@ def test_formats_populated_row():
         'Order_Date': datetime(2026, 9, 24), 'Order_Quantity': 1,
         'Sched_End': None, 'Status': 'Active', 'Note_Text': 'DPAS  DO-A3',
         'Promised_Date': datetime(2027, 2, 24), 'Curr_WC': 'CNC MILL',
+        'Shipping_Instructions': 'DPAS  DO-A3\r\nSN#M250054-10\r\nN1\r\n',
     }]
     rows = _rows_from_job_report(raw)
     assert rows == [{
@@ -34,6 +35,7 @@ def test_formats_populated_row():
         'order_date': '2026-09-24', 'order_qty': '1', 'sched_end': '',
         'promise_date': '2027-02-24', 'status': 'Active',
         'curr_wc': 'CNC MILL', 'notes': 'DPAS  DO-A3',
+        'shipping_instructions': 'DPAS  DO-A3\r\nSN#M250054-10\r\nN1',
     }]
 
 
@@ -44,6 +46,7 @@ def test_formats_blank_row_without_crashing():
         'Rev': None, 'Description': None, 'Order_Date': None,
         'Order_Quantity': None, 'Sched_End': None, 'Status': None,
         'Note_Text': None, 'Promised_Date': None, 'Curr_WC': None,
+        'Shipping_Instructions': None,
     }]
     rows = _rows_from_job_report(raw)
     assert rows == [{
@@ -51,6 +54,7 @@ def test_formats_blank_row_without_crashing():
         'line': '', 'drawing': '', 'part_number': '', 'revision': '',
         'description': '', 'order_date': '', 'order_qty': '', 'sched_end': '',
         'promise_date': '', 'status': '', 'curr_wc': '', 'notes': '',
+        'shipping_instructions': '',
     }]
 
 
