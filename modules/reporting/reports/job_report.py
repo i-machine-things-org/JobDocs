@@ -70,7 +70,8 @@ HEADERS = [
 # as Promised_Date above rather than a second OUTER APPLY, since "the"
 # delivery row for a job is already resolved there.
 _JOB_REPORT_QUERY = (
-    f"SELECT TOP 500 {_JOB_REPORT_COLUMNS_SQL}, dlv.Promised_Date, dlv.Comment AS Shipping_Instructions, cur.Curr_WC\n"  # nosec B608
+    f"SELECT TOP 500 {_JOB_REPORT_COLUMNS_SQL}, "  # nosec B608
+    "dlv.Promised_Date, dlv.Comment AS Shipping_Instructions, cur.Curr_WC\n"
     "FROM Job j\n"
     "OUTER APPLY (\n"
     "    SELECT TOP 1 d.Promised_Date, d.Comment\n"
@@ -95,9 +96,12 @@ def _strip_blank_lines(text: str) -> str:
     blank-separated line per instruction (e.g. "MTL ORDERED\\r\\n\\r\\nADVANCED
     BRONZE\\r\\n\\r\\n11/9/26"), which a table cell has no room to reproduce
     faithfully. Still multi-line (not collapsed to one line), just without
-    the blank-line gaps.
+    the blank-line gaps. rstrip(), not strip(), on each kept line -- a blank
+    check still needs the line's content either way, but stripping the left
+    side too would also eat real leading indentation on a continuation line,
+    not just the blank-line gaps this is actually trying to remove.
     """
-    return '\n'.join(line.strip() for line in text.splitlines() if line.strip())
+    return '\n'.join(line.rstrip() for line in text.strip().splitlines() if line.strip())
 
 
 def _rows_from_job_report(raw_rows: List[dict]) -> List[Dict[str, str]]:

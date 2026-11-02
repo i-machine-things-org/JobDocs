@@ -18,7 +18,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from PyQt6.QtCore import QDate, QThread, pyqtSignal, QObject, QEvent, Qt, QUrl
+from PyQt6.QtCore import QDate, QThread, pyqtSignal, QObject, QEvent, Qt, QTimer, QUrl
 from PyQt6.QtGui import QColor, QDesktopServices
 from PyQt6.QtWidgets import (
     QWidget, QTableWidgetItem, QFileDialog, QHeaderView, QAbstractItemView,
@@ -771,6 +771,19 @@ class ReportingModule(BaseModule):
         # row, and resizeRowsToContents() alone has nothing wrapped to size
         # to. Harmless for every other, single-line column.
         self.report_table.setWordWrap(True)
+        # Job Report uses resize_mode="interactive" (see _update_table_headers),
+        # so a user narrowing a wrapped column after the report has already
+        # loaded needs row heights recalculated again -- Qt's wordWrap doesn't
+        # do that on its own, it would just clip the now-taller cell. Debounced
+        # (restart-on-every-signal single-shot timer) rather than calling
+        # resizeRowsToContents() directly from sectionResized, since that
+        # signal fires continuously while a column border is being dragged and
+        # the resize itself is O(rows).
+        self._row_resize_timer = QTimer(widget)
+        self._row_resize_timer.setSingleShot(True)
+        self._row_resize_timer.setInterval(150)
+        self._row_resize_timer.timeout.connect(self.report_table.resizeRowsToContents)
+        self.report_table.horizontalHeader().sectionResized.connect(lambda *_: self._row_resize_timer.start())
 
         # Connect signals
         self.db_status_indicator.clicked.connect(self.connect_to_db)

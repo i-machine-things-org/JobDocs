@@ -8,11 +8,29 @@ live JobBOSS schema (see modules/reporting/README.md's "Job Report" section).
 from datetime import datetime
 
 from modules.reporting.reports import REPORT_TYPES
-from modules.reporting.reports.job_report import _is_past_promise, _rows_from_job_report, _strip_blank_lines
+from modules.reporting.reports.job_report import (
+    _JOB_REPORT_QUERY, _is_past_promise, _rows_from_job_report, _strip_blank_lines,
+)
 
 
 def test_job_report_is_registered():
     assert "Job Report" in REPORT_TYPES
+
+
+def test_query_selects_promise_date_and_shipping_instructions_from_same_delivery_row():
+    """_rows_from_job_report() is tested below by feeding it a raw dict
+    directly, which would still pass even if the query itself stopped
+    selecting Shipping Instructions, or started pulling it from a different
+    Delivery row than Promise Date. Assert the query text itself, so a
+    regression there is caught independently of that row-formatter test.
+    """
+    assert "dlv.Promised_Date, dlv.Comment AS Shipping_Instructions, cur.Curr_WC" in _JOB_REPORT_QUERY
+    assert (
+        "SELECT TOP 1 d.Promised_Date, d.Comment\n"
+        "    FROM Delivery d\n"
+        "    WHERE d.Job = j.Job\n"
+        "    ORDER BY CASE WHEN d.Remaining_Quantity > 0 THEN 0 ELSE 1 END, d.Promised_Date ASC"
+    ) in _JOB_REPORT_QUERY
 
 
 def test_formats_populated_row():
@@ -86,6 +104,15 @@ def test_strip_blank_lines_drops_gaps_between_entries():
 
 def test_strip_blank_lines_empty_string():
     assert _strip_blank_lines('') == ''
+
+
+def test_strip_blank_lines_keeps_leading_indentation_on_continuation_lines():
+    """Only the blank-line gaps should go -- a continuation line indented to
+    show it belongs under the line above (e.g. a sub-item) must keep that
+    indentation, not just its non-blank content.
+    """
+    raw = 'MAIN ITEM\r\n  - sub item\r\n\r\nSECOND ITEM\r\n'
+    assert _strip_blank_lines(raw) == 'MAIN ITEM\n  - sub item\nSECOND ITEM'
 
 
 def test_curr_wc_blank_when_job_has_no_open_operation():
