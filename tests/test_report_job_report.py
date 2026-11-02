@@ -8,7 +8,7 @@ live JobBOSS schema (see modules/reporting/README.md's "Job Report" section).
 from datetime import datetime
 
 from modules.reporting.reports import REPORT_TYPES
-from modules.reporting.reports.job_report import _is_past_promise, _rows_from_job_report
+from modules.reporting.reports.job_report import _is_past_promise, _rows_from_job_report, _strip_blank_lines
 
 
 def test_job_report_is_registered():
@@ -35,7 +35,7 @@ def test_formats_populated_row():
         'order_date': '2026-09-24', 'order_qty': '1', 'sched_end': '',
         'promise_date': '2027-02-24', 'status': 'Active',
         'curr_wc': 'CNC MILL', 'notes': 'DPAS  DO-A3',
-        'shipping_instructions': 'DPAS  DO-A3\r\nSN#M250054-10\r\nN1',
+        'shipping_instructions': 'DPAS  DO-A3\nSN#M250054-10\nN1',
     }]
 
 
@@ -56,6 +56,20 @@ def test_formats_blank_row_without_crashing():
         'promise_date': '', 'status': '', 'curr_wc': '', 'notes': '',
         'shipping_instructions': '',
     }]
+
+
+def test_strip_blank_lines_drops_gaps_between_entries():
+    """Delivery.Comment is typically entered one instruction per line with a
+    blank line between each (e.g. "MTL ORDERED\\r\\n\\r\\nADVANCED BRONZE\\r\\n\\r\\n11/9/26")
+    -- a table cell has no room to reproduce those gaps faithfully, so they're
+    dropped while keeping each real line on its own line.
+    """
+    raw = 'MTL ORDERED\r\n\r\nADVANCED BRONZE\r\n\r\n11/9/26\r\n'
+    assert _strip_blank_lines(raw) == 'MTL ORDERED\nADVANCED BRONZE\n11/9/26'
+
+
+def test_strip_blank_lines_empty_string():
+    assert _strip_blank_lines('') == ''
 
 
 def test_curr_wc_blank_when_job_has_no_open_operation():
