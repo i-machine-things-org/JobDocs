@@ -58,6 +58,22 @@ def test_formats_blank_row_without_crashing():
     }]
 
 
+def test_notes_also_strips_blank_lines():
+    """Note_Text gets the same blank-line treatment as Shipping Instructions
+    -- both are free-text JobBOSS fields entered the same blank-separated way.
+    """
+    raw = [{
+        'Job': '30309', 'Customer': 'BRADKEN', 'Customer_PO': None,
+        'Customer_PO_LN': None, 'Drawing': None, 'Part_Number': None,
+        'Rev': None, 'Description': None, 'Order_Date': None,
+        'Order_Quantity': None, 'Sched_End': None, 'Status': 'Active',
+        'Note_Text': 'DPAS  D0-A3\r\n\r\nSN#M250054-10\r\n',
+        'Promised_Date': None, 'Curr_WC': None, 'Shipping_Instructions': None,
+    }]
+    rows = _rows_from_job_report(raw)
+    assert rows[0]['notes'] == 'DPAS  D0-A3\nSN#M250054-10'
+
+
 def test_strip_blank_lines_drops_gaps_between_entries():
     """Delivery.Comment is typically entered one instruction per line with a
     blank line between each (e.g. "MTL ORDERED\\r\\n\\r\\nADVANCED BRONZE\\r\\n\\r\\n11/9/26")

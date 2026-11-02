@@ -91,10 +91,11 @@ _JOB_REPORT_QUERY = (
 
 def _strip_blank_lines(text: str) -> str:
     """Join text's non-blank lines with plain '\\n', dropping blank ones --
-    Delivery.Comment is typically entered as one blank-separated line per
-    instruction (e.g. "MTL ORDERED\\r\\n\\r\\nADVANCED BRONZE\\r\\n\\r\\n11/9/26"),
-    which a table cell has no room to reproduce faithfully. Still multi-line
-    (not collapsed to one line), just without the blank-line gaps.
+    both Note_Text and Delivery.Comment are typically entered as one
+    blank-separated line per instruction (e.g. "MTL ORDERED\\r\\n\\r\\nADVANCED
+    BRONZE\\r\\n\\r\\n11/9/26"), which a table cell has no room to reproduce
+    faithfully. Still multi-line (not collapsed to one line), just without
+    the blank-line gaps.
     """
     return '\n'.join(line.strip() for line in text.splitlines() if line.strip())
 
@@ -123,7 +124,7 @@ def _rows_from_job_report(raw_rows: List[dict]) -> List[Dict[str, str]]:
             'promise_date': promised.strftime('%Y-%m-%d') if promised else '',
             'status': r.get('Status') or '',
             'curr_wc': r.get('Curr_WC') or '',
-            'notes': (r.get('Note_Text') or '').strip(),
+            'notes': _strip_blank_lines(r.get('Note_Text') or ''),
             'shipping_instructions': _strip_blank_lines(r.get('Shipping_Instructions') or ''),
         })
     return rows
