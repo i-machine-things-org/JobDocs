@@ -35,13 +35,13 @@ _JOB_REPORT_COLUMNS_SQL = (
 COLUMNS = (
     'classification', 'job', 'customer', 'po', 'line', 'drawing', 'part_number',
     'revision', 'description', 'order_date', 'order_qty', 'sched_end',
-    'promise_date', 'status', 'curr_wc', 'notes',
+    'promise_date', 'status', 'curr_wc', 'notes', 'shipping_instructions',
 )
 HEADERS = [
     'Classification', 'Job ID', 'Customer ID', 'Customer PO Number', 'Line',
     'Drawing', 'Part Number', 'Revision', 'Description', 'Order Date',
     'Order Qty', 'Scheduled End Date', 'Promise Date', 'Status',
-    'Current Work Center', 'Notes',
+    'Current Work Center', 'Notes', 'Shipping Instructions',
 ]
 
 # OUTER APPLY, not CROSS APPLY: unlike shop-schedule's current-operation lookup
@@ -63,11 +63,18 @@ HEADERS = [
 # already proven live in shop-schedule/jobboss_db.py's CROSS APPLY, reused
 # here verbatim (Job_Operation.Work_Center/.Sequence/.Status), just OUTER
 # instead of CROSS for the reason above.
+#
+# Shipping Instructions = Delivery.Comment (confirmed live: matches this
+# shop's existing jobRpt "Shipping Instructions" field verbatim, e.g. job
+# 30131's NCR/disposition note) -- pulled from the same per-job Delivery row
+# as Promised_Date above rather than a second OUTER APPLY, since "the"
+# delivery row for a job is already resolved there.
 _JOB_REPORT_QUERY = (
-    f"SELECT TOP 500 {_JOB_REPORT_COLUMNS_SQL}, dlv.Promised_Date, cur.Curr_WC\n"  # nosec B608
+    f"SELECT TOP 500 {_JOB_REPORT_COLUMNS_SQL}, "  # nosec B608
+    "dlv.Promised_Date, dlv.Comment AS Shipping_Instructions, cur.Curr_WC\n"
     "FROM Job j\n"
     "OUTER APPLY (\n"
-    "    SELECT TOP 1 d.Promised_Date\n"
+    "    SELECT TOP 1 d.Promised_Date, d.Comment\n"
     "    FROM Delivery d\n"
     "    WHERE d.Job = j.Job\n"
     "    ORDER BY CASE WHEN d.Remaining_Quantity > 0 THEN 0 ELSE 1 END, d.Promised_Date ASC\n"
@@ -81,6 +88,20 @@ _JOB_REPORT_QUERY = (
     "WHERE Status = 'Active' AND {customer_clause} AND {assembly_clause}\n"
     "ORDER BY Customer, Sched_End\n"
 )
+
+
+def _strip_blank_lines(text: str) -> str:
+    """Join text's non-blank lines with plain '\\n', dropping blank ones --
+    both Note_Text and Delivery.Comment are typically entered as one
+    blank-separated line per instruction (e.g. "MTL ORDERED\\r\\n\\r\\nADVANCED
+    BRONZE\\r\\n\\r\\n11/9/26"), which a table cell has no room to reproduce
+    faithfully. Still multi-line (not collapsed to one line), just without
+    the blank-line gaps. rstrip(), not strip(), on each kept line -- a blank
+    check still needs the line's content either way, but stripping the left
+    side too would also eat real leading indentation on a continuation line,
+    not just the blank-line gaps this is actually trying to remove.
+    """
+    return '\n'.join(line.rstrip() for line in text.strip().splitlines() if line.strip())
 
 
 def _rows_from_job_report(raw_rows: List[dict]) -> List[Dict[str, str]]:
@@ -107,7 +128,8 @@ def _rows_from_job_report(raw_rows: List[dict]) -> List[Dict[str, str]]:
             'promise_date': promised.strftime('%Y-%m-%d') if promised else '',
             'status': r.get('Status') or '',
             'curr_wc': r.get('Curr_WC') or '',
-            'notes': (r.get('Note_Text') or '').strip(),
+            'notes': _strip_blank_lines(r.get('Note_Text') or ''),
+            'shipping_instructions': _strip_blank_lines(r.get('Shipping_Instructions') or ''),
         })
     return rows
 

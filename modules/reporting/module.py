@@ -18,7 +18,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from PyQt6.QtCore import QDate, QThread, pyqtSignal, QObject, QEvent, Qt, QUrl
+from PyQt6.QtCore import QDate, QThread, pyqtSignal, QObject, QEvent, Qt, QTimer, QUrl
 from PyQt6.QtGui import QColor, QDesktopServices
 from PyQt6.QtWidgets import (
     QWidget, QTableWidgetItem, QFileDialog, QHeaderView, QAbstractItemView,
@@ -331,7 +331,7 @@ def _write_xlsx_report_sheet(ws, title_block: list, headers: list, data_rows: li
     part of the Table's own range, so Excel's AutoFilter/sort can't reorder
     it away from the bottom.
     """
-    from openpyxl.styles import Font, PatternFill
+    from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
     from openpyxl.worksheet.table import Table, TableStyleInfo
 
@@ -368,6 +368,15 @@ def _write_xlsx_report_sheet(ws, title_block: list, headers: list, data_rows: li
         if pct_eff_cols:
             for col_idx in pct_eff_cols:
                 ws.cell(row=ws.max_row, column=col_idx).number_format = _PCT_DISPLAY_FORMAT
+        # Any cell with an embedded line break (e.g. Job Report's Shipping
+        # Instructions) needs Excel's own "Wrap Text" format to actually show
+        # more than its first line -- an embedded "\n" alone just overflows
+        # un-rendered into neighboring cells. Checked by content, not column
+        # key, so this applies to any report's multi-line field without this
+        # generic file needing to know which report/column that is.
+        for col_idx, value in enumerate(row, start=1):
+            if isinstance(value, str) and '\n' in value:
+                ws.cell(row=ws.max_row, column=col_idx).alignment = Alignment(wrap_text=True, vertical='top')
 
     # Same row_highlight() flag as the on-screen report_table
     # (_on_report_rows) -- reapplied here from the exported string values
@@ -757,6 +766,24 @@ class ReportingModule(BaseModule):
         # Setup table properties
         self.report_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.report_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        # Multi-line cell values (e.g. Job Report's Shipping Instructions)
+        # need both of these -- wordWrap alone still clips to a one-line-tall
+        # row, and resizeRowsToContents() alone has nothing wrapped to size
+        # to. Harmless for every other, single-line column.
+        self.report_table.setWordWrap(True)
+        # Job Report uses resize_mode="interactive" (see _update_table_headers),
+        # so a user narrowing a wrapped column after the report has already
+        # loaded needs row heights recalculated again -- Qt's wordWrap doesn't
+        # do that on its own, it would just clip the now-taller cell. Debounced
+        # (restart-on-every-signal single-shot timer) rather than calling
+        # resizeRowsToContents() directly from sectionResized, since that
+        # signal fires continuously while a column border is being dragged and
+        # the resize itself is O(rows).
+        self._row_resize_timer = QTimer(widget)
+        self._row_resize_timer.setSingleShot(True)
+        self._row_resize_timer.setInterval(150)
+        self._row_resize_timer.timeout.connect(self.report_table.resizeRowsToContents)
+        self.report_table.horizontalHeader().sectionResized.connect(lambda *_: self._row_resize_timer.start())
 
         # Connect signals
         self.db_status_indicator.clicked.connect(self.connect_to_db)
@@ -1112,6 +1139,10 @@ class ReportingModule(BaseModule):
         for col in range(self.report_table.columnCount()):
             if self.report_table.columnWidth(col) > _MAX_AUTO_COLUMN_WIDTH:
                 self.report_table.setColumnWidth(col, _MAX_AUTO_COLUMN_WIDTH)
+        # After columns (above), not before -- row heights need to wrap
+        # against each column's final width, e.g. Shipping Instructions
+        # capped at _MAX_AUTO_COLUMN_WIDTH rather than its pre-cap auto width.
+        self.report_table.resizeRowsToContents()
 
         self._last_generated_at = datetime.now()
         self.report_status_label.setText(f"Showing {len(rows)} record(s) for '{report_type}'")
