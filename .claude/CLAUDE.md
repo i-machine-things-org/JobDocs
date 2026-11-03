@@ -167,30 +167,30 @@ Rehearse before the first real tag, and again after any change to the release pi
 
 Do not rehearse by tagging a throwaway version: a pushed tag is public and hard to take back. If a repo has no publish workflow yet, this rule waits until one exists.
 
-### Automatic Version Bump Triggers
+### Release Cadence: Bi-Weekly, Not Commit-Count-Gated
 
-After every merge to `master`, count commits since the last `v*` tag:
+MINOR and PATCH releases ship on a **bi-weekly cadence** (every 14+ days), not after N commits
+accumulate — frequent, modest releases beat waiting for an arbitrary commit count. MAJOR is not on
+this schedule: a breaking change gets its own immediate release decision whenever it's ready,
+independent of the 14-day clock.
 
-```bash
-last_tag="$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || git rev-list --max-parents=0 master)"
-git log "$last_tag"..master --format='%s'
-```
+This is enforced by `.github/workflows/release-cadence-check.yml`, a plain git/date check —
+deliberately **not** an AI/Claude task, since "has 14+ days passed and did anything merge" needs no
+judgment. It runs daily (cheap, and resilient to a missed run) but only actually acts once **both**:
+- 14+ days have passed since the last `v*` tag on `master`, **and**
+- at least one commit has landed on `master` since that tag.
 
-Count by type (`--format='%s'` prints subjects only; `--oneline` would put the hash first and nothing
-would match):
-- Lines starting with `feat:` → feature count
-- Lines starting with `fix:` → fix count
+Zero commits in the window means nothing ships that cycle — the workflow stays silent rather than
+filing an empty recommendation. When both conditions are met, it opens a `release-due`-labeled GitHub
+issue with the commit list and a recommended bump (any `feat:` commit since the last tag → MINOR,
+otherwise PATCH), and auto-closes any older `release-due` issue once it detects a release actually
+shipped since that issue was filed (so a forgotten manual close can't permanently suppress future
+cycles).
 
-**Thresholds:**
-- **5 or more `feat:` commits** → recommend a MINOR bump
-- **5 or more `fix:` commits** → recommend a PATCH bump
-
-If both thresholds are met simultaneously, recommend MINOR (takes precedence). This is a
-*recommendation*, not an action — Rule 6 requires an explicit human go/no-go before any tag is
-created, and this threshold does not bypass that. Do not tag or push automatically here.
-
-Check this threshold after every merge to master and report the recommendation. Do not wait for the
-user to ask before reporting it — but do wait for their sign-off before acting on it.
+That issue is a **recommendation, not an action** — Rule 6 still requires an explicit human go/no-go
+before any tag is created; the workflow never tags or pushes. When you see a `release-due` issue
+(or the user points you at one), treat it the same way the old commit-count trigger worked: surface
+it, propose the version number, and wait for sign-off before acting.
 
 ## Rule 5: Pull Request Reviews
 

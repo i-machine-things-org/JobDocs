@@ -1,0 +1,104 @@
+name: Release Cadence Check
+
+# Deterministic, no-AI check: is a release due on the bi-weekly cadence
+# (CLAUDE.md Rule 4)? Runs daily (not biweekly) so a missed/delayed run
+# doesn't push the real notification a week late -- the 14-day gate below is
+# what actually enforces the cadence, this schedule is just how often we
+# bother checking it.
+on:
+  schedule:
+    - cron: '0 15 * * *'  # Daily, 15:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Check release cadence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          last_tag="$(git describe --tags --match 'v*' --abbrev=0 origin/master 2>/dev/null || true)"
+          if [ -z "$last_tag" ]; then
+            last_tag_date="$(git log --reverse --format=%cI origin/master | head -1)"
+            range="origin/master"
+            last_tag_label="the initial commit"
+          else
+            last_tag_date="$(git log -1 --format=%cI "$last_tag")"
+            range="$last_tag..origin/master"
+            last_tag_label="$last_tag"
+          fi
+          last_tag_epoch="$(date -u -d "$last_tag_date" +%s)"
+
+          # Auto-resolve a stale recommendation: if a release already shipped
+          # since an open issue was filed, its own ask has been satisfied even
+          # if nobody remembered to close it -- and left open, it would
+          # otherwise suppress every future recommendation forever (see the
+          # "already open" skip below).
+          existing_json="$(gh issue list --label release-due --state open --json number,createdAt --jq '.[0] // empty')"
+          if [ -n "$existing_json" ]; then
+            existing_number="$(echo "$existing_json" | jq -r '.number')"
+            existing_epoch="$(date -u -d "$(echo "$existing_json" | jq -r '.createdAt')" +%s)"
+            if [ "$existing_epoch" -lt "$last_tag_epoch" ]; then
+              gh issue close "$existing_number" --comment "Resolved -- $last_tag_label shipped since this was filed."
+            else
+              echo "Release-due issue #$existing_number is already open and still current -- skipping."
+              exit 0
+            fi
+          fi
+
+          days_since=$(( ( $(date -u +%s) - last_tag_epoch ) / 86400 ))
+          commit_count="$(git log $range --oneline | wc -l)"
+          echo "Last release: $last_tag_label ($days_since days ago); $commit_count commit(s) since."
+
+          if [ "$days_since" -lt 14 ] || [ "$commit_count" -eq 0 ]; then
+            echo "Not due yet -- needs 14+ days AND at least one commit since the last release. Skipping."
+            exit 0
+          fi
+
+          gh label create release-due --color FBCA04 \
+            --description "Scheduled release-cadence check (CLAUDE.md Rule 4)" --force >/dev/null 2>&1 || true
+
+          subjects="$(git log $range --format='%s')"
+          feat_count="$(echo "$subjects" | grep -c '^feat:' || true)"
+          fix_count="$(echo "$subjects" | grep -c '^fix:' || true)"
+          if [ "$feat_count" -gt 0 ]; then
+            bump="MINOR"
+          else
+            bump="PATCH"
+          fi
+
+          body="$(cat <<EOF
+          Bi-weekly release check: **$commit_count commit(s)** merged to \`master\` since \`$last_tag_label\` ($days_since days ago).
+
+          - \`feat:\` commits: $feat_count
+          - \`fix:\` commits: $fix_count
+          - Recommended bump: **$bump**
+
+          <details><summary>Commits since last release</summary>
+
+          \`\`\`
+          $(git log $range --format='- %s (%h)')
+          \`\`\`
+
+          </details>
+
+          Per CLAUDE.md Rule 6, tagging still needs an explicit human go/no-go -- this issue is the trigger to start that review, not an automatic release. Close this once a release is cut (or once you've decided to skip this cycle).
+          EOF
+          )"
+
+          gh issue create \
+            --title "Release due: recommend $bump bump ($commit_count commit(s) pending)" \
+            --label release-due \
+            --body "$body"
