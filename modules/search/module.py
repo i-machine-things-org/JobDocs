@@ -944,7 +944,7 @@ class SearchModule(BaseModule):
         existing "Search Criteria" box rather than a second nested group box.
         """
         self.more_options_content.setVisible(checked)
-        self.more_options_btn.setText("▾ Fewer search options" if checked else "▸ More search options")
+        self.more_options_btn.setText("▾ Search options" if checked else "▸ Search options")
 
     def update_legacy_mode_ui(self):
         """Show/hide UI elements based on legacy mode setting"""
