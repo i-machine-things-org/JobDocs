@@ -1004,6 +1004,16 @@ class SearchModule(BaseModule):
         and pytds gives no mid-query interrupt hook to cancel cooperatively
         even if it didn't (same constraint as every other worker in this
         module that blocks on real I/O, e.g. IndexWorker's filesystem walk).
+
+        Deliberately no `finished.connect(deleteLater)` here -- unlike
+        _worker/_index_worker/_naming_worker elsewhere in this module,
+        self._active_jobs_worker is never reassigned until the *next*
+        fetch starts, so a deleteLater() firing in between leaves this
+        attribute pointing at a deleted C/C++ QObject; the next
+        perform_search() call's `self._active_jobs_worker.isRunning()`
+        guard would then raise RuntimeError instead of returning False.
+        Python's own refcounting is enough to free the old worker once
+        it's reassigned below.
         """
         self.search_status_label.setText("Checking active jobs…")
         self.search_btn.setEnabled(False)
@@ -1017,7 +1027,6 @@ class SearchModule(BaseModule):
         self._active_jobs_worker.error.connect(
             lambda msg, e=epoch: self._on_active_jobs_error(msg, e)
         )
-        self._active_jobs_worker.finished.connect(self._active_jobs_worker.deleteLater)
         self._active_jobs_worker.start()
 
     def _on_active_jobs_fetched(self, job_numbers: set, epoch: int):

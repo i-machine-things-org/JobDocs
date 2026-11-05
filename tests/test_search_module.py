@@ -616,6 +616,32 @@ class TestPerformSearchActiveJobsGating:
         module.search_btn.setEnabled.assert_called_with(False)
 
 
+class TestActiveJobsWorkerIsNeverWiredToDeleteLater:
+    """Regression test for a real crash hit by a live run of the app:
+    _start_active_jobs_fetch() originally wired
+    `self._active_jobs_worker.finished.connect(self._active_jobs_worker.deleteLater)`.
+    deleteLater() destroys the underlying C/C++ QObject once the thread
+    finishes, but self._active_jobs_worker is never reassigned until the
+    *next* fetch starts (unlike _worker/_index_worker/_naming_worker
+    elsewhere in this module, which are only ever reassigned from inside
+    their own finished handler) -- so after the first fetch completed, a
+    second "Active Jobs Only" search hit
+    `RuntimeError: wrapped C/C++ object of type ActiveJobsWorker has been
+    deleted` on perform_search()'s `self._active_jobs_worker.isRunning()`
+    guard. Python's own refcounting is enough to free the old worker once
+    _start_active_jobs_fetch() reassigns the attribute to a new instance;
+    deleteLater() must never be wired to this particular worker."""
+
+    def test_does_not_connect_finished_to_delete_later(self):
+        module = _make_module_for_perform_search()
+        mock_worker_cls = MagicMock()
+
+        with patch.dict(SearchModule._start_active_jobs_fetch.__globals__, {'ActiveJobsWorker': mock_worker_cls}):
+            module._start_active_jobs_fetch()
+
+        mock_worker_cls.return_value.finished.connect.assert_not_called()
+
+
 class TestActiveJobsEpochInvalidatesStaleDeliveries:
     """Same staleness-guard pattern as _naming_scan_id (see
     TestNamingScanIdInvalidatesStaleQueuedDeliveries above): a delivery
