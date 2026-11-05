@@ -8,7 +8,9 @@ This directory is the Reporting module -- JobBOSS SQL Server integration for the
 
 **Purpose**: Lets the Reporting tab pull live job/labor data straight out of JobBOSS over SQL Server (via [`python-tds`](https://pypi.org/project/python-tds/), the same pure-Python TDS client used by the sibling `shop-schedule` project), instead of showing placeholder sample data.
 
-**Architecture**: `db_integration.py` is shared infrastructure only -- credentials, connection setup, and the two filter-input lookups (`fetch_customers()`, `fetch_employees()`) reused by more than one report type. Every report type's query, row-formatter, and display columns/headers live in `modules/reporting/reports/` instead, one file per report type (see that package's `__init__.py` for the registry). Adding a new report type means adding a file there, not editing `db_integration.py` or `modules/reporting/module.py`.
+**Architecture**: `db_integration.py` is shared infrastructure only -- credentials, connection setup, and filter-input lookups (`fetch_customers()`, `fetch_employees()`, `fetch_active_job_numbers()`) reused by more than one consumer. Every report type's query, row-formatter, and display columns/headers live in `modules/reporting/reports/` instead, one file per report type (see that package's `__init__.py` for the registry). Adding a new report type means adding a file there, not editing `db_integration.py` or `modules/reporting/module.py`.
+
+**`fetch_active_job_numbers()` is consumed outside this module entirely** -- it backs the Search tab's "Active Jobs Only" filter (`modules/search/module.py`), not a report type. It's the one function here with a consumer outside `modules/reporting/`, which is why it lives in `db_integration.py` directly rather than `reports/` despite not following the "one file per report type" shape every other query here does. Same `Job.Status = 'Active'` convention and the same unverified-column caveat as every other `Status` reference in this file -- see "Known gap" below.
 
 **Connection setup**:
 

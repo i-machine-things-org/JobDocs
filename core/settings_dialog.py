@@ -275,7 +275,7 @@ class SettingsDialog(QDialog):
         _jobboss_block = QWidget()
         _jb_vbox = QVBoxLayout(_jobboss_block)
         _jb_vbox.setContentsMargins(0, 0, 0, 0)
-        _jb_vbox.addWidget(QLabel("JobBOSS DB Connection (Reporting tab):"))
+        _jb_vbox.addWidget(QLabel("JobBOSS DB Connection (Reporting tab, Search tab's Active Jobs Only filter):"))
         jobboss_layout = QGridLayout()
         jobboss_layout.addWidget(QLabel("Host:"), 0, 0)
         self.jobboss_host_edit = QLineEdit(self.settings.get('jobboss_db_host', ''))

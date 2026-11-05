@@ -401,3 +401,316 @@ class TestIndexClearFailed:
         module._on_index_clear_failed("some message")
 
         module.show_error.assert_called_once_with("Rebuild Search Index", "some message")
+
+
+class TestPassesActiveFilter:
+    """_passes_active_filter() backs the "Active Jobs Only" search checkbox.
+    Only real job-folder results are matched against JobBOSS's
+    Job.Status='Active' set (self._active_job_filter); blueprint/quote
+    results have no corresponding Job row at all, so they always pass
+    through regardless of what's in the set."""
+
+    def test_job_result_in_active_set_passes(self):
+        module = SearchModule()
+        module._active_job_filter = {'27173H', '1001'}
+
+        assert module._passes_active_filter({'customer': 'Acme', 'job_number': '27173h'}) is True
+
+    def test_job_result_not_in_active_set_is_filtered_out(self):
+        module = SearchModule()
+        module._active_job_filter = {'1001'}
+
+        assert module._passes_active_filter({'customer': 'Acme', 'job_number': '27173H'}) is False
+
+    def test_itar_job_result_is_still_checked_against_active_set(self):
+        module = SearchModule()
+        module._active_job_filter = set()
+
+        assert module._passes_active_filter({'customer': '[ITAR] Acme', 'job_number': '27173H'}) is False
+
+    def test_blueprint_result_always_passes(self):
+        module = SearchModule()
+        module._active_job_filter = set()  # empty -- would fail a real job check
+
+        assert module._passes_active_filter({'customer': '[BP] Acme', 'job_number': 'drawing-1'}) is True
+
+    def test_quote_result_always_passes(self):
+        module = SearchModule()
+        module._active_job_filter = set()
+
+        assert module._passes_active_filter({'customer': '[Quote] Acme', 'job_number': 'Q-100'}) is True
+
+
+class TestSearchFromIndexActiveFilter:
+    """_search_from_index() applies self._active_job_filter (set by a
+    preceding ActiveJobsWorker fetch) to its combined jobs/quotes/bp results,
+    same point the existing readonly ITAR-prune already runs at."""
+
+    def test_filters_out_job_not_in_active_set(self):
+        module = _make_module()
+        module._index = MagicMock()
+        module._index.search_jobs.return_value = [
+            {'date': datetime(2026, 1, 1), 'customer': 'Acme', 'job_number': '1001',
+             'po_number': '', 'description': '', 'drawings': []},
+            {'date': datetime(2026, 1, 1), 'customer': 'Acme', 'job_number': '1002',
+             'po_number': '', 'description': '', 'drawings': []},
+        ]
+        module._index.search_quotes.return_value = []
+        module._active_job_filter = {'1001'}
+
+        result = module._search_from_index('term', True, True, True, True, False)
+
+        assert result is True
+        assert [r['job_number'] for r in module.search_results] == ['1001']
+
+    def test_filter_none_keeps_every_result(self):
+        module = _make_module()
+        module._index = MagicMock()
+        module._index.search_jobs.return_value = [
+            {'date': datetime(2026, 1, 1), 'customer': 'Acme', 'job_number': '1001',
+             'po_number': '', 'description': '', 'drawings': []},
+        ]
+        module._index.search_quotes.return_value = []
+        module._active_job_filter = None
+
+        result = module._search_from_index('term', True, True, True, True, False)
+
+        assert result is True
+        assert len(module.search_results) == 1
+
+    def test_filtering_down_to_zero_results_falls_back_like_a_real_zero_match(self):
+        module = _make_module()
+        module._index = MagicMock()
+        module._index.search_jobs.return_value = [
+            {'date': datetime(2026, 1, 1), 'customer': 'Acme', 'job_number': '1002',
+             'po_number': '', 'description': '', 'drawings': []},
+        ]
+        module._index.search_quotes.return_value = []
+        module._active_job_filter = {'1001'}
+
+        result = module._search_from_index('term', True, True, True, True, False)
+
+        assert result is False
+
+
+class TestOnResultFoundActiveFilter:
+    """_on_result_found() (the live/legacy SearchWorker's per-result slot)
+    applies self._active_job_filter the same way _search_from_index() does,
+    so the two search paths stay consistent."""
+
+    def test_non_matching_job_result_is_dropped(self):
+        module = _make_module()
+        module.search_results = []
+        module._active_job_filter = {'1001'}
+
+        module._on_result_found({
+            'date': datetime(2026, 1, 1), 'customer': 'Acme', 'job_number': '1002',
+            'po_number': '', 'description': '', 'drawings': [],
+        })
+
+        assert module.search_results == []
+        module.search_table.insertRow.assert_not_called()
+
+    def test_matching_job_result_is_kept(self):
+        module = _make_module()
+        module.search_results = []
+        module.search_table.rowCount.return_value = 0
+        module._active_job_filter = {'1001'}
+
+        module._on_result_found({
+            'date': datetime(2026, 1, 1), 'customer': 'Acme', 'job_number': '1001',
+            'po_number': '', 'description': '', 'drawings': [],
+        })
+
+        assert len(module.search_results) == 1
+        module.search_table.insertRow.assert_called_once()
+
+    def test_non_job_result_is_kept_even_though_it_cannot_match(self):
+        module = _make_module()
+        module.search_results = []
+        module.search_table.rowCount.return_value = 0
+        module._active_job_filter = set()
+
+        module._on_result_found({
+            'date': datetime(2026, 1, 1), 'customer': '[BP] Acme', 'job_number': 'drawing-1',
+            'po_number': '', 'description': '', 'drawings': [],
+        })
+
+        assert len(module.search_results) == 1
+
+
+def _make_module_for_perform_search() -> SearchModule:
+    module = SearchModule()
+    module.search_edit = MagicMock()
+    module.search_edit.text.return_value = 'acme'
+    module._worker = None
+    module.search_active_only_check = MagicMock()
+    module.show_error = MagicMock()
+    module.search_status_label = MagicMock()
+    module.search_btn = MagicMock()
+    module._execute_search = MagicMock()
+    # Deliberately unconfigured (empty strings) unless a test patches
+    # is_configured() itself -- db_integration.is_configured() requires a
+    # stored keyring password too, which no unit test should depend on.
+    module._app_context = MagicMock(get_setting=MagicMock(return_value=''))
+    return module
+
+
+class TestPerformSearchActiveJobsGating:
+    """perform_search() defers to a background ActiveJobsWorker fetch before
+    running the real search whenever "Active Jobs Only" is checked, instead
+    of running the search immediately -- mirrors the cooperative-ownership
+    pattern _naming_worker already uses elsewhere in this module."""
+
+    def test_checkbox_unchecked_runs_search_directly_and_clears_any_stale_filter(self):
+        module = _make_module_for_perform_search()
+        module.search_active_only_check.isChecked.return_value = False
+        module._active_job_filter = {'1001'}  # left over from a previous active-only search
+
+        module.perform_search()
+
+        assert module._active_job_filter is None
+        module._execute_search.assert_called_once()
+
+    def test_checkbox_checked_but_db_not_configured_shows_error_and_does_not_search(self):
+        module = _make_module_for_perform_search()
+        module.search_active_only_check.isChecked.return_value = True
+
+        module.perform_search()
+
+        module.show_error.assert_called_once()
+        module._execute_search.assert_not_called()
+        assert module._active_jobs_worker is None
+
+    def test_checkbox_checked_with_fetch_already_running_is_a_noop(self):
+        module = _make_module_for_perform_search()
+        module.search_active_only_check.isChecked.return_value = True
+        module._active_jobs_worker = MagicMock()
+        module._active_jobs_worker.isRunning.return_value = True
+
+        module.perform_search()
+
+        module.show_error.assert_not_called()
+        module._execute_search.assert_not_called()
+
+    def test_checkbox_checked_and_configured_starts_fetch_instead_of_searching(self):
+        module = _make_module_for_perform_search()
+        module.search_active_only_check.isChecked.return_value = True
+        mock_worker_cls = MagicMock()
+
+        # Patched via __globals__, not a string module path -- see
+        # _patched_naming_dialogs()'s own comment above: core/module_loader.py's
+        # dev-mode path can register a second, distinct 'modules.search.module'
+        # object in sys.modules, which would make '@patch("modules.search.module.…")'
+        # silently target the wrong copy whenever another test in this session
+        # exercises that loader first. __globals__ is bound to the actual
+        # module namespace the methods' code objects read from, so it's
+        # correct regardless of what sys.modules currently holds.
+        real_db_integration = SearchModule.perform_search.__globals__['db_integration']
+        with patch.object(real_db_integration, 'is_configured', return_value=True), \
+                patch.dict(SearchModule._start_active_jobs_fetch.__globals__, {'ActiveJobsWorker': mock_worker_cls}):
+            module.perform_search()
+
+        mock_worker_cls.return_value.start.assert_called_once()
+        module._execute_search.assert_not_called()
+        module.search_btn.setEnabled.assert_called_with(False)
+
+
+class TestActiveJobsEpochInvalidatesStaleDeliveries:
+    """Same staleness-guard pattern as _naming_scan_id (see
+    TestNamingScanIdInvalidatesStaleQueuedDeliveries above): a delivery
+    captured against an older _active_jobs_epoch is dropped instead of
+    kicking off (or erroring out) a search against UI state a newer search
+    or a clear has already moved past."""
+
+    def _module(self) -> SearchModule:
+        module = SearchModule()
+        module._execute_search = MagicMock()
+        module.show_error = MagicMock()
+        module.search_btn = MagicMock()
+        module.search_status_label = MagicMock()
+        return module
+
+    def test_stale_fetched_delivery_is_dropped(self):
+        module = self._module()
+        module._active_jobs_epoch = 2
+
+        module._on_active_jobs_fetched({'1001'}, 1)
+
+        assert module._active_job_filter is None
+        module._execute_search.assert_not_called()
+
+    def test_current_fetched_delivery_stores_filter_and_runs_search(self):
+        module = self._module()
+        module._active_jobs_epoch = 2
+
+        module._on_active_jobs_fetched({'1001'}, 2)
+
+        assert module._active_job_filter == {'1001'}
+        module._execute_search.assert_called_once()
+
+    def test_stale_error_delivery_is_dropped(self):
+        module = self._module()
+        module._active_jobs_epoch = 2
+
+        module._on_active_jobs_error("boom", 1)
+
+        module.show_error.assert_not_called()
+
+    def test_current_error_delivery_shows_error_and_re_enables_search(self):
+        module = self._module()
+        module._active_jobs_epoch = 2
+
+        module._on_active_jobs_error("boom", 2)
+
+        module.show_error.assert_called_once_with("Active Jobs Only", "boom")
+        module.search_btn.setEnabled.assert_called_once_with(True)
+
+
+class TestClearSearchAndCleanupHandleActiveJobsWorker:
+    """A running ActiveJobsWorker has no cancel() (see
+    _start_active_jobs_fetch()'s docstring). clear_search() (an interactive,
+    GUI-triggered reset) must bump _active_jobs_epoch (so a late delivery is
+    dropped, same mechanism as TestActiveJobsEpochInvalidatesStaleDeliveries)
+    without blocking on wait() -- unlike cleanup() below, there's no app-exit
+    thread-lifetime concern to trade responsiveness against here."""
+
+    def test_clear_search_bumps_epoch_without_waiting(self):
+        module = _make_module_for_clear_search()
+        module._active_jobs_worker = MagicMock()
+        module._active_jobs_worker.isRunning.return_value = True
+        module._active_jobs_epoch = 3
+
+        module.clear_search()
+
+        assert module._active_jobs_epoch == 4
+        module._active_jobs_worker.wait.assert_not_called()
+
+    def test_clear_search_leaves_epoch_alone_when_nothing_is_running(self):
+        module = _make_module_for_clear_search()
+        module._active_jobs_worker = None
+        module._active_jobs_epoch = 3
+
+        module.clear_search()  # must not raise
+
+        assert module._active_jobs_epoch == 3
+
+    def test_cleanup_bumps_epoch_and_waits_with_a_bound(self):
+        # Unlike clear_search(), cleanup() runs at app/module teardown, where
+        # an un-joined thread logs Qt's "Destroyed while thread is still
+        # running" warning -- a *bounded* wait(2000) covers the common fast
+        # case (a single SELECT) without risking an indefinite shutdown hang
+        # on a slow/unreachable DB.
+        module = SearchModule()
+        module._worker = None
+        module._index_worker = None
+        module._naming_worker = None
+        module._active_jobs_worker = MagicMock()
+        module._active_jobs_worker.isRunning.return_value = True
+        module._active_jobs_epoch = 3
+        module.search_results = []
+
+        module.cleanup()
+
+        assert module._active_jobs_epoch == 4
+        module._active_jobs_worker.wait.assert_called_once_with(2000)

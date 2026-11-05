@@ -32,6 +32,7 @@ from PyQt6 import uic
 
 from core.base_module import BaseModule
 from core.search_index import SearchIndex, _parse_job_folder
+from modules.reporting import db_integration
 from shared.utils import open_folder, reveal_in_file_manager, get_config_dir, is_reparse_point
 from shared.widgets import print_files_with_dialog
 
@@ -41,6 +42,12 @@ logger = logging.getLogger(__name__)
 # constant so every readonly/ITAR-visibility check stays in sync (CODING_NOTES:
 # ITAR / Filter Consistency).
 _ITAR_LABEL_PREFIXES = ('[ITAR] ', '[ITAR-BP] ', '[ITAR Quote] ')
+
+# Result labels that aren't a real JobBOSS job (blueprint files, quotes) --
+# the "Active Jobs Only" filter (SearchModule._passes_active_filter) always
+# lets these through rather than matching job_number against JobBOSS's Job
+# table, which has no corresponding row for them at all.
+_NON_JOB_RESULT_PREFIXES = ('[BP]', '[ITAR-BP]', '[IR]', '[Quote]', '[ITAR Quote]')
 
 # Temp dirs created to view a file on a read-only (search-only) install
 # without exposing its real path to the external viewer — see
@@ -616,6 +623,31 @@ class FolderNamingReportDialog(QDialog):
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
 
+class ActiveJobsWorker(QThread):
+    """Background fetch of JobBOSS's Active job numbers for the "Active Jobs
+    Only" search filter -- same reasoning as every other worker in this
+    module for keeping the SQL Server round trip off the GUI thread.
+    """
+
+    finished_ok = pyqtSignal(set)
+    error = pyqtSignal(str)
+
+    def __init__(self, settings: Dict[str, Any]):
+        super().__init__()
+        self._settings = settings
+
+    def run(self):
+        try:
+            job_numbers = db_integration.fetch_active_job_numbers(self._settings)
+        except Exception as exc:
+            # Only the exception type, never str(exc) -- the TDS driver's error
+            # text can echo back connection parameters (same rule as
+            # db_integration.test_connection()).
+            self.error.emit(f"Active jobs query failed ({type(exc).__name__})")
+            return
+        self.finished_ok.emit(job_numbers)
+
+
 class SearchModule(BaseModule):
     """Module for searching jobs across customer directories"""
 
@@ -641,6 +673,14 @@ class SearchModule(BaseModule):
         self._index_query_failed = False  # True if the most recent query raised
         self._sort_column: int = 0   # 0 = Date
         self._sort_ascending: bool = False  # newest first
+        self._active_jobs_worker: Optional[ActiveJobsWorker] = None
+        self._active_job_filter: Optional[set] = None  # None = filter off; uppercased job numbers when on
+        # Bumped whenever an active-jobs fetch is superseded by a newer search
+        # or a cancel/clear, so a lookup that completes late (lambda closes
+        # over the id it was started with) is dropped instead of kicking off
+        # a search against UI state that's already moved on -- same pattern
+        # as _naming_scan_id above.
+        self._active_jobs_epoch = 0
 
         # Widget references
         self.search_edit = None
@@ -654,6 +694,7 @@ class SearchModule(BaseModule):
         self.search_all_radio = None
         self.search_strict_radio = None
         self.search_blueprints_check = None
+        self.search_active_only_check = None
         self.mode_row_widget = None
         self.legacy_options_widget = None
         self.search_btn = None
@@ -787,6 +828,7 @@ class SearchModule(BaseModule):
         self.search_all_radio = widget.search_all_radio
         self.search_strict_radio = widget.search_strict_radio
         self.search_blueprints_check = widget.search_blueprints_check
+        self.search_active_only_check = widget.search_active_only_check
         self.mode_row_widget = widget.mode_row_widget
         self.legacy_options_widget = widget.legacy_options_widget
         self.search_btn = widget.search_btn
@@ -912,7 +954,9 @@ class SearchModule(BaseModule):
     # ==================== Search Functionality ====================
 
     def perform_search(self):
-        """Perform search — uses SQLite index when available, filesystem walk as fallback."""
+        """Validate input, then dispatch straight to _execute_search() -- or,
+        if "Active Jobs Only" is checked, fetch JobBOSS's current Active job
+        numbers first and dispatch from that fetch's callback instead."""
         search_term = self.search_edit.text().strip().lower()
         if len(search_term) < 2:
             self.show_error("Search", "Please enter at least 2 characters")
@@ -921,6 +965,90 @@ class SearchModule(BaseModule):
         if self._worker and self._worker.isRunning():
             self.cancel_search()
             return
+
+        if self.search_active_only_check.isChecked():
+            if self._active_jobs_worker and self._active_jobs_worker.isRunning():
+                return
+            if not db_integration.is_configured(self._jobboss_settings()):
+                self.show_error(
+                    "Active Jobs Only",
+                    "JobBOSS DB is not configured -- set the connection in "
+                    "Settings > Advanced Settings."
+                )
+                return
+            self._start_active_jobs_fetch()
+            return
+
+        self._active_job_filter = None
+        self._execute_search()
+
+    def _jobboss_settings(self) -> dict:
+        """Collect the non-secret JobBOSS DB connection settings for the
+        Active Jobs Only filter; the password itself is looked up from the
+        OS credential store by db_integration. Mirrors
+        modules/reporting/module.py's identically-named helper, duplicated
+        here rather than factored into a shared location since it's only a
+        few lines and specific to this one tab.
+        """
+        return {
+            'jobboss_db_host': self.app_context.get_setting('jobboss_db_host', ''),
+            'jobboss_db_port': self.app_context.get_setting('jobboss_db_port', ''),
+            'jobboss_db_name': self.app_context.get_setting('jobboss_db_name', ''),
+            'jobboss_db_user': self.app_context.get_setting('jobboss_db_user', ''),
+        }
+
+    def _start_active_jobs_fetch(self):
+        """Fetch JobBOSS's current Active job numbers on a background thread,
+        then run the real search once they're in (_on_active_jobs_fetched).
+        No cancel button here -- a single SELECT normally returns quickly,
+        and pytds gives no mid-query interrupt hook to cancel cooperatively
+        even if it didn't (same constraint as every other worker in this
+        module that blocks on real I/O, e.g. IndexWorker's filesystem walk).
+        """
+        self.search_status_label.setText("Checking active jobs…")
+        self.search_btn.setEnabled(False)
+
+        self._active_jobs_epoch += 1
+        epoch = self._active_jobs_epoch
+        self._active_jobs_worker = ActiveJobsWorker(self._jobboss_settings())
+        self._active_jobs_worker.finished_ok.connect(
+            lambda job_numbers, e=epoch: self._on_active_jobs_fetched(job_numbers, e)
+        )
+        self._active_jobs_worker.error.connect(
+            lambda msg, e=epoch: self._on_active_jobs_error(msg, e)
+        )
+        self._active_jobs_worker.finished.connect(self._active_jobs_worker.deleteLater)
+        self._active_jobs_worker.start()
+
+    def _on_active_jobs_fetched(self, job_numbers: set, epoch: int):
+        """Slot for ActiveJobsWorker.finished_ok -- ignores a delivery already
+        superseded by a newer search or a clear (see _active_jobs_epoch)."""
+        if epoch != self._active_jobs_epoch:
+            return
+        self._active_job_filter = job_numbers
+        self._execute_search()
+
+    def _on_active_jobs_error(self, message: str, epoch: int):
+        """Slot for ActiveJobsWorker.error -- same staleness guard as
+        _on_active_jobs_fetched()."""
+        if epoch != self._active_jobs_epoch:
+            return
+        self.search_btn.setEnabled(True)
+        self.search_status_label.setText("")
+        self.show_error("Active Jobs Only", message)
+
+    def _execute_search(self):
+        """Perform search — uses SQLite index when available, filesystem walk
+        as fallback. self._active_job_filter (None = off) is applied inside
+        _search_from_index() and _on_result_found().
+
+        search_btn is force-re-enabled here (rather than only by whichever
+        path disables it) because _start_active_jobs_fetch() may have
+        disabled it already, and the index-query path below never disables
+        it at all -- nothing else would re-enable it in that case.
+        """
+        self.search_btn.setEnabled(True)
+        search_term = self.search_edit.text().strip().lower()
 
         self.search_table.setRowCount(0)
         self.search_results.clear()
@@ -1037,6 +1165,9 @@ class SearchModule(BaseModule):
             # a read-only kiosk regardless of what the index currently holds.
             results = [r for r in results if not r['customer'].startswith(_ITAR_LABEL_PREFIXES)]
 
+        if self._active_job_filter is not None:
+            results = [r for r in results if self._passes_active_filter(r)]
+
         if not results:
             return False
 
@@ -1044,6 +1175,20 @@ class SearchModule(BaseModule):
         self._apply_sort()
         self.search_status_label.setText(f"Found {len(results)} result(s)")
         return True
+
+    def _passes_active_filter(self, result: Dict[str, Any]) -> bool:
+        """True if result should survive the "Active Jobs Only" filter.
+
+        Blueprint files and quotes aren't real JobBOSS jobs -- there's no
+        corresponding Job row to check Status against -- so they always
+        pass through rather than being matched against job_number. Real job
+        folders compare uppercased since the folder-derived job_number may
+        carry a sub-job letter suffix (e.g. '27173H') that JobBOSS's own
+        Job field uses the same casing convention for.
+        """
+        if result['customer'].startswith(_NON_JOB_RESULT_PREFIXES):
+            return True
+        return result['job_number'].strip().upper() in self._active_job_filter
 
     # ==================== Sorting ====================
 
@@ -1196,6 +1341,8 @@ class SearchModule(BaseModule):
 
     def _on_result_found(self, result: dict):
         """Slot called when a search result is found"""
+        if self._active_job_filter is not None and not self._passes_active_filter(result):
+            return
         self.search_results.append(result)
 
         # Add to table immediately
@@ -1257,6 +1404,12 @@ class SearchModule(BaseModule):
             self._naming_scan_id += 1
             self._naming_worker.cancel()
             self._naming_worker.wait()
+        if self._active_jobs_worker and self._active_jobs_worker.isRunning():
+            # No cancel() to call -- see _start_active_jobs_fetch()'s
+            # docstring -- so just bump the epoch (its callbacks drop a late
+            # delivery instead of resurrecting a search against UI state
+            # that's already been reset) and let it finish in the background.
+            self._active_jobs_epoch += 1
 
         self.search_edit.clear()
         self.search_table.setRowCount(0)
@@ -1751,6 +1904,19 @@ class SearchModule(BaseModule):
             self._naming_scan_id += 1
             self._naming_worker.cancel()
             self._naming_worker.wait()
+        if self._active_jobs_worker and self._active_jobs_worker.isRunning():
+            # No cancel() available (see _start_active_jobs_fetch()'s
+            # docstring), so an unbounded wait() here could block app
+            # shutdown for as long as the DB's connect timeout. A *bounded*
+            # wait covers the common case -- a single SELECT normally
+            # finishes well under this -- without risking an indefinite
+            # hang, and avoids Qt logging "QThread: Destroyed while thread
+            # is still running" for that common case. The epoch bump covers
+            # the rarer case where it's still running after the timeout: its
+            # callbacks drop the late delivery instead of resurrecting a
+            # search against a module mid-teardown.
+            self._active_jobs_epoch += 1
+            self._active_jobs_worker.wait(2000)
         self.search_results.clear()
         # Best-effort now, on normal shutdown; the atexit.register fallback
         # in _cleanup_kiosk_view_tmp_dirs still covers a hard exit/crash.

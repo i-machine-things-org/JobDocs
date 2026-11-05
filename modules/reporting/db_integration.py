@@ -68,6 +68,12 @@ WHERE Status = 'Active'
 ORDER BY Last_Name, First_Name
 """
 
+_ACTIVE_JOB_NUMBERS_QUERY = """
+SELECT Job
+FROM Job
+WHERE Status = 'Active'
+"""
+
 
 def customer_filter_clause(customers: Optional[List[str]]) -> "tuple[str, tuple]":
     """Build a 'Customer IN (...)' clause plus its matching parameter tuple
@@ -218,3 +224,21 @@ def fetch_employees(settings: Dict[str, Any]) -> List[Dict[str, str]]:
                 }
                 for r in cur.fetchall()
             ]
+
+
+def fetch_active_job_numbers(settings: Dict[str, Any]) -> set:
+    """Job numbers for every Active job in JobBOSS, for the Search tab's
+    "Active Jobs Only" filter (modules/search/module.py). Same `Job.Status`
+    column/value as Job Report's own 'Active' filter (job_report.py) -- see
+    this file's "Known gap" in README.md for the caveat that the exact
+    column name isn't verified against every JobBOSS schema.
+
+    Uppercased so the Search tab's folder-derived job numbers (which may
+    carry a sub-job letter suffix, e.g. '27173H') compare case-insensitively.
+    """
+    if not is_configured(settings):
+        raise RuntimeError("JobBOSS DB is not configured")
+    with connect(settings) as conn:
+        with conn.cursor() as cur:
+            cur.execute(_ACTIVE_JOB_NUMBERS_QUERY)
+            return {str(r['Job']).strip().upper() for r in cur.fetchall() if r.get('Job')}

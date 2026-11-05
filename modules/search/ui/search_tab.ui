@@ -287,6 +287,40 @@
         </layout>
        </widget>
       </item>
+      <item>
+       <layout class="QHBoxLayout" name="activeFilterLayout">
+        <item>
+         <widget class="QLabel" name="activeFilterLabel">
+          <property name="text">
+           <string>Filter:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="search_active_only_check">
+          <property name="toolTip">
+           <string>Only show jobs JobBOSS still lists as Active. Requires the JobBOSS DB connection configured in Settings &gt; Advanced Settings.</string>
+          </property>
+          <property name="text">
+           <string>Active Jobs Only (JobBOSS)</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer_5">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
      </layout>
     </widget>
    </item>
