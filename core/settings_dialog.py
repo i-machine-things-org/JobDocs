@@ -388,7 +388,7 @@ class SettingsDialog(QDialog):
             self.settings['jobboss_db_user'] = new_user
             new_password = self.jobboss_password_edit.text()
             import keyring.errors
-            from modules.reporting.db_integration import get_password, set_password
+            from shared.jobboss_db import get_password, set_password
             try:
                 if new_password and new_user:
                     set_password(new_user, new_password)

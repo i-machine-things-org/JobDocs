@@ -32,7 +32,7 @@ from PyQt6 import uic
 
 from core.base_module import BaseModule
 from core.search_index import SearchIndex, _parse_job_folder
-from modules.reporting import db_integration
+from shared import jobboss_db as db_integration
 from shared.utils import open_folder, reveal_in_file_manager, get_config_dir, is_reparse_point
 from shared.widgets import print_files_with_dialog
 

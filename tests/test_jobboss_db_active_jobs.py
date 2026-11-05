@@ -1,4 +1,4 @@
-"""Tests for fetch_active_job_numbers() in modules/reporting/db_integration.py.
+"""Tests for fetch_active_job_numbers() in shared/jobboss_db.py.
 
 Backs the Search tab's "Active Jobs Only" filter (modules/search/module.py).
 Same Job.Status='Active' convention as job_report.py's own 'Active' filter --
@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from modules.reporting import db_integration
+from shared import jobboss_db
 
 
 def _configured_settings():
@@ -24,11 +24,11 @@ def _configured_settings():
 
 def test_not_configured_raises_without_connecting():
     with pytest.raises(RuntimeError):
-        db_integration.fetch_active_job_numbers({})
+        jobboss_db.fetch_active_job_numbers({})
 
 
-@patch('modules.reporting.db_integration.is_configured', return_value=True)
-@patch('modules.reporting.db_integration.connect')
+@patch('shared.jobboss_db.is_configured', return_value=True)
+@patch('shared.jobboss_db.connect')
 def test_job_numbers_are_stripped_and_uppercased(mock_connect, mock_is_configured):
     # Mixed case/whitespace, plus a blank/None row that must be dropped --
     # real JobBOSS Job numbers can carry a sub-job letter suffix (e.g.
@@ -43,6 +43,6 @@ def test_job_numbers_are_stripped_and_uppercased(mock_connect, mock_is_configure
     mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
     mock_connect.return_value.__enter__.return_value = mock_conn
 
-    result = db_integration.fetch_active_job_numbers(_configured_settings())
+    result = jobboss_db.fetch_active_job_numbers(_configured_settings())
 
     assert result == {'27173H', '1001'}
