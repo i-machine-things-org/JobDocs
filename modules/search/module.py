@@ -696,7 +696,8 @@ class SearchModule(BaseModule):
         self.search_blueprints_check = None
         self.search_active_only_check = None
         self.mode_row_widget = None
-        self.legacy_options_widget = None
+        self.more_options_btn = None
+        self.more_options_content = None
         self.search_btn = None
         self.cancel_btn = None
         self.folder_tree = None
@@ -830,7 +831,8 @@ class SearchModule(BaseModule):
         self.search_blueprints_check = widget.search_blueprints_check
         self.search_active_only_check = widget.search_active_only_check
         self.mode_row_widget = widget.mode_row_widget
-        self.legacy_options_widget = widget.legacy_options_widget
+        self.more_options_btn = widget.more_options_btn
+        self.more_options_content = widget.more_options_content
         self.search_btn = widget.search_btn
         self.cancel_btn = widget.cancel_btn
 
@@ -895,6 +897,7 @@ class SearchModule(BaseModule):
         widget.clear_btn.clicked.connect(self.clear_search)
         self.search_all_radio.toggled.connect(self.update_search_field_checkboxes)
         self.search_strict_radio.toggled.connect(self.update_search_field_checkboxes)
+        self.more_options_btn.toggled.connect(self._on_more_options_toggled)
         self.search_table.customContextMenuRequested.connect(self.show_search_context_menu)
         self.search_table.doubleClicked.connect(self.open_selected_search_job)
         self.search_table.itemSelectionChanged.connect(
@@ -933,8 +936,15 @@ class SearchModule(BaseModule):
         self.search_desc_check.setEnabled(is_strict_mode)
         self.search_drawing_check.setEnabled(is_strict_mode)
 
-        # legacy_options_widget has no content — keep hidden
-        self.legacy_options_widget.hide()
+    def _on_more_options_toggled(self, checked: bool):
+        """Show/hide the collapsible "Search in" / Mode / Options block,
+        mirroring the checkable-QGroupBox disclosure pattern already used by
+        Settings' "Advanced Settings" (core/settings_dialog.py) -- a plain
+        QPushButton here instead, so it reads as an inline toggle within the
+        existing "Search Criteria" box rather than a second nested group box.
+        """
+        self.more_options_content.setVisible(checked)
+        self.more_options_btn.setText("▾ Fewer search options" if checked else "▸ More search options")
 
     def update_legacy_mode_ui(self):
         """Show/hide UI elements based on legacy mode setting"""
