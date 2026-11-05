@@ -350,7 +350,7 @@ as empirically confirmed rather than read from JobBOSS's own source.
 Status = 'Active' (Job_Operation_Time has no status value confirmed to mean
 "void"/"deleted" from the schema dump alone, so none is filtered here) --
 the only filter applied is the one the real report's own "Active Employees
-Only" checkbox describes, always on for v1 (see db_integration.fetch_employees()).
+Only" checkbox describes, always on for v1 (see shared.jobboss_db.fetch_employees()).
 
 Indirect time (vacation, training, cleanup, etc.) is excluded via
 Work_Center.Type <> 'Indirect' from _OP_TOTALS_CTE and Summary's op_rollup
@@ -388,7 +388,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from modules.reporting.db_integration import connect, employee_filter_clause
+from shared.jobboss_db import connect, employee_filter_clause
 from modules.reporting.reports.base import ReportDefinition
 
 # op_totals: Act Hrs summed across EVERY employee (active or not) who

@@ -275,7 +275,7 @@ class SettingsDialog(QDialog):
         _jobboss_block = QWidget()
         _jb_vbox = QVBoxLayout(_jobboss_block)
         _jb_vbox.setContentsMargins(0, 0, 0, 0)
-        _jb_vbox.addWidget(QLabel("JobBOSS DB Connection (Reporting tab):"))
+        _jb_vbox.addWidget(QLabel("JobBOSS DB Connection (Reporting tab, Search tab's Active Jobs Only filter):"))
         jobboss_layout = QGridLayout()
         jobboss_layout.addWidget(QLabel("Host:"), 0, 0)
         self.jobboss_host_edit = QLineEdit(self.settings.get('jobboss_db_host', ''))
@@ -388,7 +388,7 @@ class SettingsDialog(QDialog):
             self.settings['jobboss_db_user'] = new_user
             new_password = self.jobboss_password_edit.text()
             import keyring.errors
-            from modules.reporting.db_integration import get_password, set_password
+            from shared.jobboss_db import get_password, set_password
             try:
                 if new_password and new_user:
                     set_password(new_user, new_password)

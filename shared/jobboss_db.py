@@ -1,30 +1,32 @@
 """
-JobBOSS SQL Server access for the Reporting module.
+JobBOSS SQL Server access -- shared backend, not owned by any one feature module.
 
 Mirrors the connection technique already proven in the sibling shop-schedule
 project's jobboss_db.py: pytds (pure-Python TDS client, no ODBC driver to
 install), named-instance port resolution via the SQL Browser service, and
 SELECT-only queries -- pair this with a SQL login that has SELECT-only
-grants, nothing broader. See README.md in this directory for the
-recommended login setup.
+grants, nothing broader. See modules/reporting/README.md for the
+recommended login setup (the Reporting tab's "Reports (Beta)" feature is
+still this module's most detailed consumer, even though the connection
+layer itself no longer lives there).
 
-Lives in modules/reporting/ (not a separate top-level `experimental/`
-package, where it used to live) specifically so it's covered by every
-build's existing "always stage the modules/ tree" step. Two-part history:
-the earlier location was never added to any of the three build file-staging
-lists (Windows installer, Flatpak CI, local Flatpak dev build), so every
-v0.12.0 install shipped without this file at all -- a Module Loading Error
-on first launch, for every user, regardless of whether they'd enabled the
-separate "experimental_features" Settings toggle that gates this module's
-*use* (see core/module_loader.py; that flag is checked only after this file
-has already been imported, so a missing file breaks loading
-unconditionally). v0.12.1 fixed that immediate symptom by adding the old
-`experimental/` path to all three lists; this later move is a separate,
-structural follow-up that removes the need for any build list to know about
-this file's location at all, rather than relying on the same mistake not
-happening again for the next new top-level directory. Reports (Beta)
-remaining gated behind the Settings toggle is unrelated to, and unaffected
-by, either change -- both are purely packaging-reliability fixes.
+Lives in shared/ (not modules/reporting/, where it used to live, and not a
+separate top-level `experimental/` package before that) specifically so no
+module ever has to import another feature module's internals just to reach
+the JobBOSS connection. Before this move, modules/search/module.py's "Active
+Jobs Only" filter -- and, already, core/settings_dialog.py and two tools/
+scripts -- all reached into modules/reporting/db_integration.py directly,
+which is backwards: core/tooling code and a sibling feature module
+shouldn't have to depend on the Reporting module's own package just to get
+a DB connection. shared/ is where this repo already puts exactly this kind
+of shared backend service (see shared/remote_sync.py) -- every module that
+needs JobBOSS data requests it from here instead. `shared/` is already
+staged by every build (Windows installer, Flatpak CI, local Flatpak dev
+build) alongside core/ and modules/, same guarantee the previous move into
+modules/reporting/ relied on -- see this file's git history for the
+original packaging-outage story (a new top-level `experimental/` directory
+that no build script knew to stage) if the "always stage shared/" guarantee
+is ever in question again.
 
 Unlike shop-schedule (one device, one gitignored .env), JobDocs is installed
 by many different users against their own JobBOSS server, so connection
@@ -33,11 +35,10 @@ Non-secret fields (host/port/database/username) live in the regular app
 settings dict; the password is never written to settings.json -- it's stored
 in the OS credential store via `keyring`.
 
-This module is shared infrastructure only (credentials, connection, and
-filter-input lookups reused by more than one report type) -- every
-report-specific query, row-formatter, and display column/header set lives
-in modules/reporting/reports/ instead, one file per report type. See that
-package's __init__.py for the registry.
+This module is connection/credential infrastructure and filter-input
+lookups shared across report types only -- every report-specific query, row-formatter,
+and display column/header set lives in modules/reporting/reports/ instead,
+one file per report type. See that package's __init__.py for the registry.
 
 Copyright (c) 2025 JobDocs Contributors
 Licensed under the GNU General Public License v3.0 - see LICENSE file for details
@@ -66,6 +67,12 @@ SELECT Employee, First_Name, Last_Name
 FROM Employee
 WHERE Status = 'Active'
 ORDER BY Last_Name, First_Name
+"""
+
+_ACTIVE_JOB_NUMBERS_QUERY = """
+SELECT Job
+FROM Job
+WHERE Status = 'Active'
 """
 
 
@@ -148,9 +155,8 @@ def _connect_kwargs(settings: Dict[str, Any]):
 @contextmanager
 def connect(settings: Dict[str, Any]):
     """Open a pytds connection from the configured settings. Thin wrapper
-    around pytds.connect(*_connect_kwargs(...)) so every report file in
-    modules/reporting/reports/ shares one place for connection setup instead
-    of repeating it.
+    around pytds.connect(*_connect_kwargs(...)) so every caller shares one
+    place for connection setup instead of repeating it.
     """
     dsn, connect_kwargs = _connect_kwargs(settings)
     with pytds.connect(dsn, **connect_kwargs) as conn:
@@ -218,3 +224,21 @@ def fetch_employees(settings: Dict[str, Any]) -> List[Dict[str, str]]:
                 }
                 for r in cur.fetchall()
             ]
+
+
+def fetch_active_job_numbers(settings: Dict[str, Any]) -> set:
+    """Job numbers for every Active job in JobBOSS, for the Search tab's
+    "Active Jobs Only" filter (modules/search/module.py). Same `Job.Status`
+    column/value as Job Report's own 'Active' filter (job_report.py) -- see
+    modules/reporting/README.md's "Known gap" for the caveat that the exact
+    column name isn't verified against every JobBOSS schema.
+
+    Uppercased so the Search tab's folder-derived job numbers (which may
+    carry a sub-job letter suffix, e.g. '27173H') compare case-insensitively.
+    """
+    if not is_configured(settings):
+        raise RuntimeError("JobBOSS DB is not configured")
+    with connect(settings) as conn:
+        with conn.cursor() as cur:
+            cur.execute(_ACTIVE_JOB_NUMBERS_QUERY)
+            return {str(r['Job']).strip().upper() for r in cur.fetchall() if r.get('Job')}

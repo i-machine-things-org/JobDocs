@@ -297,6 +297,10 @@ The **Search** tab provides powerful search capabilities:
 - Click column headers to sort results
 - Double-click a result to open the job folder
 - Right-click for context menu (copy path, open location, print)
+- **Active Jobs Only** — restricts job-folder results to jobs JobBOSS still lists with `Status = 'Active'`
+  (blueprint and quote results are unaffected, since they have no corresponding `Job` row to check). Requires
+  the JobBOSS DB connection configured in Settings → Advanced Settings (the same connection used by the
+  Reporting tab) — see [modules/reporting/README.md](modules/reporting/README.md) for setup.
 - **Check Folder Naming…** — on-demand diagnostic for PO-container layouts (where `job_folder_structure`
   puts the PO number in a shared directory-name segment, e.g. `PO-{po_number}`): flags folders that
   don't match either the PO naming convention or the job-folder digit-first convention — a mistyped

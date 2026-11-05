@@ -90,56 +90,28 @@
        </layout>
       </item>
       <item>
-       <layout class="QHBoxLayout" name="checkRow">
+       <layout class="QHBoxLayout" name="moreOptionsToggleRow">
         <item>
-         <widget class="QLabel" name="searchInLabel">
-          <property name="text">
-           <string>Search in:</string>
+         <widget class="QPushButton" name="more_options_btn">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
           </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QCheckBox" name="search_customer_check">
-          <property name="text">
-           <string>Customer</string>
-          </property>
-          <property name="checked">
+          <property name="flat">
            <bool>true</bool>
           </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QCheckBox" name="search_job_check">
-          <property name="text">
-           <string>Job #</string>
-          </property>
-          <property name="checked">
+          <property name="checkable">
            <bool>true</bool>
           </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QCheckBox" name="search_desc_check">
           <property name="text">
-           <string>Description</string>
-          </property>
-          <property name="checked">
-           <bool>true</bool>
+           <string>▸ More search options</string>
           </property>
          </widget>
         </item>
         <item>
-         <widget class="QCheckBox" name="search_drawing_check">
-          <property name="text">
-           <string>Drawings</string>
-          </property>
-          <property name="checked">
-           <bool>true</bool>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <spacer name="horizontalSpacer">
+         <spacer name="horizontalSpacer_3">
           <property name="orientation">
            <enum>Qt::Horizontal</enum>
           </property>
@@ -154,8 +126,14 @@
        </layout>
       </item>
       <item>
-       <widget class="QWidget" name="mode_row_widget" native="true">
-        <layout class="QHBoxLayout" name="modeRowLayout">
+       <widget class="QWidget" name="more_options_content" native="true">
+        <property name="visible">
+         <bool>false</bool>
+        </property>
+        <layout class="QVBoxLayout" name="moreOptionsLayout">
+         <property name="spacing">
+          <number>3</number>
+         </property>
          <property name="leftMargin">
           <number>0</number>
          </property>
@@ -169,120 +147,167 @@
           <number>0</number>
          </property>
          <item>
-          <widget class="QLabel" name="modeLabel">
-           <property name="text">
-            <string>Mode:</string>
-           </property>
+          <layout class="QHBoxLayout" name="checkRow">
+           <item>
+            <widget class="QLabel" name="searchInLabel">
+             <property name="text">
+              <string>Search in:</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QCheckBox" name="search_customer_check">
+             <property name="text">
+              <string>Customer</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QCheckBox" name="search_job_check">
+             <property name="text">
+              <string>Job #</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QCheckBox" name="search_desc_check">
+             <property name="text">
+              <string>Description</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QCheckBox" name="search_drawing_check">
+             <property name="text">
+              <string>Drawings</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="horizontalSpacer">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <widget class="QWidget" name="mode_row_widget" native="true">
+           <layout class="QHBoxLayout" name="modeRowLayout">
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>0</number>
+            </property>
+            <item>
+             <widget class="QLabel" name="modeLabel">
+              <property name="text">
+               <string>Mode:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QRadioButton" name="search_all_radio">
+              <property name="text">
+               <string>Search All Folders</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QRadioButton" name="search_strict_radio">
+              <property name="text">
+               <string>Strict Format (faster)</string>
+              </property>
+              <property name="checked">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="horizontalSpacer_2">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
           </widget>
          </item>
          <item>
-          <widget class="QRadioButton" name="search_all_radio">
-           <property name="text">
-            <string>Search All Folders</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QRadioButton" name="search_strict_radio">
-           <property name="text">
-            <string>Strict Format (faster)</string>
-           </property>
-           <property name="checked">
-            <bool>true</bool>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <spacer name="horizontalSpacer_2">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item>
-       <widget class="QWidget" name="legacy_options_widget" native="true">
-        <layout class="QHBoxLayout" name="legacyOptionsLayout">
-         <property name="leftMargin">
-          <number>0</number>
-         </property>
-         <property name="topMargin">
-          <number>0</number>
-         </property>
-         <property name="rightMargin">
-          <number>0</number>
-         </property>
-         <property name="bottomMargin">
-          <number>0</number>
-         </property>
-         <item>
-          <spacer name="horizontalSpacer_3">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item>
-       <widget class="QWidget" name="also_search_widget" native="true">
-        <layout class="QHBoxLayout" name="alsoSearchLayout">
-         <property name="leftMargin">
-          <number>0</number>
-         </property>
-         <property name="topMargin">
-          <number>0</number>
-         </property>
-         <property name="rightMargin">
-          <number>0</number>
-         </property>
-         <property name="bottomMargin">
-          <number>0</number>
-         </property>
-         <item>
-          <widget class="QLabel" name="alsoSearchLabel">
-           <property name="text">
-            <string>Also search:</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QCheckBox" name="search_blueprints_check">
-           <property name="text">
-            <string>Blueprints directories</string>
-           </property>
-           <property name="checked">
-            <bool>true</bool>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <spacer name="horizontalSpacer_4">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
+          <layout class="QHBoxLayout" name="optionsRow">
+           <item>
+            <widget class="QLabel" name="optionsLabel">
+             <property name="text">
+              <string>Options:</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QCheckBox" name="search_blueprints_check">
+             <property name="text">
+              <string>Blueprints directories</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QCheckBox" name="search_active_only_check">
+             <property name="toolTip">
+              <string>Only show jobs JobBOSS still lists as Active. Requires the JobBOSS DB connection configured in Settings &gt; Advanced Settings.</string>
+             </property>
+             <property name="text">
+              <string>Active Jobs Only (JobBOSS)</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="horizontalSpacer_4">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>40</width>
+               <height>20</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
          </item>
         </layout>
        </widget>
