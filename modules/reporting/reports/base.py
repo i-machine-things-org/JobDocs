@@ -33,6 +33,13 @@ class ReportDefinition:
     uses_customer_filter: bool = False
     uses_employee_filter: bool = False
     uses_exclude_assemblies: bool = False
+    # Job Report only. A filter-time option (unlike uses_department_tabs,
+    # which only affects xlsx export): when checked, fetch() overwrites every
+    # row's Scheduled End with the latest (max) Scheduled End among all rows
+    # sharing the same Customer PO Number, so every line on one PO reports
+    # the same completion estimate. Affects the on-screen table and every
+    # export format identically, since it changes the row data itself.
+    uses_po_date_grouping: bool = False
     # Row dicts carry a 'department' key, and the UI offers a "By Department"
     # export checkbox: when checked, _export_xlsx() splits the data rows
     # into one worksheet tab per department instead of one combined sheet.

@@ -154,6 +154,26 @@ def _row_highlight(row: Dict[str, str]) -> Optional[str]:
     return None
 
 
+def _group_po_dates_by_latest(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Overwrite every row's sched_end with the latest (max) Scheduled End
+    among all rows sharing the same Customer PO Number, so a PO with lines
+    split across several different scheduled-end dates reads as one
+    consistent completion estimate instead of looking inconsistent line to
+    line. Rows with a blank po are left alone -- there's nothing to group
+    them by. 'Latest' is a plain string max since sched_end is already
+    'YYYY-MM-DD' (or '', which sorts lowest and is excluded below).
+    """
+    latest_by_po: Dict[str, str] = {}
+    for r in rows:
+        po, sched_end = r['po'], r['sched_end']
+        if po and sched_end and sched_end > latest_by_po.get(po, ''):
+            latest_by_po[po] = sched_end
+    for r in rows:
+        if r['po'] in latest_by_po:
+            r['sched_end'] = latest_by_po[r['po']]
+    return rows
+
+
 def fetch(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Dict[str, str]]:
     clause, customer_params = customer_filter_clause(filters.get('customers'))
     assembly_clause = "Assembly_Level = 0" if filters.get('exclude_assemblies') else "1=1"
@@ -161,7 +181,10 @@ def fetch(settings: Dict[str, Any], filters: Dict[str, Any]) -> List[Dict[str, s
     with connect(settings) as conn:
         with conn.cursor() as cur:
             cur.execute(query, customer_params)
-            return _rows_from_job_report(cur.fetchall())
+            rows = _rows_from_job_report(cur.fetchall())
+    if filters.get('group_po_dates'):
+        rows = _group_po_dates_by_latest(rows)
+    return rows
 
 
 JOB_REPORT = ReportDefinition(
@@ -172,5 +195,6 @@ JOB_REPORT = ReportDefinition(
     resize_mode="interactive",
     uses_customer_filter=True,
     uses_exclude_assemblies=True,
+    uses_po_date_grouping=True,
     row_highlight=_row_highlight,
 )

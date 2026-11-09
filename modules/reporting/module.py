@@ -693,6 +693,7 @@ class ReportingModule(BaseModule):
         self.employee_filter_btn = None
         self.department_split_check = None
         self.exclude_assemblies_check = None
+        self.group_po_dates_check = None
         self.report_start_date = None
         self.report_end_date = None
         self._available_customers = []
@@ -749,6 +750,7 @@ class ReportingModule(BaseModule):
         self.employee_filter_btn = widget.employee_filter_btn
         self.department_split_check = widget.department_split_check
         self.exclude_assemblies_check = widget.exclude_assemblies_check
+        self.group_po_dates_check = widget.group_po_dates_check
         self.report_start_date = widget.report_start_date
         self.report_end_date = widget.report_end_date
         # End defaults to today, not "(No Filter)" -- "through today" is the
@@ -831,6 +833,7 @@ class ReportingModule(BaseModule):
         self.employee_filter_btn.setEnabled(report_def.uses_employee_filter)
         self.department_split_check.setEnabled(report_def.uses_department_tabs)
         self.exclude_assemblies_check.setEnabled(report_def.uses_exclude_assemblies)
+        self.group_po_dates_check.setEnabled(report_def.uses_po_date_grouping)
         self.report_start_date.setEnabled(report_def.uses_dates)
         self.report_end_date.setEnabled(report_def.uses_dates)
 
@@ -1062,6 +1065,8 @@ class ReportingModule(BaseModule):
             filters['employees'] = list(self._selected_employees)
         if report_def.uses_exclude_assemblies and self.exclude_assemblies_check.isChecked():
             filters['exclude_assemblies'] = True
+        if report_def.uses_po_date_grouping and self.group_po_dates_check.isChecked():
+            filters['group_po_dates'] = True
 
         if report_def.uses_dates:
             start = self._picked_date(self.report_start_date)
