@@ -1281,6 +1281,22 @@ class ReportingModule(BaseModule):
                 writer.writerow([])
                 writer.writerows([[line] for line in report_def.footer_lines])
 
+    # Ruled-report look shared by the header band and the data table below it
+    # (shop-schedule's printed Foreman's-Report-style layout, adapted to
+    # Qt's HTML/CSS subset). Confirmed empirically, not just by reading Qt's
+    # docs: QTextDocument renders border-bottom-{width,style,color} set on a
+    # <td>/<th> itself, but silently drops the same properties set on the
+    # enclosing <table> -- every rule line below is on a cell, never a table.
+    _PDF_HDR_BORDER = 'border-bottom-width:2px; border-bottom-style:solid; border-bottom-color:#000;'
+    _PDF_TH_STYLE = (
+        'text-align:left; font-size:8pt; font-weight:bold; padding:3px 4px; '
+        'border-bottom-width:1px; border-bottom-style:solid; border-bottom-color:#000;'
+    )
+    _PDF_TD_STYLE = (
+        'padding:3px 4px; vertical-align:top; '
+        'border-bottom-width:1px; border-bottom-style:solid; border-bottom-color:#ccc;'
+    )
+
     def _export_pdf(self, file_path: str):
         """Render the title block, table, and footer as HTML and print it
         to a PDF via Qt's own QTextDocument/QPrinter -- no extra dependency
@@ -1308,21 +1324,45 @@ class ReportingModule(BaseModule):
                 if highlight_key and highlight_key in report_def.columns:
                     highlighted_cells.add((row_idx, report_def.columns.index(highlight_key)))
 
-        parts = ['<html><body style="font-family: sans-serif; font-size: 9pt;">']
-        for i, row in enumerate(title_block):
-            if not row:
-                continue
-            text = " ".join(esc(cell) for cell in row if cell not in (None, ""))
-            style = "font-weight:bold; font-size:13pt;" if i == 0 else "margin:1px 0;"
-            parts.append(f'<p style="{style}">{text}</p>')
+        # _export_title_block() is shared with CSV/xlsx export, so its shape
+        # (a list of [label, value] rows, "Report:" first, "Generated:"
+        # last, a blank spacer row at the very end) stays as-is here too --
+        # just re-laid-out into a 3-column header band instead of printed as
+        # stacked "Label: value" paragraphs: the report name becomes a big
+        # centered title, "Generated:" moves to the right, everything else
+        # (Date Range, and whichever filters this report uses) stacks in
+        # reduced-size text on the left.
+        meta_rows = [row for row in title_block if row]
+        title = esc(meta_rows[0][1]) if meta_rows else esc(self._last_report_type)
+        generated_line = ' '.join(esc(cell) for cell in meta_rows[-1]) if len(meta_rows) > 1 else ''
+        left_lines = [' '.join(esc(cell) for cell in row) for row in meta_rows[1:-1]]
 
-        parts.append('<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse; width:100%;">')
-        parts.append('<tr>' + ''.join(f'<th style="background:#dddddd;">{esc(h)}</th>' for h in headers) + '</tr>')
+        parts = ['<html><body style="font-family: sans-serif; font-size: 9pt; color:#000;">']
+        parts.append('<table width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:10px;"><tr>')
+        parts.append(
+            f'<td width="33%" style="font-size:8pt; vertical-align:bottom; padding-bottom:6px; '
+            f'{self._PDF_HDR_BORDER}">{"<br/>".join(left_lines)}</td>'
+        )
+        parts.append(
+            f'<td width="34%" style="font-size:16pt; font-weight:bold; text-align:center; '
+            f'vertical-align:bottom; padding-bottom:6px; {self._PDF_HDR_BORDER}">{title}</td>'
+        )
+        parts.append(
+            f'<td width="33%" style="font-size:8pt; text-align:right; vertical-align:bottom; '
+            f'padding-bottom:6px; {self._PDF_HDR_BORDER}">{generated_line}</td>'
+        )
+        parts.append('</tr></table>')
+
+        parts.append('<table border="0" cellspacing="0" cellpadding="0" style="width:100%;">')
+        parts.append('<tr>' + ''.join(f'<th style="{self._PDF_TH_STYLE}">{esc(h)}</th>' for h in headers) + '</tr>')
         for row_idx, row in enumerate(data_rows):
             cells = []
             for col_idx, value in enumerate(row):
-                style = ' style="background:#ffcccc;"' if (row_idx, col_idx) in highlighted_cells else ''
-                cells.append(f'<td{style}>{esc(value)}</td>')
+                # Bold red text, not a filled cell background, to match the
+                # same "flag this value" treatment as shop-schedule's print
+                # layout (its .overdue class) rather than JobDocs' prior look.
+                extra = ' color:#cc0000; font-weight:bold;' if (row_idx, col_idx) in highlighted_cells else ''
+                cells.append(f'<td style="{self._PDF_TD_STYLE}{extra}">{esc(value)}</td>')
             parts.append('<tr>' + ''.join(cells) + '</tr>')
         parts.append('</table>')
 
