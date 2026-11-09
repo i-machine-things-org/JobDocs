@@ -195,5 +195,6 @@ JOB_REPORT = ReportDefinition(
     resize_mode="interactive",
     uses_customer_filter=True,
     uses_exclude_assemblies=True,
+    uses_po_date_grouping=True,
     row_highlight=_row_highlight,
 )

@@ -7,7 +7,7 @@ live JobBOSS schema (see modules/reporting/README.md's "Job Report" section).
 
 from datetime import datetime
 
-from modules.reporting.reports import REPORT_TYPES
+from modules.reporting.reports import REPORT_TYPES, REPORTS
 from modules.reporting.reports.job_report import (
     _JOB_REPORT_QUERY, _group_po_dates_by_latest, _is_past_promise, _rows_from_job_report,
     _strip_blank_lines,
@@ -16,6 +16,19 @@ from modules.reporting.reports.job_report import (
 
 def test_job_report_is_registered():
     assert "Job Report" in REPORT_TYPES
+
+
+def test_job_report_declares_po_date_grouping():
+    """Guards the wiring, not just the transform: _group_po_dates_by_latest()
+    itself is covered in isolation below, but module.py's checkbox is only
+    enabled, and generate_report() only sets filters['group_po_dates'], when
+    REPORTS["Job Report"].uses_po_date_grouping is True. Catches the exact
+    bug class of adding the flag to ReportDefinition/wiring up the UI but
+    forgetting to actually turn it on for this report -- which a unit test
+    of the transform function alone can't see, since it calls that function
+    directly and never touches this flag.
+    """
+    assert REPORTS["Job Report"].uses_po_date_grouping is True
 
 
 def test_query_selects_promise_date_and_shipping_instructions_from_same_delivery_row():
