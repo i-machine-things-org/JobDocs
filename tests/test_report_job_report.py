@@ -9,7 +9,8 @@ from datetime import datetime
 
 from modules.reporting.reports import REPORT_TYPES
 from modules.reporting.reports.job_report import (
-    _JOB_REPORT_QUERY, _is_past_promise, _rows_from_job_report, _strip_blank_lines,
+    _JOB_REPORT_QUERY, _group_po_dates_by_latest, _is_past_promise, _rows_from_job_report,
+    _strip_blank_lines,
 )
 
 
@@ -156,3 +157,54 @@ def test_does_not_flag_when_promise_date_is_blank():
 
 def test_does_not_flag_when_both_blank():
     assert _is_past_promise('', '') is False
+
+
+def test_group_po_dates_sets_all_lines_to_the_latest():
+    rows = [
+        {'po': '2102543', 'sched_end': '2026-10-01'},
+        {'po': '2102543', 'sched_end': '2026-11-15'},
+        {'po': '2102543', 'sched_end': '2026-10-20'},
+    ]
+    _group_po_dates_by_latest(rows)
+    assert [r['sched_end'] for r in rows] == ['2026-11-15', '2026-11-15', '2026-11-15']
+
+
+def test_group_po_dates_fills_in_a_blank_line_from_its_po_group():
+    """A line with no Scheduled End of its own still picks up the PO's
+    latest date -- the point is every line on a PO reads the same estimate,
+    not just the ones that already happened to have one.
+    """
+    rows = [
+        {'po': '2102543', 'sched_end': '2026-10-01'},
+        {'po': '2102543', 'sched_end': ''},
+    ]
+    _group_po_dates_by_latest(rows)
+    assert [r['sched_end'] for r in rows] == ['2026-10-01', '2026-10-01']
+
+
+def test_group_po_dates_leaves_blank_po_untouched():
+    rows = [
+        {'po': '', 'sched_end': '2026-10-01'},
+        {'po': '', 'sched_end': '2026-11-15'},
+    ]
+    _group_po_dates_by_latest(rows)
+    assert [r['sched_end'] for r in rows] == ['2026-10-01', '2026-11-15']
+
+
+def test_group_po_dates_does_not_cross_contaminate_different_pos():
+    rows = [
+        {'po': 'A', 'sched_end': '2026-10-01'},
+        {'po': 'B', 'sched_end': '2026-12-01'},
+        {'po': 'A', 'sched_end': '2026-09-01'},
+    ]
+    _group_po_dates_by_latest(rows)
+    assert [r['sched_end'] for r in rows] == ['2026-10-01', '2026-12-01', '2026-10-01']
+
+
+def test_group_po_dates_leaves_all_blank_group_untouched():
+    rows = [
+        {'po': '2102543', 'sched_end': ''},
+        {'po': '2102543', 'sched_end': ''},
+    ]
+    _group_po_dates_by_latest(rows)
+    assert [r['sched_end'] for r in rows] == ['', '']

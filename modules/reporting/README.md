@@ -54,6 +54,8 @@ Matches the shape of this shop's existing "Job Report" (jobRpt) -- a custom repo
 
 **Filters**: Customer picker (checklist, zero = All) and "Exclude assembly sub-jobs" (filters on `Assembly_Level = 0`, i.e. `Top_Lvl_Job == Job`, to drop component jobs like "30274A" under a parent "30274").
 
+**"Group PO lines by latest Scheduled End date"**: when checked, every row sharing the same Customer PO Number has its Scheduled End overwritten with the latest (max) Scheduled End among that PO's lines -- so a PO whose lines were scheduled at different times (and so show different dates) reads as one consistent completion estimate instead of looking inconsistent line to line. A line with no Scheduled End of its own still picks up its PO's latest date; a blank PO Number is left alone, since there's nothing to group it by. Applied once to the fetched rows (`job_report.py`'s `fetch()`), so it affects the on-screen table and every export format (`.xlsx`/`.csv`/`.pdf`) identically -- including the late-job highlight above, which re-reads each row's (possibly now-later) Scheduled End against its Promise Date.
+
 #### Jobs by Customer, Jobs by Date Range, Recent Jobs (`jobs_by_customer.py`, `jobs_by_date_range.py`, `recent_jobs.py`)
 
 Three plain job lists (Date/Customer/Job #/Description/Status), sharing one row-formatter (`_common.py`'s `rows_from_jobs`) and column/header set -- just a different filter/query each: a Customer picker, a mandatory date range, or no filter (most recent 50) respectively. All three filter/sort on `Job.Order_Date`, not `Released_Date` -- found by manual testing that `Released_Date` is only populated for roughly the last year on this schema, which made every date-based report silently come back empty for anything older.

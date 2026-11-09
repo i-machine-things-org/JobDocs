@@ -313,6 +313,19 @@ Configure database connection in Settings &gt; Advanced Settings &gt; Experiment
           </property>
          </widget>
         </item>
+        <item row="4" column="0" colspan="4">
+         <!-- Job Report only. Filter-time, not export-only (see base.py's
+              uses_po_date_grouping): when a Customer PO has multiple lines
+              with different Scheduled End dates, every line's Scheduled End
+              is overwritten with the latest (max) date among that PO's
+              lines, so they read as one consistent completion estimate
+              instead of looking inconsistent across lines of the same PO. -->
+         <widget class="QCheckBox" name="group_po_dates_check">
+          <property name="text">
+           <string>Group PO lines by latest Scheduled End date</string>
+          </property>
+         </widget>
+        </item>
        </layout>
       </item>
       <item>
